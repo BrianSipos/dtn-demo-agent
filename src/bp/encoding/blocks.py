@@ -242,6 +242,15 @@ class CanonicalBlock(AbstractBlock):
         return func
 
 
+@CanonicalBlock.bind_type(1)
+class PayloadData(CborItem):
+    ''' Generic undecoded bundle payload data.
+    '''
+    fields_desc = (
+        EidField('data'),
+    )
+
+
 @CanonicalBlock.bind_type(6)
 class PreviousNodeBlock(CborItem):
     ''' Block data from BPbis Section 4.3.1.

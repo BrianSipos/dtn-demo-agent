@@ -4,18 +4,22 @@ Implementation of a symmetric BPv6 agent.
 import argparse
 import datetime
 import logging
+from logging.handlers import QueueHandler, QueueListener
 import sys
 import dbus.service
 from gi.repository import GLib as glib
 import cbor2
-#from multiprocessing import Process
-#import tcpcl.agent
-from .encoding import (
+import multiprocessing
+import tcpcl.agent
+import tcpcl.config
+from bp.encoding import (
     DtnTimeField, Timestamp,
-    Bundle, AbstractBlock, PrimaryBlock, CanonicalBlock, 
+    Bundle, AbstractBlock, PrimaryBlock, CanonicalBlock, PayloadData,
     AdminRecord, BundleAgeBlock,
+    BlockIntegrityBlock, AbstractSecurityBlock, SecurityResult,
     StatusReport, StatusInfoArray, StatusInfo
 )
+from bp.config import Config
 
 LOGGER = logging.getLogger(__name__)
 
@@ -92,12 +96,13 @@ class BundleContainer(object):
 
     def create_report_reception(self, timestamp, own_nodeid):
         status_ts = bool(self.bundle.primary.bundle_flags & PrimaryBlock.Flag.REQ_STATUS_TIME)
+        status_at = timestamp.getfieldval('time') if status_ts else None
 
         report = StatusReport(
             status=StatusInfoArray(
                 received=StatusInfo(
                     status=True,
-                    at=(timestamp.time if status_ts else None),
+                    at=status_at,
                 ),
             ),
             reason_code=0,
@@ -121,26 +126,6 @@ class BundleContainer(object):
             ) / report,
         ]
         return reply
-
-
-class Config(object):
-    ''' Agent configuration.
-
-    .. py:attribute:: enable_test
-        A set of test-mode behaviors to enable.
-    .. py:attribute:: bus_conn
-        The D-Bus connection object to register handlers on.
-    .. py:attribute:: own_nodeid
-        This agent's EID to respond to.
-    .. py:attribute:: route_table
-        A map from destination EID to next-hop Node ID.
-    '''
-
-    def __init__(self):
-        self.enable_test = set()
-        self.bus_conn = dbus.bus.BusConnection(dbus.bus.BUS_SESSION)
-        self.own_nodeid = None
-        self.route_table = {}
 
 
 class ClAgent(object):
@@ -232,7 +217,8 @@ class ClAgent(object):
         cl_conn = self._cl_conn_path[conn_path]
         LOGGER.debug('Detaching from CL object %s (node %s)', conn_path, cl_conn.nodeid)
         del self._cl_conn_path[cl_conn.obj_path]
-        del self._cl_conn_nodeid[cl_conn.nodeid]
+        if cl_conn.nodeid:
+            del self._cl_conn_nodeid[cl_conn.nodeid]
 
     def _conn_ready(self, nodeid):
         cb = self._sess_wait.get(nodeid)
@@ -286,12 +272,9 @@ class Timestamper(object):
     def __call__(self):
         ''' Generate the next timestamp.
         '''
-        now_time = DtnTimeField.datetime_to_dtntime(
-            datetime.datetime.utcnow().replace(
-                microsecond=0,
-                tzinfo=datetime.timezone.utc,
-            )
-        )
+        now_pytime = datetime.datetime.now(datetime.timezone.utc)
+        now_time = DtnTimeField.datetime_to_dtntime(now_pytime)
+
         if self._time is not None and now_time == self._time:
             self._seqno += 1
         else:
@@ -342,6 +325,14 @@ class Agent(dbus.service.Object):
                 object_path='/org/ietf/dtn/bp/Agent'
             )
         dbus.service.Object.__init__(self, **bus_kwargs)
+
+        if self._config.bus_service:
+            self._bus_serv = dbus.service.BusName(
+                bus=self._config.bus_conn,
+                name=self._config.bus_service,
+                do_not_queue=True
+            )
+            self.__logger.info('Registered as "%s"', self._bus_serv.get_name())
 
     def __del__(self):
         self.stop()
@@ -419,7 +410,7 @@ class Agent(dbus.service.Object):
         LOGGER.debug('CRC invalid %s', ctr.bundle.check_all_crc())
 
         if ctr.do_report_reception():
-            self.send_bundle(ctr.create_report_reception(self.timestamp(), self._config.own_nodeid))
+            self.send_bundle(ctr.create_report_reception(self.timestamp(), self._config.node_id))
 
     def send_bundle(self, ctr):
         ''' Perform agent handling to send a bundle.
@@ -431,6 +422,20 @@ class Agent(dbus.service.Object):
         '''
         dest_eid = str(ctr.bundle.primary.destination)
         cl_conn = self._get_session_for(dest_eid)
+
+        # Apply local security policy
+        if False:
+            CanonicalBlock(
+            ) / BlockIntegrityBlock(
+                targets=[1],
+                context_id=99,
+                context_flags=AbstractSecurityBlock.Flag.NONE,
+                results=[
+                    [  # block #1
+                        SecurityResult(type_code=3) / b'hi'
+                    ],
+                ]
+            ),
 
         ctr.fix_block_num()
         ctr.bundle.update_all_crc()
@@ -454,6 +459,8 @@ class Agent(dbus.service.Object):
 
         if self._bus_obj.NameHasOwner(servname):
             agent.bind(self._config.bus_conn)
+        else:
+            LOGGER.info('Service %s not yet available, but will bind when available', servname)
 
     @dbus.service.method(DBUS_IFACE, in_signature='s', out_signature='')
     def ping(self, nodeid):
@@ -468,15 +475,17 @@ class Agent(dbus.service.Object):
         ctr.bundle.primary = PrimaryBlock(
             bundle_flags=(PrimaryBlock.Flag.REQ_RECEPTION_REPORT | PrimaryBlock.Flag.REQ_STATUS_TIME),
             destination=nodeid,
-            source=self._config.own_nodeid,
-            report_to=self._config.own_nodeid,
+            source=self._config.node_id,
+            report_to=self._config.node_id,
             create_ts=cts,
             crc_type=AbstractBlock.CrcType.CRC32,
         )
         ctr.bundle.blocks = [
             CanonicalBlock(
-            ) / BundleAgeBlock(
-                age=300,
+                type_code=1,
+                block_num=1,
+            ) / (
+                b'hello'
             ),
         ]
 
@@ -512,15 +521,8 @@ def main():
     parser.add_argument('--log-level', dest='log_level', default='info',
                         metavar='LEVEL',
                         help='Console logging lowest level displayed.')
-    parser.add_argument('--enable-test', type=str, default=[],
-                        action='append', choices=['private_extensions'],
-                        help='Names of test modes enabled')
-    parser.add_argument('--bus-service', type=str,
-                        help='D-Bus service name')
-    parser.add_argument('--nodeid', type=uristr,
-                        help='This entity\'s Node ID')
-    parser.add_argument('--cl-service', type=str,
-                        help='DBus service name')
+    parser.add_argument('--config-file', type=str,
+                        help='Configuration file to load from')
     parser.add_argument('--eloop', type=str2bool, default=True,
                         help='If enabled, waits in an event loop.')
     subp = parser.add_subparsers(dest='action', help='action')
@@ -530,30 +532,51 @@ def main():
     parser_ping.add_argument('destination', type=uristr)
 
     args = parser.parse_args()
-    logging.basicConfig(level=args.log_level.upper())
+
+    log_level = args.log_level.upper()
+    log_queue = tcpcl.agent.root_logging(log_level)
     logging.debug('command args: %s', args)
 
     # Must run before connection or real main loop is constructed
     DBusGMainLoop(set_as_default=True)
 
     config = Config()
-
-    config.enable_test = frozenset(args.enable_test)
-    if args.bus_service:
-        bus_serv = dbus.service.BusName(
-            bus=config.bus_conn, name=args.bus_service, do_not_queue=True)
-        logging.info('Registered as "%s"', bus_serv.get_name())
-
-    config.own_nodeid = args.nodeid
+    if args.config_file:
+        with open(args.config_file, 'rb') as infile:
+            config.from_file(infile)
 
     agent = Agent(config)
-    if args.cl_service:
-        agent.cl_attach(args.cl_service)
+
+    if config.cl_fork == 'tcpcl':
+        cl_config = tcpcl.config.Config()
+        with open(args.config_file, 'rb') as infile:
+            cl_config.from_file(infile)
+
+        # Fork CL child
+        def run_cl(cl_config):
+            tcpcl.agent.root_logging(log_level, log_queue)
+            logging.getLogger().info('CL child started %s')
+            agent = tcpcl.agent.Agent(cl_config)
+            agent.exec_loop()
+            logging.getLogger().info('CL child ended')
+
+        LOGGER.info('Spawning CL process for %s', cl_config.bus_service)
+        worker_proc = multiprocessing.Process(target=run_cl, args=[cl_config])
+        worker_proc.start()
+    else:
+        worker_proc = None
+    if config.cl_attach:
+        # Immediately attach to the CL
+        agent.cl_attach(config.cl_attach)
+
     if args.action == 'ping':
         agent.ping(args.destination)
 
     if args.eloop:
         agent.exec_loop()
+
+    if worker_proc:
+        worker_proc.join()
 
 
 if __name__ == '__main__':

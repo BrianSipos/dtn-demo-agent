@@ -47,7 +47,7 @@ class EidField(CborField):
         if x is None:
             return None
         if isinstance(x, str):
-            return x 
+            return x
 
         scheme_type = x[0]
         ssp = x[1]
@@ -76,11 +76,17 @@ class DtnTimeField(UintField):
 
     @staticmethod
     def datetime_to_dtntime(val):
-        return int((val - DtnTimeField.DTN_EPOCH).total_seconds())
+        if val is None:
+            return 0
+        delta = val - DtnTimeField.DTN_EPOCH
+        return int(delta / datetime.timedelta(milliseconds=1))
 
     @staticmethod
     def dtntime_to_datetime(val):
-        return datetime.timedelta(seconds=val) + DtnTimeField.DTN_EPOCH
+        if val == 0:
+            return None
+        delta = datetime.timedelta(milliseconds=val)
+        return delta + DtnTimeField.DTN_EPOCH
 
     def i2h(self, pkt, x):
         if x is None:

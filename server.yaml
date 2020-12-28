@@ -1,0 +1,17 @@
+tcpcl:
+    bus_service: dtn.tcpcl.Server
+    node_id: dtn://server/
+    tls_enable: False
+    tls_ca_file: testpki/ca.crt
+    tls_key_file: testpki/server.key
+    tls_cert_file: testpki/server.crt
+
+    init_listen:
+        address: localhost
+        port: 4556
+
+bp:
+    bus_service: dtn.bp.Server
+    node_id: dtn://server/
+    #cl_fork: tcpcl
+    cl_attach: dtn.tcpcl.Server

@@ -643,7 +643,7 @@ class Messenger(Connection):
 
                 # Either case, TLS handshake begins
                 try:
-                    self.secure(self._config.ssl_ctx)
+                    self.secure(self._config.get_ssl_context())
                 except ssl.SSLError as err:
                     self.__logger.error('TLS failed: %s', err)
                     self.close()
@@ -675,6 +675,7 @@ class Messenger(Connection):
                     self._in_sess = True
                     self.merge_session_params()
                     self._update_state('established')
+                    self.__logger.info('Session established with %s', self._sess_parameters['peer_nodeid'])
                     if self._in_sess_func:
                         self._in_sess_func()
 
@@ -720,7 +721,7 @@ class Messenger(Connection):
         Parameters are based on current configuration.
         '''
         flags = 0
-        if self._config.ssl_ctx:
+        if self._config.tls_enable:
             flags |= contact.ContactV4.Flag.CAN_TLS
 
         options = dict(
@@ -752,7 +753,7 @@ class Messenger(Connection):
         options = dict(
             keepalive=self._config.keepalive_time,
             segment_mru=self._config.segment_size_mru,
-            nodeid_data=self._config.nodeid,
+            nodeid_data=self._config.node_id,
             ext_items=ext_items,
         )
         pkt = messages.MessageHead() / messages.SessionInit(**options)
@@ -1190,6 +1191,8 @@ class ContactHandler(Messenger, dbus.service.Object):
                 continue
             if isinstance(val, int):
                 val = min(2 ** 31 - 1, val)
+            elif isinstance(val, ipaddress._BaseAddress):
+                val = str(val)
             params[key] = val
         return dbus.Dictionary(params)
 

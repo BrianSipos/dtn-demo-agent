@@ -20,6 +20,14 @@ class SecurityResult(TypeValueHead):
     '''
 
 
+class TargetResultList(CborArray):
+    ''' A list of results for a single target.
+    '''
+    fields_desc = (
+        PacketListField('results', default=None, cls=SecurityResult),
+    )
+
+
 class AbstractSecurityBlock(CborArray):
     ''' Block data from 'draft-ietf-dtn-bpsec-22' Section 3.6.
     '''
@@ -50,18 +58,18 @@ class AbstractSecurityBlock(CborArray):
             lambda block: block.context_flags & AbstractSecurityBlock.Flag.PARAMETERS_PRESENT
         ),
         ArrayWrapField(
-            PacketListField('results', default=None, cls=SecurityResult),
+            PacketListField('results', default=None, cls=TargetResultList),
         ),
     )
 
 
-@CanonicalBlock.bind_type(192)
+@CanonicalBlock.bind_type(192)  #FIXME: not a real allocation
 class BlockIntegrityBlock(AbstractSecurityBlock):
     ''' Block data from 'draft-ietf-dtn-bpsec-22'
     '''
 
 
-@CanonicalBlock.bind_type(193)
+@CanonicalBlock.bind_type(193)  #FIXME: not a real allocation
 class BlockConfidentalityBlock(AbstractSecurityBlock):
     ''' Block data from 'draft-ietf-dtn-bpsec-22'
     '''

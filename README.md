@@ -1,8 +1,3 @@
-# dtn-bpbis-tcpcl
-
-Source for for TCPCLv4.
-The final specification is hosted at <https://datatracker.ietf.org/doc/draft-ietf-dtn-tcpclv4/>
-
 # Demo Convergence Layer Agent
 
 The demo TCPCL agent implements the corresponding specification draft.

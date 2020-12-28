@@ -1,8 +1,6 @@
 ''' Test the module :py:mod:`bp.blocks`.
 '''
 import unittest
-import cbor2
-import scapy.packet
 from scapy.config import conf
 from bp.encoding import *
 from binascii import (hexlify, unhexlify)
@@ -669,8 +667,12 @@ class TestBlockIntegrityBlock(BaseTestPacket):
             context_id=3,
             context_flags=0,
             results=[
-                SecurityResult(type_code=1) / CborItem(item='hi'),
-                SecurityResult(type_code=2) / CborItem(item=False),
+                TargetResultList(results=[
+                    SecurityResult(type_code=1) / CborItem(item='hi'),
+                ]),
+                TargetResultList(results=[
+                    SecurityResult(type_code=2) / CborItem(item=False),
+                ]),
             ]
         )
         item = [
@@ -678,8 +680,12 @@ class TestBlockIntegrityBlock(BaseTestPacket):
             3,
             0,
             [
-                [1, 'hi'],
-                [2, False],
+                [
+                    [1, 'hi'],
+                ],
+                [
+                    [2, False],
+                ],
             ],
         ]
         self.assertEqual(self._encode(pkt), item)
@@ -690,8 +696,12 @@ class TestBlockIntegrityBlock(BaseTestPacket):
             3,
             0,
             [
-                [1, 'hi'],
-                [2, False],
+                [
+                    [1, 'hi'],
+                ],
+                [
+                    [2, False],
+                ],
             ],
         ]
         pkt = self._decode(BlockIntegrityBlock, item)
@@ -700,8 +710,12 @@ class TestBlockIntegrityBlock(BaseTestPacket):
             context_id=3,
             context_flags=0,
             results=[
-                SecurityResult(type_code=1) / CborItem(item='hi'),
-                SecurityResult(type_code=2) / CborItem(item=False),
+                TargetResultList(results=[
+                    SecurityResult(type_code=1) / CborItem(item='hi'),
+                ]),
+                TargetResultList(results=[
+                    SecurityResult(type_code=2) / CborItem(item=False),
+                ]),
             ]
         )
         self.assertEqual(pkt.fields, fields)

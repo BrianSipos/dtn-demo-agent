@@ -3,60 +3,14 @@ Implementation of a symmetric TCPCL agent.
 '''
 import argparse
 import logging
-import os
 import socket
-import ssl
 import sys
 
-import dbus.bus
 import dbus.service
 from gi.repository import GLib as glib
 
-from .session import ContactHandler
-
-
-class Config(object):
-    ''' Agent configuration.
-
-    .. py:attribute:: enable_test
-        A set of test-mode behaviors to enable.
-    .. py:attribute:: bus_conn
-        The D-Bus connection object to register handlers on.
-    .. py:attribute:: stop_on_close
-        If True, the agent will stop when all of its contacts are closed.
-    .. py:attribute:: ssl_ctx
-        An :py:class:`ssl.SSLContext` object configured for this peer.
-    .. py:attribute:: require_tls
-        If not None, the required negotiated use-TLS state.
-    .. py:attribute:: require_host_authn
-        If truthy, the peer must have its host name authenticated (by TLS).
-    .. py:attribute:: require_node_authn
-        If truthy, the peer must have its Node ID authenticated (by TLS).
-    .. py:attribute:: nodeid
-        The Node ID of this entity, which is a URI.
-    .. py:attribute:: keepalive_time
-        The desired keepalive time to negotiate.
-    .. py:attribute:: idle_time
-        The session idle-timeout time.
-    '''
-
-    def __init__(self):
-        self.enable_test = set()
-        self.bus_conn = dbus.bus.BusConnection(dbus.bus.BUS_SESSION)
-        self.stop_on_close = False
-        self.ssl_ctx = None
-        self.require_tls = None
-        self.require_host_authn = False
-        self.require_node_authn = False
-        self.nodeid = u''
-        self.keepalive_time = 0
-        self.idle_time = 0
-        #: Maximum size of RX segments in octets
-        self.segment_size_mru = int(10 * (1024 ** 2))
-        #: Initial TX segment size
-        self.segment_size_tx_initial = int(0.1 * (1024 ** 2))
-        #: Target time for dynamic TX segment size
-        self.modulate_target_ack_time = None
+import tcpcl.config
+from tcpcl.session import ContactHandler
 
 
 class Agent(dbus.service.Object):
@@ -89,6 +43,19 @@ class Agent(dbus.service.Object):
                 object_path='/org/ietf/dtn/tcpcl/Agent'
             )
         dbus.service.Object.__init__(self, **bus_kwargs)
+
+        if self._config.bus_service:
+            self._bus_serv = dbus.service.BusName(
+                bus=self._config.bus_conn,
+                name=self._config.bus_service,
+                do_not_queue=True
+            )
+            self.__logger.info('Registered as "%s"', self._bus_serv.get_name())
+
+        if self._config.init_listen:
+            self.listen(self._config.init_listen.address, self._config.init_listen.port)
+        if self._config.init_connect:
+            self.connect(self._config.init_connect.address, self._config.init_connect.port)
 
     def _get_obj_path(self):
         hdl_id = self._obj_id
@@ -265,6 +232,33 @@ class Agent(dbus.service.Object):
         return self._path_to_handler[path]
 
 
+def root_logging(log_level, log_queue=None):
+    ''' Initialize multiprocessing-safe logging.
+    '''
+    import multiprocessing
+    from logging.handlers import QueueHandler, QueueListener
+
+    if log_queue is None:
+        log_queue = multiprocessing.Queue()
+    
+        # ql gets records from the queue and sends them to the stream handler
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s PID:%(process)s TID:%(threadName)s <%(levelname)s> %(message)s"))
+        ql = QueueListener(log_queue, handler)
+        ql.start()
+
+    # Root logger gets queued
+    logger = logging.getLogger()
+    logger.setLevel(log_level)
+    for hdl in logger.handlers:
+        logger.removeHandler(hdl)
+
+    qh = QueueHandler(log_queue)
+    logger.addHandler(qh)
+
+    return log_queue
+
+
 def str2bool(val):
     ''' Require an option value to be boolean text.
     '''
@@ -294,19 +288,8 @@ def main(*argv):
     parser.add_argument('--log-level', dest='log_level', default='info',
                         metavar='LEVEL',
                         help='Console logging lowest level displayed.')
-    parser.add_argument('--enable-test', type=str, default=[],
-                        action='append', choices=['private_extensions'],
-                        help='Names of test modes enabled')
-    parser.add_argument('--bus-service', type=str,
-                        help='D-Bus service name')
-    parser.add_argument('--nodeid', type=uristr,
-                        help='This entity\'s Node ID')
-    parser.add_argument('--keepalive', type=int,
-                        help='Keepalive time in seconds')
-    parser.add_argument('--idle', type=int,
-                        help='Idle time in seconds')
-    parser.add_argument('--tls-disable', dest='tls_enable', default=True, action='store_false',
-                        help='Disallow use of TLS on this endpoint')
+    parser.add_argument('--config-file', type=str,
+                        help='Configuration file to load from')
     parser.add_argument('--tls-version', type=str,
                         help='Version name of TLS to use')
     parser.add_argument('--tls-require', default=None, type=str2bool,
@@ -321,8 +304,6 @@ def main(*argv):
                         help='Filename for DH parameters')
     parser.add_argument('--tls-ciphers', type=str, default=None,
                         help='Allowed TLS cipher filter')
-    parser.add_argument('--stop-on-close', default=False, action='store_true',
-                        help='Stop the agent when connection is closed')
     subp = parser.add_subparsers(dest='action', help='action')
 
     parser_listen = subp.add_parser('listen',
@@ -340,64 +321,23 @@ def main(*argv):
                              help='Host TCP port')
 
     args = parser.parse_args(argv[1:])
-    logging.basicConfig(level=args.log_level.upper())
+    log_queue = root_logging(args.log_level.upper())
     logging.debug('command args: %s', args)
 
     # Must run before connection or real main loop is constructed
     DBusGMainLoop(set_as_default=True)
 
-    config = Config()
+    config = tcpcl.config.Config()
+    if args.config_file:
+        with open(args.config_file, 'rb') as infile:
+            config.from_file(infile)
 
-    config.enable_test = frozenset(args.enable_test)
-    if args.bus_service:
-        bus_serv = dbus.service.BusName(
-            bus=config.bus_conn, name=args.bus_service, do_not_queue=True)
-        logging.info('Registered as "%s"', bus_serv.get_name())
-
-    if args.tls_enable:
-        version_map = {
-            None: ssl.PROTOCOL_TLS,
-            '1.0': ssl.PROTOCOL_TLSv1,
-            '1.1': ssl.PROTOCOL_TLSv1_1,
-            '1.2': ssl.PROTOCOL_TLSv1_2,
-        }
-        try:
-            vers_enum = version_map[args.tls_version]
-        except KeyError:
-            raise argparse.ArgumentTypeError('Invalid TLS version "{0}"'.format(args.tls_version))
-
-        config.ssl_ctx = ssl.SSLContext(vers_enum)
-        config.ssl_ctx.keylog_filename = os.environ.get('SSLKEYLOGFILE')
-        if args.tls_ciphers:
-            config.ssl_ctx.set_ciphers(args.tls_ciphers)
-        if args.tls_ca:
-            config.ssl_ctx.load_verify_locations(cafile=args.tls_ca)
-        if args.tls_cert or args.tls_key:
-            if not args.tls_cert or not args.tls_key:
-                raise RuntimeError('Neither or both of --tls-cert and --tls-key are needed')
-            config.ssl_ctx.load_cert_chain(certfile=args.tls_cert, keyfile=args.tls_key)
-        if args.tls_dhparam:
-            config.ssl_ctx.load_dh_params(args.tls_dhparam)
-        config.ssl_ctx.verify_mode = ssl.CERT_OPTIONAL
-
-    config.nodeid = args.nodeid
-    config.require_tls = args.tls_require
-    config.stop_on_close = args.stop_on_close
-
-    if args.keepalive:
-        config.keepalive_time = args.keepalive
-
-    if args.idle:
-        config.idle_time = args.idle
-    else:
-        config.idle_time = 2 * config.keepalive_time
+    if args.action == 'listen':
+        config.init_listen = tcpcl.config.ListenConfig(address=args.address, port=args.port)
+    elif args.action == 'connect':
+        config.init_connect = tcpcl.config.ConnectConfig(address=args.address, port=args.port)
 
     agent = Agent(config)
-    if args.action == 'listen':
-        agent.listen(args.address, args.port)
-    elif args.action == 'connect':
-        agent.connect(args.address, args.port)
-
     agent.exec_loop()
 
 
