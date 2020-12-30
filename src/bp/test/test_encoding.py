@@ -676,10 +676,10 @@ class TestBlockIntegrityBlock(BaseTestPacket):
             context_flags=0,
             results=[
                 TargetResultList(results=[
-                    SecurityResult(type_code=1) / CborItem(item='hi'),
+                    TypeValuePair(type_code=1, value='hi'),
                 ]),
                 TargetResultList(results=[
-                    SecurityResult(type_code=2) / CborItem(item=False),
+                    TypeValuePair(type_code=2, value=False),
                 ]),
             ]
         )
@@ -719,10 +719,10 @@ class TestBlockIntegrityBlock(BaseTestPacket):
             context_flags=0,
             results=[
                 TargetResultList(results=[
-                    SecurityResult(type_code=1) / CborItem(item='hi'),
+                    TypeValuePair(type_code=1, value='hi'),
                 ]),
                 TargetResultList(results=[
-                    SecurityResult(type_code=2) / CborItem(item=False),
+                    TypeValuePair(type_code=2, value=False),
                 ]),
             ]
         )
