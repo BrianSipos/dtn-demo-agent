@@ -11,6 +11,7 @@ from scapy_cbor.packets import (CborArray, CborItem)
 from scapy_cbor.fields import (
     BstrField, ConditionalField, EnumField, FlagsField, UintField, PacketField
 )
+from scapy_cbor.util import encode_diagnostic
 from .fields import (EidField, DtnTimeField)
 
 LOGGER = logging.getLogger(__name__)
@@ -210,7 +211,7 @@ class CanonicalBlock(AbstractBlock):
         if (pay_data is not None and pay_type is not None):
             try:
                 cls = self.guess_payload_class(None)
-                LOGGER.debug('CanonicalBlock.post_dissect with %s: %s', cls, cbor2.loads(pay_data))
+                LOGGER.debug('CanonicalBlock.post_dissect with class %s from: %s', cls, encode_diagnostic(pay_data))
             except KeyError:
                 cls = None
 
@@ -226,7 +227,7 @@ class CanonicalBlock(AbstractBlock):
         return AbstractBlock.post_dissect(self, s)
 
     def default_payload_class(self, payload):
-        return CborItem
+        return scapy.packet.Raw
 
     @classmethod
     def bind_type(cls, type_code):
@@ -240,15 +241,6 @@ class CanonicalBlock(AbstractBlock):
             return othercls
 
         return func
-
-
-@CanonicalBlock.bind_type(1)
-class PayloadData(CborItem):
-    ''' Generic undecoded bundle payload data.
-    '''
-    fields_desc = (
-        EidField('data'),
-    )
 
 
 @CanonicalBlock.bind_type(6)

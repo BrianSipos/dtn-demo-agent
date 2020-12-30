@@ -1,5 +1,6 @@
 ''' Whole bundle encodings and helper functions.
 '''
+import cbor2
 from scapy_cbor.fields import (PacketField, PacketListField)
 from scapy_cbor.packets import (CborArray)
 from .blocks import (PrimaryBlock, CanonicalBlock)
@@ -31,6 +32,14 @@ class Bundle(CborArray):
         self._update_from_admin()
 
         return CborArray.self_build(self, field_pos_list)
+
+    def __bytes__(self):
+        ''' Force the indefinite outer array.
+        :return: The encoded bundle.
+        '''
+        item = self.build()
+        data = b'\x9f' + b''.join(cbor2.dumps(part) for part in item) + b'\xff'
+        return data
 
     def post_dissect(self, s):
         # Special handling for admin payload

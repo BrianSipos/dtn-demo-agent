@@ -15,3 +15,7 @@ bp:
     node_id: dtn://server/
     #cl_fork: tcpcl
     cl_attach: dtn.tcpcl.Server
+
+    tls_ca_file: testpki/ca.crt
+    tls_key_file: testpki/server.key
+    tls_cert_file: testpki/server.crt

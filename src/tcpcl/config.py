@@ -50,8 +50,11 @@ class Config(object):
     tls_enable: bool = True
     tls_version: Optional[str] = None
     tls_ciphers: Optional[Set[str]] = None
+    #: Trusted root CA PEM file
     tls_ca_file: Optional[str] = None
+    #: Local certificate (chain) PEM file
     tls_cert_file: Optional[str] = None
+    #: Local private key PEM file
     tls_key_file: Optional[str] = None
     tls_dhparam: Optional[str] = None
     #: If not None, the required negotiated use-TLS state.

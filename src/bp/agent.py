@@ -4,19 +4,24 @@ Implementation of a symmetric BPv6 agent.
 import argparse
 import datetime
 import logging
-from logging.handlers import QueueHandler, QueueListener
 import sys
 import dbus.service
 from gi.repository import GLib as glib
 import cbor2
 import multiprocessing
+import re
+from urllib.parse import urlsplit, urlunsplit
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from cryptography import x509
 import tcpcl.agent
 import tcpcl.config
+from scapy_cbor.packets import CborItem
 from bp.encoding import (
     DtnTimeField, Timestamp,
-    Bundle, AbstractBlock, PrimaryBlock, CanonicalBlock, PayloadData,
+    Bundle, AbstractBlock, PrimaryBlock, CanonicalBlock,
     AdminRecord, BundleAgeBlock,
-    BlockIntegrityBlock, AbstractSecurityBlock, SecurityResult,
+    BlockIntegrityBlock, AbstractSecurityBlock, SecurityParameter, TargetResultList, SecurityResult,
     StatusReport, StatusInfoArray, StatusInfo
 )
 from bp.config import Config
@@ -121,6 +126,7 @@ class BundleContainer(object):
         reply.bundle.blocks = [
             CanonicalBlock(
                 type_code=1,
+                block_num=1,
                 crc_type=AbstractBlock.CrcType.CRC32,
             ) / AdminRecord(
             ) / report,
@@ -306,10 +312,30 @@ class Agent(dbus.service.Object):
         #: Set when shutdown() is called and waiting on sessions
         self._in_shutdown = False
 
-        self.route_table = {
-            'dtn://client/': ('localhost', 4556),
-            'dtn://server/': ('localhost', 4556),
-        }
+        self._ca_cert = None
+        if self._config.tls_ca_file:
+            with open(self._config.tls_cert_file, 'rb') as infile:
+                self._ca_cert = x509.load_pem_x509_certificate(infile.read())
+
+        self._cert_chain = None
+        if self._config.tls_cert_file:
+            cert_chain = []
+            with open(self._config.tls_cert_file, 'rb') as infile:
+                chunk = b''
+                while True:
+                    line = infile.readline()
+                    chunk += line
+                    if b'END CERTIFICATE' in line.upper():
+                        cert = x509.load_pem_x509_certificate(chunk)
+                        cert_chain.append(cert)
+                    if not line:
+                        break
+            self._cert_chain = tuple(cert_chain)
+
+        self._priv_key = None
+        if self._config.tls_key_file:
+            with open(self._config.tls_key_file, 'rb') as infile:
+                self._priv_key = serialization.load_pem_private_key(infile.read(), None, default_backend())
 
         self.timestamp = Timestamper()
 
@@ -392,13 +418,19 @@ class Agent(dbus.service.Object):
         ctr = BundleContainer(Bundle(data))
         self.recv_bundle(ctr)
 
-    def _get_session_for(self, nodeid):
-        self.__logger.info('Getting session for: %s', nodeid)
+    def _get_session_for(self, eid):
+        self.__logger.info('Getting session for: %s', eid)
         if not self._cl_agent:
             raise RuntimeError('No CL bound')
 
-        (address, port) = self.route_table[nodeid]
-        return self._cl_agent.get_session(nodeid, address, port)
+        found = None
+        for item in self._config.route_table:
+            if item.eid_pattern.match(eid) is not None:
+                found = item
+                break
+        if found is None:
+            raise KeyError('No route to destination: {}'.format(eid))
+        return self._cl_agent.get_session(found.next_nodeid, found.next_hop.address, found.next_hop.port)
 
     def recv_bundle(self, ctr):
         ''' Perform agent handling of a received bundle.
@@ -424,18 +456,59 @@ class Agent(dbus.service.Object):
         cl_conn = self._get_session_for(dest_eid)
 
         # Apply local security policy
-        if False:
-            CanonicalBlock(
+        ctr.reload()
+        if self._priv_key:
+            from binascii import hexlify
+            from cose import Sign1Message, CoseHeaderKeys, CoseAlgorithms, RSA
+            import cose.keys.cosekey as cosekey
+
+            x5chain = []
+            for cert in self._cert_chain:
+                x5chain.append(cert.public_bytes(serialization.Encoding.DER))
+
+            target_blocks = [1]
+            # Sign each target
+            result_pairs = []
+            for block_num in target_blocks:
+                content_plaintext = ctr.block_num(block_num).data
+                ext_aad_enc = b''
+                cose_key = RSA.from_cryptograpy_key_obj(self._priv_key)
+                self.__logger.debug('Signing target %d AAD %s payload %s', block_num, hexlify(ext_aad_enc), hexlify(content_plaintext))
+                msg_obj = Sign1Message(
+                    phdr={
+                        CoseHeaderKeys.ALG: CoseAlgorithms.PS256,
+                    },
+                    uhdr={
+                        CoseHeaderKeys.X5_T: b'hi',
+                    },
+                    payload=content_plaintext,
+                    # Non-encoded parameters
+                    external_aad=ext_aad_enc,
+                )
+                msg_enc = msg_obj.encode(
+                    private_key=cose_key,
+                    alg=msg_obj.phdr[CoseHeaderKeys.ALG],
+                    tagged=False
+                )
+                result_pairs.append((msg_obj.cbor_tag, msg_enc))
+
+            bib = CanonicalBlock(
             ) / BlockIntegrityBlock(
-                targets=[1],
+                targets=target_blocks,
                 context_id=99,
-                context_flags=AbstractSecurityBlock.Flag.NONE,
+                context_flags=AbstractSecurityBlock.Flag.PARAMETERS_PRESENT,
+                parameters=[
+                    SecurityParameter(type_code=3) / CborItem(item=x5chain)
+                ],
                 results=[
-                    [  # block #1
-                        SecurityResult(type_code=3) / b'hi'
-                    ],
+                    # One result per target
+                    TargetResultList(results=[
+                        SecurityResult(type_code=result_pair[0]) / CborItem(item=result_pair[1])
+                    ])
+                    for result_pair in result_pairs
                 ]
-            ),
+            )
+            ctr.bundle.blocks.insert(0, bib)
 
         ctr.fix_block_num()
         ctr.bundle.update_all_crc()
@@ -484,8 +557,8 @@ class Agent(dbus.service.Object):
             CanonicalBlock(
                 type_code=1,
                 block_num=1,
-            ) / (
-                b'hello'
+                crc_type=AbstractBlock.CrcType.CRC32,
+                data=b'hello',
             ),
         ]
 
@@ -505,9 +578,7 @@ def str2bool(val):
 def uristr(val):
     ''' Require an option value to be a URI.
     '''
-    from urllib.parse import urlparse
-
-    nodeid_uri = urlparse(val)
+    nodeid_uri = urlsplit(val)
     if not nodeid_uri.scheme:
         raise argparse.ArgumentTypeError('URI value expected')
     return val

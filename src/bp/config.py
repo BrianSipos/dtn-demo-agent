@@ -1,12 +1,27 @@
 ''' Agent configuration data.
 '''
+import copy
 from dataclasses import dataclass, field, fields
-from typing import Optional, Set, Dict
+from typing import Optional, Set, Dict, List
 import logging
 import dbus.bus
+import re
 import yaml
+from tcpcl.config import ConnectConfig
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class RouteItem(object):
+    ''' Each item in the routing table.
+    '''
+    #: The regex pattern to match on the Destination EID
+    eid_pattern: re.Pattern
+    #: The next-hop Node ID
+    next_nodeid: str
+    #: The next-hop Transport
+    next_hop: ConnectConfig
 
 
 @dataclass
@@ -26,7 +41,14 @@ class Config(object):
 
     #: The Node ID of this agent, which is a URI.
     node_id: str = u''
-    route_table: dict = field(default_factory=dict)
+    route_table: List[RouteItem] = field(default_factory=list)
+
+    #: Trusted root CA PEM file
+    tls_ca_file: Optional[str] = None
+    #: Local certificate (chain) PEM file
+    tls_cert_file: Optional[str] = None
+    #: Local private key PEM file
+    tls_key_file: Optional[str] = None
 
     #: The name of a CL to read config for and fork
     cl_fork: Optional[str] = None
@@ -45,7 +67,22 @@ class Config(object):
 
         for fld in fields(self):
             if fld.name in bpdat:
-                setattr(self, fld.name, bpdat[fld.name])
+                if fld.name == 'route_table':
+                    self.route_table = []
+                    for item in bpdat[fld.name]:
+                        item_cpy = copy.copy(item)
+                        try:
+                            pat = re.compile(item_cpy.pop('eid_pattern'))
+                            nodeid = item_cpy.pop('next_nodeid')
+                            self.route_table.append(RouteItem(
+                                eid_pattern=pat,
+                                next_nodeid=nodeid,
+                                next_hop=ConnectConfig(**item_cpy)
+                            ))
+                        except Exception as err:
+                            LOGGER.error('Ignoring invalid route_table entry %s because (%s): %s', item, type(err).__name__, err)
+                else:
+                    setattr(self, fld.name, bpdat[fld.name])
 
     @property
     def bus_conn(self):

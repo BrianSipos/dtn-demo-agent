@@ -83,15 +83,16 @@ class DtnTimeField(UintField):
 
     @staticmethod
     def dtntime_to_datetime(val):
-        if val == 0:
+        if val == 0 or val is None:
             return None
         delta = datetime.timedelta(milliseconds=val)
         return delta + DtnTimeField.DTN_EPOCH
 
     def i2h(self, pkt, x):
-        if x is None:
+        dtval = DtnTimeField.dtntime_to_datetime(x)
+        if dtval is None:
             return None
-        return DtnTimeField.dtntime_to_datetime(x).isoformat()
+        return dtval.isoformat()
 
     def h2i(self, pkt, x):
         return self.any2i(pkt, x)

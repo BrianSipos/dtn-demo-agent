@@ -72,7 +72,7 @@ class TestDtnTimeField(unittest.TestCase):
         fld = DtnTimeField('field')
 
         self.assertEqual(
-            fld.i2h(None, 1000),
+            fld.i2h(None, 1000000),
             '2000-01-01T00:16:40+00:00',
         )
 
@@ -81,7 +81,7 @@ class TestDtnTimeField(unittest.TestCase):
 
         self.assertEqual(
             fld.h2i(None, '2000-01-01T00:16:40+00:00'),
-            1000,
+            1000000,
         )
 
 
@@ -127,19 +127,19 @@ class TestTimestamp(BaseTestPacket):
             seqno=3,
         )
         item = [
-            1000,
+            1000000,
             3,
         ]
         self.assertEqual(self._encode(pkt), item)
 
     def testDecodeValue(self):
         item = [
-            1000,
+            1000000,
             3,
         ]
         blk = self._decode(Timestamp, item)
         fields = dict(
-            time=1000,
+            time=1000000,
             seqno=3,
         )
         self.assertEqual(blk.fields, fields)
@@ -167,7 +167,7 @@ class TestPrimaryBlock(BaseTestPacket):
             destination='dtn://dst/',
             source='dtn://src/',
             report_to='dtn://rpt/',
-            create_ts=Timestamp(time=1000, seqno=5),
+            create_ts=Timestamp(time=1000000, seqno=5),
             lifetime=300,
         )
         self.assertEqual(
@@ -179,7 +179,7 @@ class TestPrimaryBlock(BaseTestPacket):
                 [EidField.TypeCode.dtn, '//dst/'],
                 [EidField.TypeCode.dtn, '//src/'],
                 [EidField.TypeCode.dtn, '//rpt/'],
-                [1000, 5],
+                [1000000, 5],
                 300,
                 None,
             ]
@@ -193,7 +193,7 @@ class TestPrimaryBlock(BaseTestPacket):
             [EidField.TypeCode.dtn, '//dst/'],
             [EidField.TypeCode.dtn, '//src/'],
             [EidField.TypeCode.dtn, '//rpt/'],
-            [1000, 5],
+            [1000000, 5],
             300,
             None,
         ]
@@ -205,7 +205,7 @@ class TestPrimaryBlock(BaseTestPacket):
             destination='dtn://dst/',
             source='dtn://src/',
             report_to='dtn://rpt/',
-            create_ts=Timestamp(time=1000, seqno=5),
+            create_ts=Timestamp(time=1000000, seqno=5),
             lifetime=300,
             crc_value=None,
         )
@@ -235,7 +235,7 @@ class TestPrimaryBlock(BaseTestPacket):
                 [EidField.TypeCode.dtn, '//dst/'],
                 [EidField.TypeCode.dtn, '//src/'],
                 [EidField.TypeCode.dtn, '//rpt/'],
-                [1000, 3],
+                [1000000, 3],
                 300,
                 1000,
                 2000,
@@ -251,7 +251,7 @@ class TestPrimaryBlock(BaseTestPacket):
             [EidField.TypeCode.dtn, '//dst/'],
             [EidField.TypeCode.dtn, '//src/'],
             [EidField.TypeCode.dtn, '//rpt/'],
-            [1000, 3],
+            [1000000, 3],
             300,
             1000,
             2000,
@@ -265,7 +265,7 @@ class TestPrimaryBlock(BaseTestPacket):
             destination='dtn://dst/',
             source='dtn://src/',
             report_to='dtn://rpt/',
-            create_ts=Timestamp(time=1000, seqno=3),
+            create_ts=Timestamp(time=1000000, seqno=3),
             lifetime=300,
             fragment_offset=1000,
             total_app_data_len=2000,
@@ -333,6 +333,10 @@ class TestBundle(BaseTestPacket):
                 None,  # missing primary
             ]
         )
+        self.assertEqual(
+            hexlify(bytes(bdl)),
+            b'9ff6ff'
+        )
 
     def testEncodeOnlyPrimary(self):
         bdl = Bundle(
@@ -353,6 +357,10 @@ class TestBundle(BaseTestPacket):
                     0,
                 ],
             ]
+        )
+        self.assertEqual(
+            hexlify(bytes(bdl)),
+            b'9f8807000082010082010082010082000000ff'
         )
 
     def testDecodeOnlyPrimary(self):

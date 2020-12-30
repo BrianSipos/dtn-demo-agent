@@ -215,9 +215,10 @@ class PacketListField(PacketField):
     def addfield(self, pkt, s, val):
         ''' Augmented signature for `s` as CBOR array instead of bytes.
         '''
-        for obj in val:
-            subitem = self.i2m(pkt, obj)
-            s.append(subitem)
+        if val:
+            for obj in val:
+                subitem = self.i2m(pkt, obj)
+                s.append(subitem)
         return s
 
 

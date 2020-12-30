@@ -1,6 +1,7 @@
 tcpcl:
     bus_service: dtn.tcpcl.Client
     node_id: dtn://client/
+
     tls_enable: False
     tls_ca_file: testpki/ca.crt
     tls_key_file: testpki/client.key
@@ -11,3 +12,12 @@ bp:
     node_id: dtn://client/
     #cl_fork: tcpcl
     cl_attach: dtn.tcpcl.Client
+
+    route_table:
+       -  eid_pattern: "dtn://server/.*"
+          next_nodeid: dtn://server/
+          address: localhost
+
+    tls_ca_file: testpki/ca.crt
+    tls_key_file: testpki/client.key
+    tls_cert_file: testpki/client.crt
