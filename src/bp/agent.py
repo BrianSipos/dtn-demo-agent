@@ -17,16 +17,20 @@ from cryptography import x509
 import tcpcl.agent
 import tcpcl.config
 from scapy_cbor.packets import CborItem
+from scapy_cbor.util import encode_diagnostic
 from bp.encoding import (
     DtnTimeField, Timestamp,
     Bundle, AbstractBlock, PrimaryBlock, CanonicalBlock,
     AdminRecord, BundleAgeBlock,
-    BlockIntegrityBlock, AbstractSecurityBlock, SecurityParameter, TargetResultList, SecurityResult,
+    BlockIntegrityBlock, AbstractSecurityBlock, TypeValuePair, TargetResultList,
     StatusReport, StatusInfoArray, StatusInfo
 )
 from bp.config import Config
 
 LOGGER = logging.getLogger(__name__)
+
+#: Dummy context ID value
+BPSEC_COSE_CONTEXT_ID = 99
 
 
 class BundleContainer(object):
@@ -50,6 +54,8 @@ class BundleContainer(object):
         return self._block_num[num]
 
     def block_type(self, type_code):
+        ''' Look up a block by type code or data class.
+        '''
         return self._block_type[type_code]
 
     def reload(self):
@@ -62,7 +68,7 @@ class BundleContainer(object):
         block_type = {}
         if self.bundle.payload is not None:
             block_num[0] = self.bundle.payload
-        for blk in self.bundle.blocks:
+        for blk in self.bundle.getfieldval('blocks'):
             blk_num = blk.getfieldval('block_num')
             if blk_num is not None:
                 if blk_num in block_num:
@@ -70,9 +76,11 @@ class BundleContainer(object):
                 block_num[blk_num] = blk
 
             blk_type = blk.getfieldval('type_code')
-            if blk_type not in block_type:
-                block_type[blk_type] = []
-            block_type[blk_type].append(blk)
+            data_cls = type(blk.payload)
+            for key in (blk_type, data_cls):
+                if key not in block_type:
+                    block_type[key] = []
+                block_type[key].append(blk)
 
         self._block_num = block_num
         self._block_type = block_type
@@ -132,6 +140,17 @@ class BundleContainer(object):
             ) / report,
         ]
         return reply
+
+
+def get_bpsec_cose_aad(ctr, target, secblk, aad_scope):
+    ''' Extract AAD from a bundle container.
+    '''
+    return cbor2.dumps([
+        ctr.bundle.primary.build() if aad_scope & 0x1 else None,
+        target.build()[:3] if aad_scope & 0x2 else None,
+        secblk.build()[:3] if aad_scope & 0x4 else None,
+    ])
+    return b''
 
 
 class ClAgent(object):
@@ -245,6 +264,7 @@ class ClAgent(object):
             eloop = glib.MainLoop()
             self._sess_wait[nodeid] = eloop.quit
             eloop.run()
+            LOGGER.info('Connected')
 
         cl_conn = self._cl_conn_nodeid[nodeid]
         return cl_conn
@@ -430,7 +450,11 @@ class Agent(dbus.service.Object):
                 break
         if found is None:
             raise KeyError('No route to destination: {}'.format(eid))
-        return self._cl_agent.get_session(found.next_nodeid, found.next_hop.address, found.next_hop.port)
+        return self._cl_agent.get_session(
+            found.next_nodeid,
+            found.next_hop.address if found.next_hop else None,
+            found.next_hop.port if found.next_hop else None
+        )
 
     def recv_bundle(self, ctr):
         ''' Perform agent handling of a received bundle.
@@ -438,8 +462,47 @@ class Agent(dbus.service.Object):
         :param ctr: The bundle container just recieved.
         :type ctr: :py:cls:`BundleContainer`
         '''
-        LOGGER.info('Received bundle\n%s', ctr.bundle.show(dump=True))
-        LOGGER.debug('CRC invalid %s', ctr.bundle.check_all_crc())
+        self.__logger.info('Received bundle\n%s', ctr.bundle.show(dump=True))
+        self.__logger.debug('CRC invalid for block numbers: %s', ctr.bundle.check_all_crc())
+
+        integ_blocks = ctr.block_type(BlockIntegrityBlock)
+        for bib in integ_blocks:
+            if bib.payload.context_id == BPSEC_COSE_CONTEXT_ID:
+                from cose import CoseMessage, CoseHeaderKeys, RSA
+
+                # FIXME: wonky method of correlating an end-entity cert
+                aad_scope = 0x7
+                first_cert = None
+                for param in bib.payload.parameters:
+                    if param.type_code == 5:
+                        aad_scope = int(param.value)
+                    elif param.type_code == 3:
+                        first_cert = x509.load_der_x509_certificate(param.value[0])
+
+                cose_key = RSA.from_cryptograpy_key_obj(first_cert.public_key())
+
+                for (ix, blk_num) in enumerate(bib.payload.targets):
+                    target_blk = ctr.block_num(blk_num)
+                    for result in bib.payload.results[ix].results:
+                        msg_cls = CoseMessage._COSE_MSG_ID[result.type_code]
+
+                        # replace detached payload
+                        msg_enc = bytes(result.getfieldval('value'))
+                        msg_dec = cbor2.loads(msg_enc)
+                        msg_dec[2] = target_blk.getfieldval('data')
+
+                        self.__logger.debug('COSE message\n%s', encode_diagnostic(msg_dec))
+                        msg_obj = msg_cls.from_cose_obj(msg_dec)
+                        msg_obj.external_aad = get_bpsec_cose_aad(ctr, target_blk, bib, aad_scope)
+
+                        try:
+                            msg_obj.verify_signature(
+                                public_key=cose_key,
+                                alg=msg_obj.phdr[CoseHeaderKeys.ALG],
+                            )
+                            self.__logger.info('Verified signature on block num %d', blk_num)
+                        except Exception as err:
+                            self.__logger.error('Failed to verify signature on block num %d: %s', blk_num, err)
 
         if ctr.do_report_reception():
             self.send_bundle(ctr.create_report_reception(self.timestamp(), self._config.node_id))
@@ -460,28 +523,47 @@ class Agent(dbus.service.Object):
         if self._priv_key:
             from binascii import hexlify
             from cose import Sign1Message, CoseHeaderKeys, CoseAlgorithms, RSA
+            from cose.messages.signer import SignerParams
             import cose.keys.cosekey as cosekey
+
+            aad_scope = 0x3
 
             x5chain = []
             for cert in self._cert_chain:
                 x5chain.append(cert.public_bytes(serialization.Encoding.DER))
 
-            target_blocks = [1]
-            # Sign each target
-            result_pairs = []
-            for block_num in target_blocks:
-                content_plaintext = ctr.block_num(block_num).data
-                ext_aad_enc = b''
+            # A little switcharoo to avoid cached overload_fields on `data`
+            bib = CanonicalBlock(
+                type_code=BlockIntegrityBlock._overload_fields[CanonicalBlock]['type_code']
+            )
+            bib_data = BlockIntegrityBlock(
+                targets=[1],
+                context_id=BPSEC_COSE_CONTEXT_ID,
+                context_flags=AbstractSecurityBlock.Flag.PARAMETERS_PRESENT,
+                parameters=[
+                    TypeValuePair(type_code=3, value=x5chain),
+                    TypeValuePair(type_code=5, value=aad_scope),
+                ],
+            )
+
+            # Sign each target with one result per
+            target_result = []
+            for blk_num in bib_data.targets:
+                target_blk = ctr.block_num(blk_num)
+                target_plaintext = target_blk.data
+
+                ext_aad_enc = get_bpsec_cose_aad(ctr, target_blk, bib, aad_scope)
                 cose_key = RSA.from_cryptograpy_key_obj(self._priv_key)
-                self.__logger.debug('Signing target %d AAD %s payload %s', block_num, hexlify(ext_aad_enc), hexlify(content_plaintext))
+                self.__logger.debug('Signing target %d AAD %s payload %s', blk_num, hexlify(ext_aad_enc), hexlify(target_plaintext))
                 msg_obj = Sign1Message(
                     phdr={
                         CoseHeaderKeys.ALG: CoseAlgorithms.PS256,
                     },
                     uhdr={
-                        CoseHeaderKeys.X5_T: b'hi',
+                        #FIXME: doesn't decode
+                        #CoseHeaderKeys.X5_T: [0, b'hi'],
                     },
-                    payload=content_plaintext,
+                    payload=target_plaintext,
                     # Non-encoded parameters
                     external_aad=ext_aad_enc,
                 )
@@ -490,29 +572,31 @@ class Agent(dbus.service.Object):
                     alg=msg_obj.phdr[CoseHeaderKeys.ALG],
                     tagged=False
                 )
-                result_pairs.append((msg_obj.cbor_tag, msg_enc))
+                # detach payload
+                msg_dec = cbor2.loads(msg_enc)
+                msg_dec[2] = None
+                msg_enc = cbor2.dumps(msg_dec)
+                self.__logger.debug('COSE message\n%s', encode_diagnostic(msg_dec))
 
-            bib = CanonicalBlock(
-            ) / BlockIntegrityBlock(
-                targets=target_blocks,
-                context_id=99,
-                context_flags=AbstractSecurityBlock.Flag.PARAMETERS_PRESENT,
-                parameters=[
-                    SecurityParameter(type_code=3) / CborItem(item=x5chain)
-                ],
-                results=[
-                    # One result per target
-                    TargetResultList(results=[
-                        SecurityResult(type_code=result_pair[0]) / CborItem(item=result_pair[1])
-                    ])
-                    for result_pair in result_pairs
-                ]
-            )
+                target_result.append(
+                    TypeValuePair(
+                        type_code=msg_obj.cbor_tag,
+                        value=msg_enc
+                    )
+                )
+
+            bib.remove_payload()
+            # One result per target
+            bib_data.setfieldval('results', [
+                TargetResultList(results=[result])
+                for result in target_result
+            ])
+            bib.add_payload(bib_data)
             ctr.bundle.blocks.insert(0, bib)
 
         ctr.fix_block_num()
         ctr.bundle.update_all_crc()
-        LOGGER.info('Sending bundle\n%s', ctr.bundle.show(dump=True))
+        self.__logger.info('Sending bundle\n%s', ctr.bundle.show(dump=True))
 
         cl_conn.conn_obj.send_bundle_data(dbus.ByteArray(bytes(ctr.bundle)))
 
@@ -522,7 +606,7 @@ class Agent(dbus.service.Object):
 
         :param str servname: The DBus service name to listen from.
         '''
-        LOGGER.debug('Attaching to CL service %s', servname)
+        self.__logger.debug('Attaching to CL service %s', servname)
 
         agent = ClAgent()
         agent.serv_name = servname
@@ -533,7 +617,7 @@ class Agent(dbus.service.Object):
         if self._bus_obj.NameHasOwner(servname):
             agent.bind(self._config.bus_conn)
         else:
-            LOGGER.info('Service %s not yet available, but will bind when available', servname)
+            self.__logger.info('Service %s not yet available, but will bind when available', servname)
 
     @dbus.service.method(DBUS_IFACE, in_signature='s', out_signature='')
     def ping(self, nodeid):

@@ -63,6 +63,8 @@ class Bundle(CborArray):
 
     def check_all_crc(self):
         ''' Check for CRC failures.
+
+        :return: The set of block numbers with failed CRC check.
         '''
         fail = set()
         if self.primary:

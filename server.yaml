@@ -19,3 +19,7 @@ bp:
     tls_ca_file: testpki/ca.crt
     tls_key_file: testpki/server.key
     tls_cert_file: testpki/server.crt
+
+    route_table:
+       -  eid_pattern: "dtn://client/.*"
+          next_nodeid: dtn://client/

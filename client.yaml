@@ -13,11 +13,12 @@ bp:
     #cl_fork: tcpcl
     cl_attach: dtn.tcpcl.Client
 
+    tls_ca_file: testpki/ca.crt
+    tls_key_file: testpki/client.key
+    tls_cert_file: testpki/client.crt
+
     route_table:
        -  eid_pattern: "dtn://server/.*"
           next_nodeid: dtn://server/
           address: localhost
-
-    tls_ca_file: testpki/ca.crt
-    tls_key_file: testpki/client.key
-    tls_cert_file: testpki/client.crt
+ 

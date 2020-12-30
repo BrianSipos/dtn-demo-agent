@@ -57,7 +57,7 @@ def encode_diagnostic(obj, **kwargs):
     elif obj is None:
         text = 'null'
     else:
-        print('Unencodable value', obj)
+        print('Unencodable value ({}): {}'.format(type(obj), repr(obj)))
         text = None
     # prepend unconditionally
     if text and wsp_indent:

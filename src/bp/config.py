@@ -21,7 +21,7 @@ class RouteItem(object):
     #: The next-hop Node ID
     next_nodeid: str
     #: The next-hop Transport
-    next_hop: ConnectConfig
+    next_hop: Optional[ConnectConfig]
 
 
 @dataclass
@@ -74,10 +74,11 @@ class Config(object):
                         try:
                             pat = re.compile(item_cpy.pop('eid_pattern'))
                             nodeid = item_cpy.pop('next_nodeid')
+                            conn = ConnectConfig(**item_cpy) if item_cpy else None
                             self.route_table.append(RouteItem(
                                 eid_pattern=pat,
                                 next_nodeid=nodeid,
-                                next_hop=ConnectConfig(**item_cpy)
+                                next_hop=conn
                             ))
                         except Exception as err:
                             LOGGER.error('Ignoring invalid route_table entry %s because (%s): %s', item, type(err).__name__, err)

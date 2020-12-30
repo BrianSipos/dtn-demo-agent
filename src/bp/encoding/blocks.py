@@ -217,7 +217,7 @@ class CanonicalBlock(AbstractBlock):
 
             if cls is not None:
                 try:
-                    pay = cls(cbor2.loads(pay_data))
+                    pay = cls(pay_data)
                     self.add_payload(pay)
                 except Exception as err:
                     if conf.debug_dissector:

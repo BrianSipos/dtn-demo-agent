@@ -3,28 +3,28 @@
 import enum
 from scapy_cbor.fields import (
     ConditionalField, ArrayWrapField,
-    UintField, FlagsField, FieldListField, PacketListField,
+    CborField, UintField, FlagsField, FieldListField, PacketListField,
 )
-from scapy_cbor.packets import (CborArray, TypeValueHead)
+from scapy_cbor.packets import CborArray
 from .fields import EidField
 from .blocks import CanonicalBlock
 
 
-class SecurityParameter(TypeValueHead):
-    ''' Header for a security parameter, the payload is the value.
+class TypeValuePair(CborArray):
+    ''' A pattern for an array encoding which contains exactly two values.
     '''
 
-
-class SecurityResult(TypeValueHead):
-    ''' Header for a security result, the payload is the value.
-    '''
+    fields_desc = (
+        UintField('type_code'),
+        CborField('value'),
+    )
 
 
 class TargetResultList(CborArray):
     ''' A list of results for a single target.
     '''
     fields_desc = (
-        PacketListField('results', default=None, cls=SecurityResult),
+        PacketListField('results', default=None, cls=TypeValuePair),
     )
 
 
@@ -53,12 +53,12 @@ class AbstractSecurityBlock(CborArray):
         ),
         ConditionalField(
             ArrayWrapField(
-                PacketListField('parameters', default=None, cls=SecurityParameter),
+                PacketListField('parameters', default=None, cls=TypeValuePair),
             ),
             lambda block: block.context_flags & AbstractSecurityBlock.Flag.PARAMETERS_PRESENT
         ),
         ArrayWrapField(
-            PacketListField('results', default=None, cls=TargetResultList),
+            PacketListField('results', default=[], cls=TargetResultList),
         ),
     )
 
@@ -73,4 +73,3 @@ class BlockIntegrityBlock(AbstractSecurityBlock):
 class BlockConfidentalityBlock(AbstractSecurityBlock):
     ''' Block data from 'draft-ietf-dtn-bpsec-22'
     '''
-
