@@ -47,7 +47,7 @@ class CborArray(AbstractCborStruct):
     must itself build to an array struct.
     '''
 
-    def self_build(self, field_pos_list=None):
+    def self_build(self, *_args, **_kwargs):
         lst = []
 
         #LOGGER.info('CborArray.self_build fields=%s', self.fields)

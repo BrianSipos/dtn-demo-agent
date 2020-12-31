@@ -7,7 +7,7 @@ import cbor2
 import crcmod
 from scapy.config import conf
 import scapy.packet
-from scapy_cbor.packets import (CborArray, CborItem)
+from scapy_cbor.packets import (AbstractCborStruct, CborArray, CborItem)
 from scapy_cbor.fields import (
     BstrField, ConditionalField, EnumField, FlagsField, UintField, PacketField
 )
@@ -185,29 +185,37 @@ class CanonicalBlock(AbstractBlock):
         UintField('block_num', default=None),
         FlagsField('block_flags', default=Flag.NONE, flags=Flag),
         EnumField('crc_type', default=AbstractBlock.CrcType.NONE, enum=AbstractBlock.CrcType),
-        BstrField('data', default=None),  # block-type-specific data here
+        BstrField('btsd', default=None),  # block-type-specific data here
         ConditionalField(
             BstrField('crc_value'),
             lambda block: block.crc_type != 0
         ),
     )
 
-    def add_payload(self, payload):
-        AbstractBlock.add_payload(self, payload)
+    def ensure_block_type_specific_data(self):
+        ''' Embed payload as field data if not already present.
+        '''
+        if isinstance(self.payload, scapy.packet.NoPayload):
+            return
+        if self.fields.get('btsd') is not None:
+            return
+        pay_data = self.payload.do_build()
+        if isinstance(self.payload, AbstractCborStruct):
+            pay_data = cbor2.dumps(pay_data)
+        self.fields['btsd'] = pay_data
 
-        # Embed payload as field overload
-        if 'data' not in self.overloaded_fields:
-            pay_data = cbor2.dumps(self.payload.do_build())
-            self.overloaded_fields['data'] = pay_data
+    def self_build(self, *args, **kwargs):
+        self.ensure_block_type_specific_data()
+        return AbstractBlock.self_build(self, *args, **kwargs)
 
     def do_build_payload(self):
-        # Payload is handled by add_payload()
+        # Payload is handled by self_build()
         return b''
 
     def post_dissect(self, s):
         # Extract payload from fields
         pay_type = self.fields.get('type_code')
-        pay_data = self.fields.get('data')
+        pay_data = self.fields.get('btsd')
         if (pay_data is not None and pay_type is not None):
             try:
                 cls = self.guess_payload_class(None)

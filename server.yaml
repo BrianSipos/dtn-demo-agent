@@ -3,8 +3,8 @@ tcpcl:
     node_id: dtn://server/
     tls_enable: False
     tls_ca_file: testpki/ca.crt
-    tls_key_file: testpki/server.key
-    tls_cert_file: testpki/server.crt
+    tls_key_file: testpki/server-transport.key
+    tls_cert_file: testpki/server-transport.crt
 
     init_listen:
         address: localhost
@@ -16,9 +16,9 @@ bp:
     #cl_fork: tcpcl
     cl_attach: dtn.tcpcl.Server
 
-    tls_ca_file: testpki/ca.crt
-    tls_key_file: testpki/server.key
-    tls_cert_file: testpki/server.crt
+    verify_ca_file: testpki/ca.crt
+    sign_key_file: testpki/server-sign.key
+    sign_cert_file: testpki/server-sign.crt
 
     route_table:
        -  eid_pattern: "dtn://client/.*"

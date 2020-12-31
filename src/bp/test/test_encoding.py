@@ -309,7 +309,7 @@ class TestCanonicalBlock(BaseTestPacket):
         blk = CanonicalBlock(
             type_code=1,
             block_num=8,
-            data=b'hi'
+            btsd=b'hi'
         )
         self.assertEqual(
             self._encode(blk),
@@ -401,7 +401,7 @@ class TestBundle(BaseTestPacket):
             blocks=[
                 CanonicalBlock(
                     block_num=1,
-                    data=pyld_data,
+                    btsd=pyld_data,
                 ),
             ]
         )
@@ -472,7 +472,7 @@ class TestBundle(BaseTestPacket):
             block_num=8,
             block_flags=0,
             crc_type=0,
-            data=pyld_data
+            btsd=pyld_data
         )
         self.assertEqual(blk.fields, fields)
 
@@ -514,7 +514,7 @@ class TestPreviousNodeBlock(BaseTestPacket):
             block_num=None,
             block_flags=0,
             crc_type=0,
-            data=unhexlify('82016b2f2f6e6f64652f73657276')
+            btsd=unhexlify('82016b2f2f6e6f64652f73657276')
         )
         self.assertEqual(blk.fields, fields)
 
@@ -555,7 +555,7 @@ class TestBundleAgeBlock(BaseTestPacket):
             block_num=None,
             block_flags=0,
             crc_type=0,
-            data=unhexlify('0a')
+            btsd=unhexlify('0a')
         )
         self.assertEqual(blk.fields, fields)
 
@@ -600,7 +600,7 @@ class TestHopCountBlock(BaseTestPacket):
             block_num=None,
             block_flags=0,
             crc_type=0,
-            data=unhexlify('820a05')
+            btsd=unhexlify('820a05')
         )
         self.assertEqual(blk.fields, fields)
 

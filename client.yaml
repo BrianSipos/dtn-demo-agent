@@ -4,8 +4,8 @@ tcpcl:
 
     tls_enable: False
     tls_ca_file: testpki/ca.crt
-    tls_key_file: testpki/client.key
-    tls_cert_file: testpki/client.crt
+    tls_key_file: testpki/client-transport.key
+    tls_cert_file: testpki/client-transport.crt
 
 bp:
     bus_service: dtn.bp.Client
@@ -13,9 +13,9 @@ bp:
     #cl_fork: tcpcl
     cl_attach: dtn.tcpcl.Client
 
-    tls_ca_file: testpki/ca.crt
-    tls_key_file: testpki/client.key
-    tls_cert_file: testpki/client.crt
+    verify_ca_file: testpki/ca.crt
+    sign_key_file: testpki/client-sign.key
+    sign_cert_file: testpki/client-sign.crt
 
     route_table:
        -  eid_pattern: "dtn://server/.*"

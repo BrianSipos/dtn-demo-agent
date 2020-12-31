@@ -44,11 +44,11 @@ class Config(object):
     route_table: List[RouteItem] = field(default_factory=list)
 
     #: Trusted root CA PEM file
-    tls_ca_file: Optional[str] = None
+    verify_ca_file: Optional[str] = None
     #: Local certificate (chain) PEM file
-    tls_cert_file: Optional[str] = None
+    sign_cert_file: Optional[str] = None
     #: Local private key PEM file
-    tls_key_file: Optional[str] = None
+    sign_key_file: Optional[str] = None
 
     #: The name of a CL to read config for and fork
     cl_fork: Optional[str] = None

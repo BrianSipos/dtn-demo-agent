@@ -24,8 +24,8 @@ class Bundle(CborArray):
         for blk in self.blocks:
             if isinstance(blk.payload, AdminRecord):
                 self.primary.bundle_flags |= PrimaryBlock.Flag.PAYLOAD_ADMIN
-                blk.overloaded_fields['type_code'] = 1
-                blk.overloaded_fields['data'] = bytes(blk.payload)
+                blk.setfieldval('type_code', 1)
+                blk.setfieldval('btsd', bytes(blk.payload))
 
     def self_build(self, field_pos_list=None):
         # Special handling for admin payload
@@ -43,10 +43,11 @@ class Bundle(CborArray):
 
     def post_dissect(self, s):
         # Special handling for admin payload
-        if self.primary and self.primary.bundle_flags & PrimaryBlock.Flag.PAYLOAD_ADMIN:
+        if self.primary and self.primary.getfieldval('bundle_flags') & PrimaryBlock.Flag.PAYLOAD_ADMIN:
             for blk in self.blocks:
-                if blk.type_code == 1 and blk.data is not None:
-                    pay = AdminRecord(blk.data)
+                blk_data = blk.getfieldval('btsd')
+                if blk.type_code == 1 and blk_data is not None:
+                    pay = AdminRecord(blk_data)
                     blk.remove_payload()
                     blk.add_payload(pay)
 
@@ -59,6 +60,7 @@ class Bundle(CborArray):
         if self.primary:
             self.primary.update_crc()
         for blk in self.blocks:
+            blk.ensure_block_type_specific_data()
             blk.update_crc()
 
     def check_all_crc(self):

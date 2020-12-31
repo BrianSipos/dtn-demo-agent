@@ -243,7 +243,7 @@ def root_logging(log_level, log_queue=None):
     
         # ql gets records from the queue and sends them to the stream handler
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s PID:%(process)s TID:%(threadName)s <%(levelname)s> %(message)s"))
+        handler.setFormatter(logging.Formatter("%(asctime)s PID:%(process)s TID:%(threadName)s <%(levelname)s> %(name)s: %(message)s"))
         ql = QueueListener(log_queue, handler)
         ql.start()
 

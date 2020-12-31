@@ -19,6 +19,40 @@ from . import formats, contact, messages, extend
 from builtins import isinstance
 
 
+def match_id(ref_id, cert, san_key, logger, log_name):
+    ''' Match a certificate identifier.
+    :return: The matched ID URI, or False if present but failed, or None if
+    no identifier present in the certificate.
+    '''
+    cert_ids = None
+    if cert:
+        try:
+            ext = cert.extensions.get_extension_for_oid(x509.oid.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+            cert_ids = ext.value.get_values_for_type(san_key)
+        except x509.ExtensionNotFound:
+            pass
+
+    logger.debug('Authenticating %s reference %s with cert containing: %s',
+                 log_name, repr(ref_id), cert_ids)
+
+    if cert_ids:
+        if ref_id in cert_ids:
+            authn_val = ref_id
+        else:
+            # cert IDs but no match
+            authn_val = False
+    else:
+        # no certificate IDs
+        authn_val = None
+
+    # Handle authentication result
+    if not authn_val and ref_id and cert_ids:
+        logger.warning('Peer %s not authenticated', log_name)
+    else:
+        logger.debug('Certificate matched %s reference %s', log_name, repr(authn_val))
+    return authn_val
+
+
 class Connection(object):
     ''' Optionally secured socket connection.
     This handles octet-level buffering and queuing.
@@ -783,35 +817,6 @@ class Messenger(Connection):
         authn_dnsid = None
         authn_ipaddrid = None
 
-        def match_id(ref_id, cert, san_key, log_name):
-            cert_ids = None
-            if cert:
-                try:
-                    ext = cert.extensions.get_extension_for_oid(x509.oid.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
-                    cert_ids = ext.value.get_values_for_type(san_key)
-                except x509.ExtensionNotFound:
-                    pass
-
-            self.__logger.debug('Authenticating %s reference %s with cert containing: %s',
-                                log_name, repr(ref_id), cert_ids)
-
-            if cert_ids:
-                if ref_id in cert_ids:
-                    authn_val = ref_id
-                else:
-                    # cert IDs but no match
-                    authn_val = False
-            else:
-                # no certificate IDs
-                authn_val = None
-
-            # Handle authentication result
-            if not authn_val and ref_id and cert_ids:
-                self.__logger.warning('Peer %s not authenticated', log_name)
-            else:
-                self.__logger.debug('Certificate matched %s reference %s', log_name, repr(authn_val))
-            return authn_val
-
         sock_tls = self.get_secure_socket()
         if sock_tls:
             # Native (python ssl) validation for reference
@@ -839,11 +844,11 @@ class Messenger(Connection):
             #Example print(x509.ObjectIdentifier('1.3.6.1.5.5.7.3.1') in eku_set)
 
             # Exact IPADDR-ID matching
-            authn_ipaddrid = match_id(peer_ipaddrid, cert, x509.IPAddress, 'IPADDR-ID')
+            authn_ipaddrid = match_id(peer_ipaddrid, cert, x509.IPAddress, self.__logger, 'IPADDR-ID')
             # Exact DNS-ID matching
-            authn_dnsid = match_id(peer_dnsid, cert, x509.DNSName, 'DNS-ID')
+            authn_dnsid = match_id(peer_dnsid, cert, x509.DNSName, self.__logger, 'DNS-ID')
             # Exact NODE-ID matching
-            authn_nodeid = match_id(peer_nodeid, cert, x509.UniformResourceIdentifier, 'NODE-ID')
+            authn_nodeid = match_id(peer_nodeid, cert, x509.UniformResourceIdentifier, self.__logger, 'NODE-ID')
 
             any_fail = (peer_ipaddrid and authn_ipaddrid is False) or (peer_dnsid and authn_dnsid is False) or authn_nodeid is False
             netname_absent = authn_ipaddrid is None and authn_dnsid is None
