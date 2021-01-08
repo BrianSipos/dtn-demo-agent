@@ -9,9 +9,10 @@ import six
 def encode_diagnostic(obj, **kwargs):
     ''' Encode a Python object as a CBOR Extended Diagnostic Notation string.
     
-    Special options:
+    :param kwargs: Special options:
       indent: if provided, indent this many spaces
       bstr_as: either 'hex' (default) or 'base64'
+    :throw TypeError: If there is an unencodable part.
     '''
     indent = kwargs.get('indent')
     wsp_indent = ' ' * indent if indent is not None else ''
@@ -57,8 +58,8 @@ def encode_diagnostic(obj, **kwargs):
     elif obj is None:
         text = 'null'
     else:
-        print('Unencodable value ({}): {}'.format(type(obj), repr(obj)))
-        text = None
+        raise TypeError('Unencodable value ({}): {}'.format(type(obj), repr(obj)))
+
     # prepend unconditionally
     if text and wsp_indent:
         text = wsp_indent + text

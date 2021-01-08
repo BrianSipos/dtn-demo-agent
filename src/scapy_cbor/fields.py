@@ -4,6 +4,7 @@ import logging
 import cbor2
 import scapy.fields
 from scapy import volatile
+from scapy_cbor.util import encode_diagnostic
 
 LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +57,12 @@ class CborField(scapy.fields.Field):
         :rtype: A value or :py:obj:`IGNORE`.
         '''
         return x
+
+#    def i2repr(self, pkt, x):
+#        try:
+#            return encode_diagnostic(x)
+#        except:
+#            return scapy.fields.Field.i2repr(self, pkt, x)
 
     def any2i(self, pkt, x):
         # Coerce all values to internal type
@@ -353,12 +360,6 @@ class BstrField(CborField):
 
     def __init__(self, name, default=None):
         CborField.__init__(self, name, default)
-
-    def i2repr(self, pkt, x):
-        if x is None:
-            return None
-        from scapy.utils import repr_hex
-        return "h'{}'".format(repr_hex(x))
 
     def i2m(self, pkt, x):
         try:

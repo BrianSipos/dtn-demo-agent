@@ -94,6 +94,9 @@ class DtnTimeField(UintField):
             return None
         return dtval.isoformat()
 
+    def i2repr(self, pkt, x):
+        return self.i2h(pkt, x)
+
     def h2i(self, pkt, x):
         return self.any2i(pkt, x)
 

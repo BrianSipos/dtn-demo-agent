@@ -100,7 +100,7 @@ class BundleContainer(object):
     def fix_block_num(self):
         ''' Assign unique block numbers where needed.
         '''
-        for blk in self.bundle.blocks:
+        for blk in self.bundle.getfieldval('blocks'):
             if blk.getfieldval('block_num') is None:
                 if blk.getfieldval('type_code') == 1:
                     set_num = 1
@@ -110,8 +110,8 @@ class BundleContainer(object):
 
     def do_report_reception(self):
         return (
-            self.bundle.primary.report_to != 'dtn:none'
-            and self.bundle.primary.bundle_flags & PrimaryBlock.Flag.REQ_RECEPTION_REPORT
+            self.bundle.primary.getfieldval('report_to') != 'dtn:none'
+            and self.bundle.primary.getfieldval('bundle_flags') & PrimaryBlock.Flag.REQ_RECEPTION_REPORT
         )
 
     def create_report_reception(self, timestamp, own_nodeid):
@@ -495,7 +495,11 @@ class Agent(dbus.service.Object):
         bib_data = BlockIntegrityBlock(
             targets=target_block_nums,
             context_id=BPSEC_COSE_CONTEXT_ID,
-            context_flags=AbstractSecurityBlock.Flag.PARAMETERS_PRESENT,
+            context_flags=(
+                AbstractSecurityBlock.Flag.SOURCE_PRESENT
+                | AbstractSecurityBlock.Flag.PARAMETERS_PRESENT
+            ),
+            source=self._config.node_id,
             parameters=[
                 TypeValuePair(type_code=3, value=x5chain),
                 TypeValuePair(type_code=5, value=aad_scope),
@@ -504,7 +508,7 @@ class Agent(dbus.service.Object):
 
         # Sign each target with one result per
         target_result = []
-        for blk_num in bib_data.targets:
+        for blk_num in bib_data.getfieldval('targets'):
             target_blk = ctr.block_num(blk_num)
             target_blk.ensure_block_type_specific_data()
             target_plaintext = target_blk.getfieldval('btsd')
@@ -671,7 +675,7 @@ class Agent(dbus.service.Object):
         :param ctr: The bundle container to send.
         :type ctr: :py:cls:`BundleContainer`
         '''
-        dest_eid = str(ctr.bundle.primary.destination)
+        dest_eid = str(ctr.bundle.primary.getfieldval('destination'))
         cl_conn = self._get_session_for(dest_eid)
 
         self._apply_integrity(ctr)
