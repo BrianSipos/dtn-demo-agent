@@ -39,7 +39,6 @@ class AbstractSecurityBlock(CborArray):
         '''
         NONE = 0
         PARAMETERS_PRESENT = 2 ** 0
-        SOURCE_PRESENT = 2 ** 1
 
     fields_desc = (
         ArrayWrapField(
@@ -47,15 +46,12 @@ class AbstractSecurityBlock(CborArray):
         ),
         UintField('context_id'),
         FlagsField('context_flags', default=Flag.NONE, flags=Flag),
-        ConditionalField(
-            EidField('source', default=None),
-            lambda block: block.context_flags & AbstractSecurityBlock.Flag.SOURCE_PRESENT
-        ),
+        EidField('source', default=None),
         ConditionalField(
             ArrayWrapField(
                 PacketListField('parameters', default=None, cls=TypeValuePair),
             ),
-            lambda block: block.context_flags & AbstractSecurityBlock.Flag.PARAMETERS_PRESENT
+            lambda block: block.getfieldval('context_flags') & AbstractSecurityBlock.Flag.PARAMETERS_PRESENT
         ),
         ArrayWrapField(
             PacketListField('results', default=[], cls=TargetResultList),

@@ -23,7 +23,7 @@ class Bundle(CborArray):
     def _update_from_admin(self):
         for blk in self.blocks:
             if isinstance(blk.payload, AdminRecord):
-                self.primary.bundle_flags |= PrimaryBlock.Flag.PAYLOAD_ADMIN
+                self.primary.setfieldval('bundle_flags', self.primary.getfieldval('bundle_flags') | PrimaryBlock.Flag.PAYLOAD_ADMIN)
                 blk.setfieldval('type_code', 1)
                 blk.setfieldval('btsd', bytes(blk.payload))
 

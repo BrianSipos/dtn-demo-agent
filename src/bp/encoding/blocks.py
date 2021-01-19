@@ -145,15 +145,15 @@ class PrimaryBlock(AbstractBlock):
         UintField('lifetime', default=0),
         ConditionalField(
             UintField('fragment_offset', default=0),
-            lambda block: block.bundle_flags & PrimaryBlock.Flag.IS_FRAGMENT
+            lambda block: block.getfieldval('bundle_flags') & PrimaryBlock.Flag.IS_FRAGMENT
         ),
         ConditionalField(
             UintField('total_app_data_len', default=0),
-            lambda block: block.bundle_flags & PrimaryBlock.Flag.IS_FRAGMENT
+            lambda block: block.getfieldval('bundle_flags') & PrimaryBlock.Flag.IS_FRAGMENT
         ),
         ConditionalField(
             BstrField('crc_value'),
-            lambda block: block.crc_type != 0
+            lambda block: block.getfieldval('crc_type') != 0
         ),
     )
 

@@ -115,7 +115,7 @@ class BundleContainer(object):
         )
 
     def create_report_reception(self, timestamp, own_nodeid):
-        status_ts = bool(self.bundle.primary.bundle_flags & PrimaryBlock.Flag.REQ_STATUS_TIME)
+        status_ts = bool(self.bundle.primary.getfieldval('bundle_flags') & PrimaryBlock.Flag.REQ_STATUS_TIME)
         status_at = timestamp.getfieldval('time') if status_ts else None
 
         report = StatusReport(
@@ -183,6 +183,9 @@ class ClAgent(object):
     :ivar recv_bundle_finish: A callback to handle received bundle data.
     '''
 
+    #: Interface name
+    DBUS_IFACE = 'org.ietf.dtn.tcpcl.Agent'
+
     def __init__(self):
         self.__logger = logging.getLogger(self.__class__.__name__)
 
@@ -205,12 +208,12 @@ class ClAgent(object):
     def bind(self, bus_conn):
         if self.agent_obj:
             return
-        self.__logger.debug('Binding to CL service %s', self.serv_name)
+        self.__logger.debug('Binding to CL service %s %s', self.serv_name, self.obj_path)
         self.bus_conn = bus_conn
         self.agent_obj = bus_conn.get_object(self.serv_name, self.obj_path)
 
-        self.agent_obj.connect_to_signal('connection_opened', self._conn_attach)
-        self.agent_obj.connect_to_signal('connection_closed', self._conn_detach)
+        self.agent_obj.connect_to_signal('connection_opened', self._conn_attach, dbus_interface=ClAgent.DBUS_IFACE)
+        self.agent_obj.connect_to_signal('connection_closed', self._conn_detach, dbus_interface=ClAgent.DBUS_IFACE)
         for conn_path in self.agent_obj.get_connections():
             self._conn_attach(conn_path)
 
@@ -242,9 +245,10 @@ class ClAgent(object):
             if callable(self.recv_bundle_finish):
                 self.recv_bundle_finish(data)
 
-        conn_obj.connect_to_signal('recv_bundle_finished', handle_recv_bundle_finish)
+        conn_obj.connect_to_signal('recv_bundle_finished', handle_recv_bundle_finish, dbus_interface=ClConnection.DBUS_IFACE)
 
         def handle_state_change(state):
+            self.__logger.debug('State change to %s', state)
             if state == 'established':
                 params = conn_obj.get_session_parameters()
                 cl_conn = self._cl_conn_path[conn_path]
@@ -256,7 +260,7 @@ class ClAgent(object):
 
         state = conn_obj.get_session_state()
         if state != 'established':
-            conn_obj.connect_to_signal('session_state_changed', handle_state_change)
+            conn_obj.connect_to_signal('session_state_changed', handle_state_change, dbus_interface=ClConnection.DBUS_IFACE)
         handle_state_change(state)
 
     def _conn_detach(self, conn_path):
@@ -298,6 +302,9 @@ class ClConnection(object):
 
     :ivar conn_obj: The bus proxy object when it is valid.
     '''
+
+    #: Interface name
+    DBUS_IFACE = 'org.ietf.dtn.tcpcl.Contact'
 
     def __init__(self):
         self.serv_name = None
@@ -346,6 +353,7 @@ class Agent(dbus.service.Object):
     :type bus_kwargs: dict or None
     '''
 
+    #: Interface name
     DBUS_IFACE = 'org.ietf.dtn.bp.Agent'
 
     def __init__(self, config, bus_kwargs=None):
@@ -373,7 +381,7 @@ class Agent(dbus.service.Object):
         self.timestamp = Timestamper()
 
         self._bus_obj = self._config.bus_conn.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus')
-        self._bus_obj.connect_to_signal('NameOwnerChanged', self._bus_name_changed)
+        self._bus_obj.connect_to_signal('NameOwnerChanged', self._bus_name_changed, dbus_interface='org.freedesktop.DBus')
 
         # Bound-to CL agent
         self._cl_agent = None
@@ -496,8 +504,7 @@ class Agent(dbus.service.Object):
             targets=target_block_nums,
             context_id=BPSEC_COSE_CONTEXT_ID,
             context_flags=(
-                AbstractSecurityBlock.Flag.SOURCE_PRESENT
-                | AbstractSecurityBlock.Flag.PARAMETERS_PRESENT
+                AbstractSecurityBlock.Flag.PARAMETERS_PRESENT
             ),
             source=self._config.node_id,
             parameters=[
