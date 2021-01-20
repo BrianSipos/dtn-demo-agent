@@ -1,17 +1,13 @@
 ''' Test the module :py:mod:`bp.blocks`.
 '''
-import unittest
 import cbor2
 from binascii import (hexlify, unhexlify)
-from scapy.config import conf
 from bp.encoding.fields import (EidField)
 from bp.encoding.blocks import (Timestamp, PrimaryBlock, CanonicalBlock,
-                                PreviousNodeBlock, BundleAgeBlock, 
+                                PreviousNodeBlock, BundleAgeBlock,
                                 HopCountBlock)
 from bp.encoding.bundle import (Bundle)
 from bp.test.base import (DTN_NONE, BaseTestPacket)
-
-conf.debug_dissector = True
 
 
 class TestPrimaryBlock(BaseTestPacket):

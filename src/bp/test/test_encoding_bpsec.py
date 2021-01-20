@@ -1,8 +1,7 @@
 ''' Test the module :py:mod:`bp.blocks`.
 '''
-import unittest
 from bp.encoding.fields import (EidField)
-from bp.encoding.bpsec import (TargetResultList, TypeValuePair, 
+from bp.encoding.bpsec import (TargetResultList, TypeValuePair,
                                BlockIntegrityBlock)
 from bp.test.base import BaseTestPacket
 

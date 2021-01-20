@@ -1,11 +1,7 @@
 ''' Test the module :py:mod:`bp.blocks`.
 '''
 import unittest
-from scapy.config import conf
 from bp.encoding.fields import (EidField, DtnTimeField)
-from binascii import (hexlify, unhexlify)
-
-conf.debug_dissector = True
 
 
 class TestEidField(unittest.TestCase):
@@ -80,17 +76,3 @@ class TestDtnTimeField(unittest.TestCase):
             fld.h2i(None, '2000-01-01T00:16:40+00:00'),
             1000000,
         )
-
-
-class BaseTestPacket(unittest.TestCase):
-    ''' Include helper functions for scapy packet handling.
-    '''
-
-    def _encode(self, pkt):
-        pkt.show()
-        return pkt.build()
-
-    def _decode(self, cls, item):
-        pkt = cls(item)
-        pkt.show()
-        return pkt

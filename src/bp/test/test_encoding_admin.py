@@ -1,23 +1,8 @@
 ''' Test the module :py:mod:`bp.blocks`.
 '''
-import unittest
 from scapy_cbor.packets import CborItem
 from bp.encoding.admin import (AdminRecord, StatusInfo)
 from bp.test.base import (BaseTestPacket)
-
-
-class BaseTestPacket(unittest.TestCase):
-    ''' Include helper functions for scapy packet handling.
-    '''
-
-    def _encode(self, pkt):
-        pkt.show()
-        return pkt.build()
-
-    def _decode(self, cls, item):
-        pkt = cls(item)
-        pkt.show()
-        return pkt
 
 
 class TestAdminRecord(BaseTestPacket):
