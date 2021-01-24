@@ -66,7 +66,7 @@ class Connection(object):
     '''
 
     def __init__(self, sock, as_passive, peer_name):
-        self.__logger = logging.getLogger(self.__class__.__name__)
+        self._logger = logging.getLogger(self.__class__.__name__)
 
         self._on_close = None
         self._as_passive = as_passive
@@ -141,7 +141,7 @@ class Connection(object):
         old = self.__s_notls
         self.__unlisten_notls()
 
-        self.__logger.debug('Socket binding on %s', sock)
+        self._logger.debug('Socket binding on %s', sock)
         self.__s_notls = sock
         if self.__s_notls is not None:
             self.__s_notls.setblocking(0)
@@ -162,7 +162,7 @@ class Connection(object):
         '''
         if not self.__s_notls:
             return
-        self.__logger.info('Closing connection')
+        self._logger.info('Closing connection')
 
         self.__unlisten_tls()
         self.__unlisten_notls()
@@ -174,7 +174,7 @@ class Connection(object):
             try:
                 sock.shutdown(socket.SHUT_RDWR)
             except socket.error as err:
-                self.__logger.warning('Socket shutdown error: %s', err)
+                self._logger.warning('Socket shutdown error: %s', err)
             sock.close()
 
         self.__s_notls = None
@@ -206,12 +206,12 @@ class Connection(object):
                                         server_hostname=self._peer_name,
                                         do_handshake_on_connect=False)
 
-        self.__logger.debug('Socket STARTTLS on %s', s_tls)
-        self.__logger.info('Negotiating TLS...')
+        self._logger.debug('Socket STARTTLS on %s', s_tls)
+        self._logger.info('Negotiating TLS...')
         s_tls.do_handshake()
 
         self.__s_tls = s_tls
-        self.__logger.info('TLS secured with %s', self.__s_tls.cipher())
+        self._logger.info('TLS secured with %s', self.__s_tls.cipher())
 
         self.__s_tls.setblocking(0)
         self.__avail_rx_tls_id = glib.io_add_watch(
@@ -223,7 +223,7 @@ class Connection(object):
         if not self.__s_tls:
             return
 
-        self.__logger.debug('Unsecuring TLS...')
+        self._logger.debug('Unsecuring TLS...')
         self.__unlisten_tls()
 
         # Fall-back to old unsecure socket upon failure
@@ -232,11 +232,11 @@ class Connection(object):
         self.__s_notls = None
 
         # Keep the unsecured socket
-        self.__logger.debug('TLS unwrap on %s', self.__s_tls)
+        self._logger.debug('TLS unwrap on %s', self.__s_tls)
         try:
             new_notls = self.__s_tls.unwrap()
         except ssl.SSLError as err:
-            self.__logger.warning('Failed to shutdown TLS session: %s', err)
+            self._logger.warning('Failed to shutdown TLS session: %s', err)
         self.__s_tls = None
 
         if new_notls.fileno() >= 0:
@@ -271,12 +271,12 @@ class Connection(object):
         :return: True if the RX buffer should be pumped more.
         :rtype: bool
         '''
-        self.__logger.debug('RX proxy')
+        self._logger.debug('RX proxy')
 
         try:
             data = sock.recv(self.CHUNK_SIZE)
         except (socket.error, ssl.SSLWantReadError) as err:
-            self.__logger.error('Failed to "recv" on socket: (%s) %s', err.__class__.__name__, err)
+            self._logger.error('Failed to "recv" on socket: (%s) %s', err.__class__.__name__, err)
             # Optimistically continue to read
             return True
 
@@ -285,7 +285,7 @@ class Connection(object):
             self.close()
             return False
 
-        self.__logger.debug('Received %d octets (%s)',
+        self._logger.debug('Received %d octets (%s)',
                             len(data), self._conn_name())
         self.recv_raw(data)
         return True
@@ -339,13 +339,13 @@ class Connection(object):
         sent_size = 0
         if self.__tx_buf:
             data = self.__tx_buf[:self.CHUNK_SIZE]
-            self.__logger.debug('Sending message %d/%d octets (%s)',
+            self._logger.debug('Sending message %d/%d octets (%s)',
                                 len(data), len(self.__tx_buf), self._conn_name())
             try:
                 tx_size = sock.send(data)
-                self.__logger.debug('Sent %d octets', tx_size)
+                self._logger.debug('Sent %d octets', tx_size)
             except socket.error as err:
-                self.__logger.error('Failed to "send" on socket: %s', err)
+                self._logger.error('Failed to "send" on socket: %s', err)
                 tx_size = None
 
             if tx_size:
@@ -358,7 +358,7 @@ class Connection(object):
 
         buf_empty = (len(self.__tx_buf) == 0)
         if sent_size:
-            self.__logger.debug('TX %d octets, remain %d octets (msg empty %s)', sent_size, len(
+            self._logger.debug('TX %d octets, remain %d octets (msg empty %s)', sent_size, len(
                 self.__tx_buf), up_empty)
         cont = (not buf_empty or not up_empty)
         return cont
@@ -433,7 +433,7 @@ class Messenger(Connection):
     '''
 
     def __init__(self, config, sock, fromaddr=None, toaddr=None):
-        self.__logger = logging.getLogger(self.__class__.__name__)
+        self._logger = logging.getLogger(self.__class__.__name__)
         self._config = config
 
         self._on_state_change = None
@@ -579,7 +579,7 @@ class Messenger(Connection):
 
     def _keepalive_timeout(self):
         ''' Handle TX keepalive. '''
-        self.__logger.debug('Keepalive time')
+        self._logger.debug('Keepalive time')
         self.send_message(messages.MessageHead() / messages.Keepalive())
 
     def _idle_stop(self):
@@ -598,7 +598,7 @@ class Messenger(Connection):
     def _idle_timeout(self):
         ''' Handle an idle timer timeout. '''
         self._idle_stop()
-        self.__logger.debug('Idle time reached')
+        self._logger.debug('Idle time reached')
         self.send_sess_term(messages.SessionTerm.Reason.IDLE_TIMEOUT, False)
         return False
 
@@ -608,7 +608,7 @@ class Messenger(Connection):
         self._idle_reset()
         # always append
         self.__rx_buf += data
-        self.__logger.debug('RX buffer size %d octets', len(self.__rx_buf))
+        self._logger.debug('RX buffer size %d octets', len(self.__rx_buf))
 
         # Handle as many messages as are present
         while self.__rx_buf:
@@ -622,19 +622,19 @@ class Messenger(Connection):
                 pkt = msgcls(self.__rx_buf)
                 pkt_data = bytes(pkt)
             except formats.VerifyError as err:
-                self.__logger.debug('Decoded partial packet: %s', err)
+                self._logger.debug('Decoded partial packet: %s', err)
                 return
             except Exception as err:
-                self.__logger.error('Failed to decode packet: %s', err)
+                self._logger.error('Failed to decode packet: %s', err)
                 raise
             if self.DO_DEBUG_DATA:
-                self.__logger.debug('RX packet data: %s',
+                self._logger.debug('RX packet data: %s',
                                     binascii.hexlify(pkt_data))
-            self.__logger.debug('Matched message %d octets', len(pkt_data))
+            self._logger.debug('Matched message %d octets', len(pkt_data))
 
             # Keep final padding as future data
             self.__rx_buf = self.__rx_buf[len(pkt_data):]
-            self.__logger.debug('RX remain %d octets', len(self.__rx_buf))
+            self._logger.debug('RX remain %d octets', len(self.__rx_buf))
 
             self.recv_message(pkt)
 
@@ -643,7 +643,7 @@ class Messenger(Connection):
 
         :param pkt: The message packet received.
         '''
-        self.__logger.info('RX: %s', repr(pkt))
+        self._logger.info('RX: %s', repr(pkt))
 
         if isinstance(pkt, contact.Head):
             if pkt.magic != contact.MAGIC_HEAD:
@@ -665,7 +665,7 @@ class Messenger(Connection):
             # Check policy before attempt
             if self._config.require_tls is not None:
                 if self._tls_attempt != self._config.require_tls:
-                    self.__logger.error('TLS parameter violated policy')
+                    self._logger.error('TLS parameter violated policy')
                     self.close()
                     return
 
@@ -679,14 +679,14 @@ class Messenger(Connection):
                 try:
                     self.secure(self._config.get_ssl_context())
                 except ssl.SSLError as err:
-                    self.__logger.error('TLS failed: %s', err)
+                    self._logger.error('TLS failed: %s', err)
                     self.close()
                     return
 
             # Check policy after attempt
             if self._config.require_tls is not None:
                 if self.is_secure() != self._config.require_tls:
-                    self.__logger.error('TLS result violated policy')
+                    self._logger.error('TLS result violated policy')
                     self.close()
                     return
 
@@ -709,7 +709,7 @@ class Messenger(Connection):
                     self._in_sess = True
                     self.merge_session_params()
                     self._update_state('established')
-                    self.__logger.info('Session established with %s', self._sess_parameters['peer_nodeid'])
+                    self._logger.info('Session established with %s', self._sess_parameters['peer_nodeid'])
                     if self._in_sess_func:
                         self._in_sess_func()
 
@@ -769,7 +769,7 @@ class Messenger(Connection):
     def merge_contact_params(self):
         ''' Combine local and peer contact headers to contact configuration.
         '''
-        self.__logger.debug('Contact negotiation')
+        self._logger.debug('Contact negotiation')
 
         this_can_tls = (self._conhead_this.flags &
                         contact.ContactV4.Flag.CAN_TLS)
@@ -800,7 +800,7 @@ class Messenger(Connection):
 
         :raise TerminateError: If there is some failure to negotiate.
         '''
-        self.__logger.debug('Session negotiation')
+        self._logger.debug('Session negotiation')
 
         peer_addr_str = self.get_app_socket().getpeername()[0]
         if self._as_passive:
@@ -823,32 +823,32 @@ class Messenger(Connection):
             try:
                 ssl.match_hostname(sock_tls.getpeercert(), peer_dnsid or peer_addr_str)
             except ssl.CertificateError as err:
-                self.__logger.warning('Native name validation failed: %s', err)
+                self._logger.warning('Native name validation failed: %s', err)
 
             # Verify TLS name bindings
             cert_der = sock_tls.getpeercert(True)
             cert = x509.load_der_x509_certificate(cert_der, default_backend())
-            self.__logger.debug('Peer certificate: %s', cert)
+            self._logger.debug('Peer certificate: %s', cert)
 
             try:
                 ku_bits = cert.extensions.get_extension_for_oid(x509.oid.ExtensionOID.KEY_USAGE).value
             except x509.ExtensionNotFound:
                 ku_bits = None
-            self.__logger.debug('Peer KU: %s', ku_bits)
+            self._logger.debug('Peer KU: %s', ku_bits)
 
             try:
                 eku_set = cert.extensions.get_extension_for_oid(x509.oid.ExtensionOID.EXTENDED_KEY_USAGE).value
             except x509.ExtensionNotFound:
                 eku_set = None
-            self.__logger.debug('Peer EKU: %s', eku_set)
+            self._logger.debug('Peer EKU: %s', eku_set)
             #Example print(x509.ObjectIdentifier('1.3.6.1.5.5.7.3.1') in eku_set)
 
             # Exact IPADDR-ID matching
-            authn_ipaddrid = match_id(peer_ipaddrid, cert, x509.IPAddress, self.__logger, 'IPADDR-ID')
+            authn_ipaddrid = match_id(peer_ipaddrid, cert, x509.IPAddress, self._logger, 'IPADDR-ID')
             # Exact DNS-ID matching
-            authn_dnsid = match_id(peer_dnsid, cert, x509.DNSName, self.__logger, 'DNS-ID')
+            authn_dnsid = match_id(peer_dnsid, cert, x509.DNSName, self._logger, 'DNS-ID')
             # Exact NODE-ID matching
-            authn_nodeid = match_id(peer_nodeid, cert, x509.UniformResourceIdentifier, self.__logger, 'NODE-ID')
+            authn_nodeid = match_id(peer_nodeid, cert, x509.UniformResourceIdentifier, self._logger, 'NODE-ID')
 
             any_fail = (peer_ipaddrid and authn_ipaddrid is False) or (peer_dnsid and authn_dnsid is False) or authn_nodeid is False
             netname_absent = authn_ipaddrid is None and authn_dnsid is None
@@ -857,7 +857,7 @@ class Messenger(Connection):
 
         self._keepalive_time = min(self._sessinit_this.keepalive,
                                    self._sessinit_peer.keepalive)
-        self.__logger.debug('KEEPALIVE time %d', self._keepalive_time)
+        self._logger.debug('KEEPALIVE time %d', self._keepalive_time)
         self._idle_time = self._config.idle_time
         self._keepalive_reset()
         self._idle_reset()
@@ -928,7 +928,7 @@ class Messenger(Connection):
         '''
         data = self.__tx_buf[:size]
         if data:
-            self.__logger.debug('TX popping %d of %d',
+            self._logger.debug('TX popping %d of %d',
                                 len(data), len(self.__tx_buf))
         self.__tx_buf = self.__tx_buf[len(data):]
 
@@ -940,10 +940,10 @@ class Messenger(Connection):
 
         :param pkt: The message packet to send.
         '''
-        self.__logger.info('TX: %s', repr(pkt))
+        self._logger.info('TX: %s', repr(pkt))
         pkt_data = bytes(pkt)
         if self.DO_DEBUG_DATA:
-            self.__logger.debug('TX packet data: %s',
+            self._logger.debug('TX packet data: %s',
                                 binascii.hexlify(pkt_data))
 
         self.__tx_buf += pkt_data
@@ -1027,7 +1027,7 @@ class Messenger(Connection):
         :param ext_items: Extension items which may be in the start segment.
         :type ext_items: array
         '''
-        self.__logger.debug('XFER_DATA %d %s', transfer_id, flags)
+        self._logger.debug('XFER_DATA %d %s', transfer_id, flags)
         if not self._in_sess:
             raise RejectError(messages.RejectMsg.Reason.UNEXPECTED)
 
@@ -1041,7 +1041,7 @@ class Messenger(Connection):
         :param length: The acknowledged length.
         :type length: int
         '''
-        self.__logger.debug('XFER_ACK %d %s %s', transfer_id, flags, length)
+        self._logger.debug('XFER_ACK %d %s %s', transfer_id, flags, length)
         if not self._in_sess:
             raise RejectError(messages.RejectMsg.Reason.UNEXPECTED)
 
@@ -1053,7 +1053,7 @@ class Messenger(Connection):
         :param reason: The refusal reason code.
         :type reason: int
         '''
-        self.__logger.debug('XFER_REFUSE %d %s', transfer_id, reason)
+        self._logger.debug('XFER_REFUSE %d %s', transfer_id, reason)
         if not self._in_sess:
             raise RejectError(messages.RejectMsg.Reason.UNEXPECTED)
 
@@ -1149,7 +1149,7 @@ class ContactHandler(Messenger, dbus.service.Object):
     DBUS_IFACE = 'org.ietf.dtn.tcpcl.Contact'
 
     def __init__(self, hdl_kwargs, bus_kwargs):
-        self.__logger = logging.getLogger(self.__class__.__name__)
+        self._logger = logging.getLogger(self.__class__.__name__)
         Messenger.__init__(self, **hdl_kwargs)
         dbus.service.Object.__init__(self, **bus_kwargs)
         self.object_path = bus_kwargs['object_path']
@@ -1202,9 +1202,9 @@ class ContactHandler(Messenger, dbus.service.Object):
         return dbus.Dictionary(params)
 
     def next_id(self):
-        ''' Get the next available bundle ID number.
+        ''' Get the next available transfer ID number.
 
-        :return: A valid bundle ID.
+        :return: A valid transfer ID.
         :rtype: int
         '''
         bid = self._tx_next_id
@@ -1227,7 +1227,7 @@ class ContactHandler(Messenger, dbus.service.Object):
     def _check_sess_term(self):
         ''' Perform post-termination logic. '''
         if self._in_term and self.is_sess_idle():
-            self.__logger.info('Closing in terminating state')
+            self._logger.info('Closing in terminating state')
             self.close()
 
     def recv_sess_term(self, reason):
@@ -1236,7 +1236,7 @@ class ContactHandler(Messenger, dbus.service.Object):
         # No further processing
         while self._tx_pend_start:
             item = self._tx_pend_start.pop(0)
-            self.__logger.warning('Terminating and ignoring transfer %d', item.transfer_id)
+            self._logger.warning('Terminating and ignoring transfer %d', item.transfer_id)
             self.send_bundle_finished(
                 str(item.transfer_id),
                 item.total_length or 0,
@@ -1265,7 +1265,7 @@ class ContactHandler(Messenger, dbus.service.Object):
             self._rx_bundles.append(item)
             self._rx_map[item.transfer_id] = item
 
-            self.__logger.info('Finished RX size %d', recv_length)
+            self._logger.info('Finished RX size %d', recv_length)
             self.recv_bundle_finished(
                 str(item.transfer_id), recv_length, 'success')
             self._rx_teardown()
@@ -1471,7 +1471,7 @@ class ContactHandler(Messenger, dbus.service.Object):
         :rtype: bool
         '''
         self._process_queue_pend = None
-        self.__logger.debug('Processing queue of %d items',
+        self._logger.debug('Processing queue of %d items',
                             len(self._tx_pend_start))
 
         # work from the head of the list

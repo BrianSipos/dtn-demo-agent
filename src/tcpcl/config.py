@@ -1,7 +1,7 @@
 ''' Agent configuration data.
 '''
 from dataclasses import dataclass, field, fields
-from typing import Optional, Set
+from typing import Optional, List, Set
 import logging
 import os
 import dbus.bus
@@ -40,9 +40,9 @@ class Config(object):
     bus_service: Optional[str] = None
 
     #: If provided, will listen on the specified address/port
-    init_listen: Optional[ListenConfig] = None
+    init_listen: List[ListenConfig] = field(default_factory=list)
     #: If provided, will connect to the specified address/port
-    init_connect: Optional[ConnectConfig] = None
+    init_connect: List[ConnectConfig] = field(default_factory=list)
     #: If True, the agent will stop when all of its contacts are closed.
     stop_on_close: bool = False
 
@@ -90,9 +90,13 @@ class Config(object):
         for fld in fields(self):
             if fld.name in cldat:
                 if fld.name == 'init_listen':
-                    self.init_listen = ListenConfig(**cldat[fld.name])
+                    self.init_listen.append(
+                        ListenConfig(**cldat[fld.name])
+                    )
                 elif fld.name == 'init_connect':
-                    self.init_connect = ConnectConfig(**cldat[fld.name])
+                    self.init_connect.append(
+                        ConnectConfig(**cldat[fld.name])
+                    )
                 else:
                     setattr(self, fld.name, cldat[fld.name])
 
@@ -103,8 +107,8 @@ class Config(object):
     def bus_conn(self):
         cur_conn = getattr(self, '_bus_conn', None)
         if cur_conn is None:
-            LOGGER.debug('Connecting to DBus')
             addr_or_type = self.bus_addr if self.bus_addr else dbus.bus.BUS_SESSION
+            LOGGER.debug('Connecting to DBus: %s', addr_or_type)
             self._bus_conn = dbus.bus.BusConnection(addr_or_type)
         return self._bus_conn
 

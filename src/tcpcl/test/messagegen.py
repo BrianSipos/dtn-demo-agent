@@ -28,7 +28,7 @@ class Worker(object):
     ]
 
     def __init__(self, args):
-        self.__logger = logging.getLogger(self.__class__.__name__)
+        self._logger = logging.getLogger(self.__class__.__name__)
         self.args = args
         self._on_stop = None
 
@@ -45,12 +45,12 @@ class Worker(object):
         sent_size = 0
         while len(frombuf) > 0:
             data = frombuf[:self.CHUNK_SIZE]
-            self.__logger.debug('Sending chunk %d/%d octets', len(data), len(frombuf))
+            self._logger.debug('Sending chunk %d/%d octets', len(data), len(frombuf))
             try:
                 tx_size = sock.send(data)
-                self.__logger.debug('Sent %d chunk %d octets', sock.fileno(), tx_size)
+                self._logger.debug('Sent %d chunk %d octets', sock.fileno(), tx_size)
             except socket.error as err:
-                self.__logger.warning('Failed to send chunk: %s', err)
+                self._logger.warning('Failed to send chunk: %s', err)
                 tx_size = None
             if tx_size:
                 frombuf[:] = frombuf[tx_size:]
@@ -74,9 +74,9 @@ class Worker(object):
 
         try:
             data = sock.recv(self.CHUNK_SIZE)
-            self.__logger.debug('Received %d chunk %d octets', sock.fileno(), len(data))
+            self._logger.debug('Received %d chunk %d octets', sock.fileno(), len(data))
         except socket.error as err:
-            self.__logger.warning('Failed to recv chunk: %s', err)
+            self._logger.warning('Failed to recv chunk: %s', err)
             data = None
 
         if not data:
@@ -94,7 +94,7 @@ class Worker(object):
         :return: True to continue listening.
         '''
         sock, fromaddr = bindsock.accept()
-        self.__logger.info('Connecting')
+        self._logger.info('Connecting')
         self._passive_sock = sock
 
         glib.io_add_watch(self._passive_sock, glib.IO_OUT, self._chunked_tx, self.__passive_tx_buf)
@@ -141,11 +141,11 @@ class Worker(object):
         for sock in (self._active_sock, self._passive_sock, self._listener):
             if sock.fileno() < 0:
                 continue
-            self.__logger.debug('Shutting down FD:%d', sock.fileno())
+            self._logger.debug('Shutting down FD:%d', sock.fileno())
             try:
                 sock.shutdown(socket.SHUT_RDWR)
             except socket.error as err:
-                self.__logger.error('Socket shutdown error: %s', err)
+                self._logger.error('Socket shutdown error: %s', err)
             sock.close()
 
         if self._on_stop:

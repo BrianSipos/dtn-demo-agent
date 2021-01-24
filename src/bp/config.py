@@ -7,7 +7,6 @@ import logging
 import dbus.bus
 import re
 import yaml
-from tcpcl.config import ConnectConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -20,8 +19,10 @@ class RouteItem(object):
     eid_pattern: re.Pattern
     #: The next-hop Node ID
     next_nodeid: str
-    #: The next-hop Transport
-    next_hop: Optional[ConnectConfig]
+    #: Convergence layer name
+    cl_type: str
+    #: The raw config object with additional parameters
+    raw_config: object
 
 
 @dataclass
@@ -49,11 +50,13 @@ class Config(object):
     sign_cert_file: Optional[str] = None
     #: Local private key PEM file
     sign_key_file: Optional[str] = None
+    #: Sign outgoing blocks of this type
+    apply_integrity: Set[int] = field(default_factory=lambda: {1})
 
-    #: The name of a CL to read config for and fork
-    cl_fork: Optional[str] = None
-    #: The bus service name of a CL to attach to
-    cl_attach: Optional[str] = None
+    #: The names of CL to read config for and fork
+    cl_fork: List[str] = field(default_factory=list)
+    #: The bus service names of CLs to attach to
+    cl_attach: Dict[str, str] = field(default_factory=dict)
 
     def from_file(self, fileobj):
         ''' Load configuration from a YAML file.
@@ -72,24 +75,31 @@ class Config(object):
                     for item in bpdat[fld.name]:
                         item_cpy = copy.copy(item)
                         try:
-                            pat = re.compile(item_cpy.pop('eid_pattern'))
-                            nodeid = item_cpy.pop('next_nodeid')
-                            conn = ConnectConfig(**item_cpy) if item_cpy else None
+                            eid_pattern = re.compile(item_cpy.pop('eid_pattern'))
+                            next_nodeid = item_cpy.pop('next_nodeid')
+                            cl_type = item_cpy.pop('cl_type')
                             self.route_table.append(RouteItem(
-                                eid_pattern=pat,
-                                next_nodeid=nodeid,
-                                next_hop=conn
+                                eid_pattern=eid_pattern,
+                                next_nodeid=next_nodeid,
+                                cl_type=cl_type,
+                                raw_config=item
                             ))
                         except Exception as err:
                             LOGGER.error('Ignoring invalid route_table entry %s because (%s): %s', item, type(err).__name__, err)
                 else:
                     setattr(self, fld.name, bpdat[fld.name])
 
+        # Get CL bus names to attach to
+        for cl_type in ('tcpcl', 'udpcl'):
+            cldat = filedat.get(cl_type)
+            if cldat:
+                self.cl_attach[cl_type] = cldat['bus_service']
+
     @property
     def bus_conn(self):
         cur_conn = getattr(self, '_bus_conn', None)
         if cur_conn is None:
-            LOGGER.debug('Connecting to DBus')
             addr_or_type = self.bus_addr if self.bus_addr else dbus.bus.BUS_SESSION
+            LOGGER.debug('Connecting to DBus: %s', addr_or_type)
             self._bus_conn = dbus.bus.BusConnection(addr_or_type)
         return self._bus_conn

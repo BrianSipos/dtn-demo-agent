@@ -74,8 +74,11 @@ class CborArray(AbstractCborStruct):
         return scapy.packet.Packet.post_build(self, pkt, pay)
 
     def do_dissect(self, s):
+        # unwrap tagged array
+        while isinstance(s, cbor2.CBORTag):
+            s = s.value
         # do not edit array directly
-        s = copy.deepcopy(s)
+        s = copy.copy(s)
         for defn in self.fields_desc:
             # None is a legitimate CBOR value, so need to detect
             # if array was modified

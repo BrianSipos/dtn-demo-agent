@@ -1,20 +1,28 @@
+udpcl:
+    bus_service: dtn.udpcl.Server
+
+    init_listen:
+#        address: 127.0.0.1
+        address: ""
+        port: 4556
+
 tcpcl:
     bus_service: dtn.tcpcl.Server
     node_id: dtn://server/
+
     tls_enable: False
     tls_ca_file: testpki/ca.crt
     tls_key_file: testpki/server-transport.key
     tls_cert_file: testpki/server-transport.crt
 
     init_listen:
-        address: localhost
+        address: 127.0.0.1
         port: 4556
 
 bp:
     bus_service: dtn.bp.Server
     node_id: dtn://server/
     #cl_fork: tcpcl
-    cl_attach: dtn.tcpcl.Server
 
     verify_ca_file: testpki/ca.crt
     sign_key_file: testpki/server-sign.key
@@ -23,3 +31,5 @@ bp:
     route_table:
        -  eid_pattern: "dtn://client/.*"
           next_nodeid: dtn://client/
+          cl_type: udpcl
+          address: 127.0.0.2

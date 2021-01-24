@@ -1,6 +1,7 @@
 ''' Conversion and output utilites.
 '''
 import binascii
+import cbor2
 import copy
 import enum
 import six
@@ -55,6 +56,8 @@ def encode_diagnostic(obj, **kwargs):
         text = str(int(obj))
     elif isinstance(obj, bool):
         text = 'true' if obj else 'false'
+    elif isinstance(obj, cbor2.CBORTag):
+        text = '{}({})'.format(obj.tag, obj.value)
     elif obj is None:
         text = 'null'
     else:

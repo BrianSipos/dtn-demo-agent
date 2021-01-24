@@ -12,18 +12,11 @@ All of these commands require either a local installation of the python packages
 PYTHONPATH=demo-agent/src
 ```
 
-An insecure session on the `localhost` address can be established with commands:
+A pair of TCPCL entities can be created with commands:
 ```
-python3 -m tcpcl.agent --bus-service=dtn.tcpcl.Server --nodeid=dtn:server --tls-disable listen --address=localhost
-python3 -m tcpcl.agent --bus-service=dtn.tcpcl.Client --nodeid=dtn:client --tls-disable --stop-on-close connect localhost
+python3 -m tcpcl.agent --config-file=server.yaml
+python3 -m tcpcl.agent --config-file=client.yaml
 ```
-
-To use local test PKI hierarchy use:
-```
-python3 -m tcpcl.agent --bus-service=dtn.tcpcl.Server --nodeid=dtn:server --tls-ca=testpki/ca.crt --tls-key=testpki/server.key --tls-cert=testpki/server.crt listen --address=localhost
-python3 -m tcpcl.agent --bus-service=dtn.tcpcl.Client --nodeid=dtn:client --tls-ca=testpki/ca.crt --tls-key=testpki/client.key --tls-cert=testpki/client.crt --tls-version=1.2 --tls-cipher AES256-GCM-SHA384 --stop-on-close connect localhost
-```
-this also forces a ciphersuite with which tools like Wireshark can use the private key to decipher the encrypted data.
 
 It is also possible for either the active- or passive-side agent to log TLS ephemeral key data using the `SSLKEYLOGFILE` environment variable to specify a key material log file (in an indentical way to how Firefox/Chrome browsers use it).
 
