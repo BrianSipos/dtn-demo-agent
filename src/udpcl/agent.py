@@ -4,6 +4,7 @@ Implementation of a symmetric UDPCL agent.
 import copy
 from dataclasses import dataclass, field, fields
 from typing import Optional, Tuple, BinaryIO
+import ipaddress
 import logging
 import os
 from io import BytesIO
@@ -13,13 +14,24 @@ import dbus.service
 from gi.repository import GLib as glib
 
 
+def addr_family(ipaddr):
+    if isinstance(ipaddr, ipaddress.IPv4Address):
+        return socket.AF_INET
+    elif isinstance(ipaddr, ipaddress.IPv6Address):
+        return socket.AF_INET6
+    else:
+        raise ValueError('Not an IP address')
+
+
 @dataclass
 class BundleItem(object):
     ''' State for RX and TX full bundles.
     '''
 
     #: The remote address
-    address: Tuple[str, int]
+    address: str
+    #: The remote port
+    port: int
     #: Binary file to store in
     file: BinaryIO
     #: The unique transfer ID number.
@@ -67,7 +79,7 @@ class Agent(dbus.service.Object):
             self.__logger.info('Registered as "%s"', self._bus_serv.get_name())
 
         for item in self._config.init_listen:
-            self.listen(item.address, item.port)
+            self.listen(item.address, item.port, item.opts)
 
     def set_on_stop(self, func):
         ''' Set a callback to be run when this agent is stopped.
@@ -98,23 +110,43 @@ class Agent(dbus.service.Object):
         except KeyboardInterrupt:
             self.stop()
 
-    @dbus.service.method(DBUS_IFACE, in_signature='si')
-    def listen(self, address, port):
+    @dbus.service.method(DBUS_IFACE, in_signature='sia{sv}')
+    def listen(self, address, port, opts=None):
         ''' Begin listening for incoming transfers and defer handling
         connections to `glib` event loop.
         '''
+        if opts is None:
+            opts = {}
+
         bindspec = (address, port)
         if bindspec in self._bindsocks:
             raise dbus.DBusException('Already listening')
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        ipaddr = ipaddress.ip_address(address)
+        sock = socket.socket(addr_family(ipaddr), socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(bindspec)
-        if True:
-            mreq = struct.pack("=4sl", socket.inet_aton("224.0.0.1"), socket.INADDR_ANY)
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-
         self.__logger.info('Listening on %s:%d', address or '*', port)
+        sock.bind(bindspec)
+
+        multicast_member = opts.get('multicast_member', [])
+        for item in multicast_member:
+            addr = str(item['addr'])
+
+            if isinstance(ipaddr, ipaddress.IPv4Address):
+                self.__logger.info('Listening for multicast %s', addr)
+                mreq = struct.pack("=4sl", socket.inet_aton(addr), socket.INADDR_ANY)
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            elif isinstance(ipaddr, ipaddress.IPv6Address):
+                iface = item['iface']
+                iface_ix = socket.if_nametoindex(iface)
+                self.__logger.info('Listening for multicast %s on %s (%s)', addr, iface, iface_ix)
+                mreq = struct.pack(
+                    "=16si",
+                    socket.inet_pton(socket.AF_INET6, addr),
+                    iface_ix
+                )
+                sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
+
         self._bindsocks[bindspec] = sock
         glib.io_add_watch(sock, glib.IO_IN, self._recv)
 
@@ -140,11 +172,19 @@ class Agent(dbus.service.Object):
         :return: True to continue listening.
         '''
         data, fromaddr = bindsock.recvfrom(64 * 1024)
-        self.__logger.info('Received bundle of %d octets from %s:%d', len(data), *fromaddr)
+
+        address = fromaddr[0]
+        port = fromaddr[1]
+        self.__logger.info('Received %d octets from %s:%d',
+                           len(data), address, port)
+        if data[:1] == b'\x00':
+            self.__logger.info('Ignorning padding data')
+            return True
 
         self._add_rx_item(
             BundleItem(
-                address=fromaddr,
+                address=address,
+                port=port,
                 total_length=len(data),
                 file=BytesIO(data)
             )
@@ -193,7 +233,8 @@ class Agent(dbus.service.Object):
         data = b''.join([bytes([val]) for val in data])
 
         item = BundleItem(
-            address=(address, port),
+            address=address,
+            port=port,
             file=BytesIO(data)
         )
         return str(self._add_tx_item(item))
@@ -203,7 +244,8 @@ class Agent(dbus.service.Object):
         ''' Send a bundle from the filesystem.
         '''
         item = BundleItem(
-            address=(address, port),
+            address=address,
+            port=port,
             file=open(filepath, 'rb')
         )
         return str(self._add_tx_item(item))
@@ -232,6 +274,8 @@ class Agent(dbus.service.Object):
         :return: True to continue processing at a later time.
         :rtype: bool
         '''
+        if not self._tx_queue:
+            return
         self.__logger.debug('Processing queue of %d items',
                             len(self._tx_queue))
 
@@ -243,17 +287,50 @@ class Agent(dbus.service.Object):
             item.total_length
         )
 
-        self.__logger.info('Sending bundle of %d octets to %s:%d',
-                           item.total_length, *item.address)
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        if False:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        if True:
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton('127.0.0.1'))
-        sock.sendto(item.file.read(), 0, item.address)
-        sock.close()
+        ipaddr = ipaddress.ip_address(item.address)
+        is_ipv4 = isinstance(ipaddr, ipaddress.IPv4Address)
+        is_ipv6 = isinstance(ipaddr, ipaddress.IPv6Address)
+        self.__logger.info('Sending %d octets to %s:%d',
+                           item.total_length, item.address, item.port)
+        sock = socket.socket(addr_family(ipaddr), socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+
+        if is_ipv4:
+            addr = (item.address, item.port)
+        else:
+            addr = (item.address, item.port, 0, 0)
+
+        data = item.file.read()
+        if ipaddr.is_multicast:
+            multicast = self._config.multicast
+
+            loop = 0
+            if loop is not None:
+                if is_ipv4:
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loop)
+                else:
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_LOOP, loop)
+
+            if multicast.ttl is not None:
+                if is_ipv4:
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, multicast.ttl)
+                else:
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, multicast.ttl)
+
+            if is_ipv4 and multicast.v4sources:
+                for src in multicast.v4sources:
+                    self.__logger.debug('Using multicast %s', src)
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(src))
+                    sock.sendto(data, 0, addr)
+            elif is_ipv6 and multicast.v6sources:
+                for src in multicast.v6sources:
+                    if_ix = socket.if_nametoindex(src)
+                    self.__logger.debug('Using multicast %s (%s)', src, if_ix)
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, if_ix)
+                    sock.sendto(data, 0, addr)
+            else:
+                sock.sendto(data, 0, addr)
+        else:
+            sock.sendto(data, 0, addr)
 
         self.send_bundle_finished(
             str(item.transfer_id),

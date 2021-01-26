@@ -91,7 +91,10 @@ class UdpclAdaptor(AbstractAdaptor):
         port = kwargs.get('port', 4556)
 
         def sender(data):
-            self.agent_obj.send_bundle_data(address, port, dbus.ByteArray(unhexlify('d9d9f7') + data))
+            tag = unhexlify('d9d9f7')
+            if not data.startswith(tag):
+                data = tag + data
+            self.agent_obj.send_bundle_data(address, port, dbus.ByteArray(data))
 
         return sender
 

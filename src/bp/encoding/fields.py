@@ -7,7 +7,6 @@ import enum
 import logging
 import urllib
 from scapy import volatile
-from scapy.config import conf
 from scapy_cbor.fields import (CborField, UintField)
 
 LOGGER = logging.getLogger(__name__)
@@ -35,12 +34,21 @@ class EidField(CborField):
         if x is None or x == 'dtn:none':
             return [EidField.TypeCode.dtn, EidField.WellKnownSsp.none]
 
-        parts = urllib.parse.urlparse(x)
+        parts = urllib.parse.urlsplit(x)
         try:
             scheme_type = EidField.TypeCode[parts[0]]
         except KeyError:
             raise ValueError('No type code for scheme "{}"'.format(parts[0]))
-        ssp = '//{0}{1}'.format(parts[1], parts[2])
+
+        authority = parts[1]
+        path = parts[2]
+        ssp = ''
+        if authority:
+            ssp += '//' + authority
+            if not path.startswith('/'):
+                path = '/' + path
+        ssp += path
+
         return [scheme_type, ssp]
 
     def m2i(self, pkt, x):
@@ -101,8 +109,8 @@ class DtnTimeField(UintField):
         return self.any2i(pkt, x)
 
     def any2i(self, pkt, x):
-        if isinstance(x, int):
-            return x
+        if x is None:
+            return None
 
         elif isinstance(x, datetime.datetime):
             return DtnTimeField.datetime_to_dtntime(x)
@@ -113,7 +121,7 @@ class DtnTimeField(UintField):
                     .replace(tzinfo=datetime.timezone.utc)
             )
 
-        return None
+        return int(x)
 
     def randval(self):
         return volatile.RandNum(-(2 ** 16), (2 ** 16))

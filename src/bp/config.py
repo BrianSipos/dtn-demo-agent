@@ -51,7 +51,9 @@ class Config(object):
     #: Local private key PEM file
     sign_key_file: Optional[str] = None
     #: Sign outgoing blocks of this type
-    apply_integrity: Set[int] = field(default_factory=lambda: {1})
+    integrity_for_blocks: Set[int] = field(default_factory=lambda: {1})
+    #: Include certificate chain in integrity parameters
+    integrity_include_chain: bool = True
 
     #: The names of CL to read config for and fork
     cl_fork: List[str] = field(default_factory=list)

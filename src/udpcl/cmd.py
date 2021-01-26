@@ -1,8 +1,11 @@
 ''' Command entry points.
 '''
 import argparse
+from binascii import unhexlify
 import logging
 import sys
+from gi.repository import GLib as glib
+
 from udpcl.config import Config, ListenConfig
 from udpcl.agent import Agent
 
@@ -71,6 +74,15 @@ def main(*argv):
         )
 
     agent = Agent(config)
+
+    def init_padding():
+        pad = unhexlify('00000000')
+        agent.send_bundle_data('224.0.0.1', 4556, pad)
+        agent.send_bundle_data('ff02::1', 4556, pad)
+        return None
+
+    glib.idle_add(init_padding)
+
     agent.exec_loop()
 
 

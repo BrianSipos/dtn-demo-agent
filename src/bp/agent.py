@@ -54,6 +54,16 @@ class BundleContainer(object):
         '''
         return self._block_type[type_code]
 
+    def bundle_ident(self):
+        ''' Get the bundle identity (source + timestamp) as a tuple.
+        '''
+        pri = self.bundle.getfieldval('primary')
+        return (
+            pri.source,
+            pri.create_ts.getfieldval('time'),
+            pri.create_ts.getfieldval('seqno')
+        )
+
     def reload(self):
         ''' Reload derived info from the bundle.
         '''
@@ -238,6 +248,8 @@ class Agent(dbus.service.Object):
 
         # Bound-to CL agent for each type
         self._cl_agent = {}
+        # Seen bundle identities
+        self._seen_bundle_ident = set()
 
         if bus_kwargs is None:
             bus_kwargs = dict(
@@ -343,7 +355,7 @@ class Agent(dbus.service.Object):
         target_block_nums = [
             blk.block_num
             for blk in ctr.bundle.blocks
-            if blk.type_code in self._config.apply_integrity
+            if blk.type_code in self._config.integrity_for_blocks
         ]
         if not target_block_nums:
             return
@@ -366,10 +378,14 @@ class Agent(dbus.service.Object):
             ),
             source=self._config.node_id,
             parameters=[
-                TypeValuePair(type_code=3, value=x5chain),
                 TypeValuePair(type_code=5, value=aad_scope),
             ],
         )
+
+        if self._config.integrity_include_chain:
+            bib_data.parameters.append(
+                TypeValuePair(type_code=3, value=x5chain)
+            )
 
         # Sign each target with one result per
         target_result = []
@@ -524,8 +540,20 @@ class Agent(dbus.service.Object):
         :param ctr: The bundle container just recieved.
         :type ctr: :py:cls:`BundleContainer`
         '''
-        self._logger.info('Received bundle\n%s', ctr.bundle.show(dump=True))
-        self._logger.debug('CRC invalid for block numbers: %s', ctr.bundle.check_all_crc())
+        self._logger.debug('Received bundle\n%s', ctr.bundle.show(dump=True))
+
+        invalid_crc = ctr.bundle.check_all_crc()
+        if invalid_crc:
+            self._logger.warning('CRC invalid for block numbers: %s', invalid_crc)
+            return
+
+        ident = ctr.bundle_ident()
+        self._logger.info('Received bundle identity %s', ident)
+        if ident in self._seen_bundle_ident:
+            self._logger.debug('Ignoring already seen bundle %s', ident)
+            return
+        else:
+            self._seen_bundle_ident.add(ident)
 
         self._verify_integrity(ctr)
 
@@ -588,7 +616,7 @@ class Agent(dbus.service.Object):
         ctr = BundleContainer()
         ctr.bundle.primary = PrimaryBlock(
             bundle_flags=(PrimaryBlock.Flag.REQ_RECEPTION_REPORT | PrimaryBlock.Flag.REQ_STATUS_TIME),
-            destination=nodeid,
+            destination=str(nodeid),
             source=self._config.node_id,
             report_to=self._config.node_id,
             create_ts=cts,

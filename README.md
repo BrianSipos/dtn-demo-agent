@@ -12,6 +12,12 @@ All of these commands require either a local installation of the python packages
 PYTHONPATH=demo-agent/src
 ```
 
+When running local--local testing on loopback device "lo" alternate address assignments must be made similarly to:
+```
+sudo ip -4 addr add 127.0.0.2/8 dev lo
+sudo ip -6 addr add ::2/128 dev lo
+```
+
 A pair of TCPCL entities can be created with commands:
 ```
 python3 -m tcpcl.agent --config-file=server.yaml

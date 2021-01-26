@@ -1,10 +1,20 @@
 udpcl:
     bus_service: dtn.udpcl.Server
 
+    multicast:
+        v4sources:
+          - 127.0.0.1
+        v6sources:
+          - wlp0s20f3
+
     init_listen:
-#        address: 127.0.0.1
-        address: ""
-        port: 4556
+      - address: 0.0.0.0
+        multicast_member:
+          - addr: 224.0.0.1
+      - address: "::"
+        multicast_member:
+          - addr: ff02::1
+            iface: wlp0s20f3
 
 tcpcl:
     bus_service: dtn.tcpcl.Server
@@ -17,7 +27,6 @@ tcpcl:
 
     init_listen:
         address: 127.0.0.1
-        port: 4556
 
 bp:
     bus_service: dtn.bp.Server

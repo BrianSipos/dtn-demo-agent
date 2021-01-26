@@ -6,7 +6,7 @@ from bp.encoding.fields import (EidField, DtnTimeField)
 
 class TestEidField(unittest.TestCase):
 
-    def testEncode(self):
+    def testEncodeEndpoint(self):
         fld = EidField('field')
 
         item = [
@@ -18,7 +18,7 @@ class TestEidField(unittest.TestCase):
             item
         )
 
-    def testDecode(self):
+    def testDecodeEndpoint(self):
         fld = EidField('field')
 
         item = [
@@ -28,6 +28,54 @@ class TestEidField(unittest.TestCase):
         self.assertEqual(
             fld.m2i(None, item),
             'dtn://node/serv'
+        )
+
+    def testEncodeNodeid(self):
+        fld = EidField('field')
+
+        item = [
+            EidField.TypeCode.dtn,
+            '//node/',
+        ]
+        self.assertEqual(
+            fld.i2m(None, 'dtn://node'), # normalized
+            item
+        )
+
+    def testDecodeNodeid(self):
+        fld = EidField('field')
+
+        item = [
+            EidField.TypeCode.dtn,
+            '//node/',
+        ]
+        self.assertEqual(
+            fld.m2i(None, item),
+            'dtn://node/'
+        )
+
+    def testEncodePathonly(self):
+        fld = EidField('field')
+
+        item = [
+            EidField.TypeCode.dtn,
+            '~mcast',
+        ]
+        self.assertEqual(
+            fld.i2m(None, 'dtn:~mcast'),
+            item
+        )
+
+    def testDecodePathonly(self):
+        fld = EidField('field')
+
+        item = [
+            EidField.TypeCode.dtn,
+            '~mcast',
+        ]
+        self.assertEqual(
+            fld.m2i(None, item),
+            'dtn:~mcast'
         )
 
 
