@@ -29,12 +29,12 @@ and dynamic segment sizing.
     },
     packages=find_packages(where='src'),
     install_requires=[
-        'scapy >=2.4',
         'cbor2 >=4.1,<4.2',
         'crcmod >=1.7',
-        'PyGObject >=3.34', # glib integration
         'cryptography >=0.9',
         'certvalidator',
+        'PyGObject >=3.34', # glib integration
+        'scapy >=2.4',
     ],
     extras_require={},
 
@@ -46,8 +46,9 @@ and dynamic segment sizing.
         'console_scripts': [
             'tcpcl-messagegen = tcpcl.test.messagegen:main',
             'tcpcl-bundlegen = tcpcl.test.bundlegen:main',
-            'tcpcl-agent = tcpcl.agent:main',
-            'bp-agent = bp.agent:main',
+            'tcpcl-agent = tcpcl.cmd:main',
+            'udpcl-agent = udpcl.cmd:main',
+            'bp-agent = bp.cmd:main',
         ],
     },
 

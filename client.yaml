@@ -4,17 +4,17 @@ udpcl:
     multicast:
         v4sources:
           - 127.0.0.2
-        v6sources:
-          - wlp0s20f3
+#        v6sources:
+#          - wlp0s20f3
 
     init_listen:
       - address: 127.0.0.2
         multicast_member:
           - addr: 224.0.0.1
-      - address: "::2"
-        multicast_member:
-          - addr: ff02::1
-            iface: wlp0s20f3
+#      - address: "::2"
+#        multicast_member:
+#          - addr: ff02::1
+#            iface: wlp0s20f3
 
 tcpcl:
     bus_service: dtn.tcpcl.Client
@@ -44,8 +44,8 @@ bp:
       - eid_pattern: "dtn:~neighbor"
         next_nodeid: "dtn:~neighbor"
         cl_type: udpcl
-#        address: 224.0.0.1
-        address: ff02::1
+        address: 224.0.0.1
+#        address: ff02::1
 
       - eid_pattern: "dtn://server/.*"
         next_nodeid: dtn://server/
