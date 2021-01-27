@@ -32,4 +32,4 @@ jobs:
     - name: Test with pytest
       run: |
         pip3 install nose
-        nosetests-3 -v src
+        nosetests -v src
