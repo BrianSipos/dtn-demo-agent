@@ -58,11 +58,11 @@ class CborField(scapy.fields.Field):
         '''
         return x
 
-#    def i2repr(self, pkt, x):
-#        try:
-#            return encode_diagnostic(x)
-#        except:
-#            return scapy.fields.Field.i2repr(self, pkt, x)
+    def i2repr(self, pkt, x):
+        if isinstance(x, (bytes, )):
+            return encode_diagnostic(x)
+        else:
+            return scapy.fields.Field.i2repr(self, pkt, x)
 
     def any2i(self, pkt, x):
         # Coerce all values to internal type

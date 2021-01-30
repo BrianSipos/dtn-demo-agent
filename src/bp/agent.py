@@ -10,6 +10,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography import x509
 from certvalidator import CertificateValidator, ValidationContext
+import scapy.volatile
 import tcpcl
 from scapy_cbor.util import encode_diagnostic
 from bp.encoding import (
@@ -47,22 +48,37 @@ class BundleContainer(object):
         self.reload()
 
     def block_num(self, num):
+        ''' Look up a block by unique number.
+
+        :param num: The block number to look up.
+        :return: The block with that number.
+        :raise KeyError: If the number is not present.
+        '''
         return self._block_num[num]
 
     def block_type(self, type_code):
         ''' Look up a block by type code or data class.
+
+        :param type_code: The type code to look up.
+        :return: A list of blocks of that type, which may be empty.
         '''
-        return self._block_type[type_code]
+        return self._block_type.get(type_code, [])
 
     def bundle_ident(self):
         ''' Get the bundle identity (source + timestamp) as a tuple.
         '''
         pri = self.bundle.getfieldval('primary')
-        return (
+        ident = [
             pri.source,
             pri.create_ts.getfieldval('time'),
             pri.create_ts.getfieldval('seqno')
-        )
+        ]
+        if pri.bundle_flags & PrimaryBlock.Flag.IS_FRAGMENT:
+            ident += [
+                pri.fragment_offset,
+                pri.total_app_data_len,
+            ]
+        return tuple(ident)
 
     def reload(self):
         ''' Reload derived info from the bundle.
@@ -107,8 +123,8 @@ class BundleContainer(object):
         '''
         for blk in self.bundle.getfieldval('blocks'):
             if blk.getfieldval('block_num') is None:
-                if blk.getfieldval('type_code') == 1:
-                    set_num = 1
+                if blk.getfieldval('type_code') == Bundle.BLOCK_TYPE_PAYLOAD:
+                    set_num = Bundle.BLOCK_NUM_PAYLOAD
                 else:
                     set_num = self.get_block_num()
                 blk.overloaded_fields['block_num'] = set_num
@@ -327,6 +343,8 @@ class Agent(dbus.service.Object):
         self.recv_bundle(ctr)
 
     def _get_route_to(self, eid):
+        ''' Get a route table entry.
+        '''
         self._logger.info('Getting route to: %s', eid)
         found = None
         for item in self._config.route_table:
@@ -337,19 +355,17 @@ class Agent(dbus.service.Object):
                 break
         if found is None:
             raise KeyError('No route to destination: {}'.format(eid))
-
-        return self._cl_agent[found.cl_type].send_bundle_func(**found.raw_config)
+        return found
 
     def _apply_integrity(self, ctr):
         ''' If configured add a BIB.
+        The container must be reloaded beforehand.
         '''
         from cose import Sign1Message, CoseHeaderKeys, CoseAlgorithms, RSA
         from cose.extensions.x509 import X5T
 
         if not self._priv_key:
             return
-
-        ctr.reload()
 
         aad_scope = 0x3
         target_block_nums = [
@@ -534,6 +550,65 @@ class Agent(dbus.service.Object):
                             self._logger.error('Failed to verify signature on block num %d: %s', blk_num, err)
                             continue
 
+    def _fragment(self, ctr, route):
+        orig_size = len(ctr.bundle)
+        bundle_flags = ctr.bundle.primary.bundle_flags
+        should_fragment = (
+            orig_size > route.mtu
+            and not bundle_flags & PrimaryBlock.Flag.NO_FRAGMENT
+            and not bundle_flags & PrimaryBlock.Flag.IS_FRAGMENT
+        )
+        self._logger.info('Unfragmented size %d, should fragment %s', orig_size, should_fragment)
+
+        if not should_fragment:
+            # no fragmentation
+            return [ctr]
+
+        # take the payload data to fragment it
+        pyld_blk = ctr.block_num(Bundle.BLOCK_NUM_PAYLOAD)
+        payload_data = pyld_blk.getfieldval('btsd')
+        pyld_blk.delfieldval('btsd')
+        payload_size = len(payload_data)
+        self._logger.info('Payload data size %d', payload_size)
+        # maximum size of each fragment field
+        pyld_size_enc = len(cbor2.dumps(payload_size))
+
+        # two encoded sizes for fragment, one for payload bstr head
+        non_pyld_size = orig_size - payload_size + 3 * pyld_size_enc
+        self._logger.info('Non-payload size %d', non_pyld_size)
+        if non_pyld_size > route.mtu:
+            raise RuntimeError('Non-payload size {} too large for route MTU {}'.format(orig_size, route.mtu))
+
+        frag_offset = 0
+        ctrlist = []
+        while frag_offset < len(payload_data):
+            fctr = BundleContainer()
+            fctr.bundle.primary = ctr.bundle.primary.copy()
+            fctr.bundle.primary.bundle_flags |= PrimaryBlock.Flag.IS_FRAGMENT
+            fctr.bundle.primary.fragment_offset = frag_offset
+            fctr.bundle.primary.total_app_data_len = payload_size
+
+            for blk in ctr.bundle.blocks:
+                if (not ctrlist 
+                    or blk.block_flags & CanonicalBlock.Flag.REPLICATE_IN_FRAGMENT
+                    or blk.type_code == Bundle.BLOCK_NUM_PAYLOAD):
+                    fctr.bundle.blocks.append(blk.copy())
+            # ensure full size (with zero-size payload)
+            fctr.reload()
+            fctr.bundle.fill_fields()
+
+            non_pyld_size = len(fctr.bundle)
+            # zero-length payload has one-octet encoded bstr head
+            frag_size = route.mtu - (non_pyld_size - 1 + pyld_size_enc)
+            self._logger.info('Fragment non-payload size %d, offset %d, (max) size %d', non_pyld_size, frag_offset, frag_size)
+            frag_data = payload_data[frag_offset:(frag_offset + frag_size)]
+            frag_offset += frag_size
+
+            fctr.block_num(Bundle.BLOCK_NUM_PAYLOAD).setfieldval('btsd', frag_data)
+            ctrlist.append(fctr)
+
+        return ctrlist
+
     def recv_bundle(self, ctr):
         ''' Perform agent handling of a received bundle.
 
@@ -569,17 +644,24 @@ class Agent(dbus.service.Object):
         :type ctr: :py:cls:`BundleContainer`
         '''
         dest_eid = str(ctr.bundle.primary.getfieldval('destination'))
-        sender = self._get_route_to(dest_eid)
+        route = self._get_route_to(dest_eid)
+        sender = self._cl_agent[route.cl_type].send_bundle_func(**route.raw_config)
+
+        ctr.reload()
 
         self._apply_integrity(ctr)
 
         ctr.fix_block_num()
-        ctr.bundle.update_all_crc()
-        self._logger.info('Sending bundle\n%s', ctr.bundle.show(dump=True))
+        ctr.bundle.fill_fields()
 
-        data = bytes(ctr.bundle)
-        self._logger.debug('send_bundle data %s', encode_diagnostic(cbor2.loads(data)))
-        sender(data)
+        ctrlist = self._fragment(ctr, route)
+        for ctr in ctrlist:
+            ctr.bundle.update_all_crc()
+            self._logger.debug('Sending bundle\n%s', ctr.bundle.show(dump=True))
+            data = bytes(ctr.bundle)
+            self._logger.info('send_bundle size %d', len(data))
+            self._logger.debug('send_bundle data %s', encode_diagnostic(cbor2.loads(data)))
+            sender(data)
 
     @dbus.service.method(DBUS_IFACE, in_signature='ss', out_signature='')
     def cl_attach(self, cltype, servname):
@@ -604,11 +686,12 @@ class Agent(dbus.service.Object):
         else:
             self._logger.info('Service %s not yet available, but will bind when available', servname)
 
-    @dbus.service.method(DBUS_IFACE, in_signature='s', out_signature='')
-    def ping(self, nodeid):
+    @dbus.service.method(DBUS_IFACE, in_signature='si', out_signature='')
+    def ping(self, nodeid, datalen):
         ''' Ping via TCPCL and an admin record.
 
-        :param str servname: The DBus service name to listen from.
+        :param str nodeid: The destination Node ID.
+        :param int datalen: The payload data length.
         '''
 
         cts = self.timestamp()
@@ -627,7 +710,7 @@ class Agent(dbus.service.Object):
                 type_code=1,
                 block_num=1,
                 crc_type=AbstractBlock.CrcType.CRC32,
-                btsd=b'hello',
+                btsd=bytes(scapy.volatile.RandString(datalen)),
             ),
         ]
 

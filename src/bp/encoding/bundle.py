@@ -15,6 +15,9 @@ class Bundle(CborArray):
     which is block type code 1.
     '''
 
+    BLOCK_TYPE_PAYLOAD = 1
+    BLOCK_NUM_PAYLOAD = 1
+
     fields_desc = (
         PacketField('primary', default=None, cls=PrimaryBlock),
         PacketListField('blocks', default=[], cls=CanonicalBlock),
@@ -24,7 +27,7 @@ class Bundle(CborArray):
         for blk in self.blocks:
             if isinstance(blk.payload, AdminRecord):
                 self.primary.setfieldval('bundle_flags', self.primary.getfieldval('bundle_flags') | PrimaryBlock.Flag.PAYLOAD_ADMIN)
-                blk.setfieldval('type_code', 1)
+                blk.setfieldval('type_code', Bundle.BLOCK_TYPE_PAYLOAD)
                 blk.setfieldval('btsd', bytes(blk.payload))
 
     def self_build(self, field_pos_list=None):
@@ -46,12 +49,24 @@ class Bundle(CborArray):
         if self.primary and self.primary.getfieldval('bundle_flags') & PrimaryBlock.Flag.PAYLOAD_ADMIN:
             for blk in self.blocks:
                 blk_data = blk.getfieldval('btsd')
-                if blk.type_code == 1 and blk_data is not None:
+                if (blk.type_code == Bundle.BLOCK_TYPE_PAYLOAD
+                    and blk_data is not None):
                     pay = AdminRecord(blk_data)
                     blk.remove_payload()
                     blk.add_payload(pay)
 
         return CborArray.post_dissect(self, s)
+
+    def fill_fields(self):
+        ''' Fill all fields so that the bundle is the full size it needs
+        to be for encoding encoding with build().
+        Derived classes should populate their block-type-specific-data also.
+        '''
+        self._update_from_admin()
+        if self.primary:
+            self.primary.fill_fields()
+        for blk in self.blocks:
+            blk.fill_fields()
 
     def update_all_crc(self):
         ''' Update all CRC fields in this bundle which are not yet set.

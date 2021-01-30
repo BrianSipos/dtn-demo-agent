@@ -1,9 +1,10 @@
 ''' Test the module :py:mod:`bp.blocks`.
 '''
-import binascii
 import unittest
 import scapy
-from scapy_cbor.fields import *
+from scapy_cbor.fields import (
+    BoolField, UintField, OptionalField, FieldListField
+)
 
 scapy.config.conf.debug_dissector = True
 

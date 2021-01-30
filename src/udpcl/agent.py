@@ -2,7 +2,7 @@
 Implementation of a symmetric UDPCL agent.
 '''
 import copy
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass
 from typing import Optional, Tuple, BinaryIO
 import ipaddress
 import logging
@@ -140,10 +140,9 @@ class Agent(dbus.service.Object):
                 iface = item['iface']
                 iface_ix = socket.if_nametoindex(iface)
                 self.__logger.info('Listening for multicast %s on %s (%s)', addr, iface, iface_ix)
-                mreq = struct.pack(
-                    "=16si",
-                    socket.inet_pton(socket.AF_INET6, addr),
-                    iface_ix
+                mreq = (
+                    socket.inet_pton(socket.AF_INET6, addr)
+                    + struct.pack("@I", iface_ix)
                 )
                 sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
 
@@ -323,9 +322,9 @@ class Agent(dbus.service.Object):
                     sock.sendto(data, 0, addr)
             elif is_ipv6 and multicast.v6sources:
                 for src in multicast.v6sources:
-                    if_ix = socket.if_nametoindex(src)
-                    self.__logger.debug('Using multicast %s (%s)', src, if_ix)
-                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, if_ix)
+                    iface_ix = socket.if_nametoindex(src)
+                    self.__logger.debug('Using multicast %s (%s)', src, iface_ix)
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, iface_ix)
                     sock.sendto(data, 0, addr)
             else:
                 sock.sendto(data, 0, addr)

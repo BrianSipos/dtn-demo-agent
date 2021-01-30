@@ -61,7 +61,19 @@ class AbstractBlock(CborArray):
     crc_type_name = 'crc_type'
     crc_value_name = 'crc_value'
 
-    def update_crc(self):
+    def fill_fields(self):
+        ''' Fill all fields so that the block is the full size it needs
+        to be for encoding encoding with build().
+        Derived classes should populate their block-type-specific-data also.
+        '''
+        crc_type = self.getfieldval(self.crc_type_name)
+        crc_value = self.fields.get(self.crc_value_name)
+        if crc_type and not crc_value:
+            defn = AbstractBlock.CRC_DEFN[crc_type]
+            # Encode with a zero-valued CRC field
+            self.fields[self.crc_value_name] = defn['encode'](0)
+
+    def update_crc(self, keep_existing=False):
         ''' Update this block's CRC field from the current field data
         only if the current CRC (field not default) value is None.
         '''
@@ -73,7 +85,7 @@ class AbstractBlock(CborArray):
             crc_value = None
         else:
             crc_value = self.fields.get(self.crc_value_name)
-            if crc_value is None:
+            if not keep_existing or crc_value is None:
                 defn = AbstractBlock.CRC_DEFN[crc_type]
                 # Encode with a zero-valued CRC field
                 self.fields[self.crc_value_name] = defn['encode'](0)
@@ -204,9 +216,13 @@ class CanonicalBlock(AbstractBlock):
             pay_data = cbor2.dumps(pay_data)
         self.fields['btsd'] = pay_data
 
+    def fill_fields(self):
+        self.ensure_block_type_specific_data()
+        super().fill_fields()
+
     def self_build(self, *args, **kwargs):
         self.ensure_block_type_specific_data()
-        return AbstractBlock.self_build(self, *args, **kwargs)
+        return super().self_build(*args, **kwargs)
 
     def do_build_payload(self):
         # Payload is handled by self_build()
@@ -232,7 +248,7 @@ class CanonicalBlock(AbstractBlock):
                         raise
                     LOGGER.warning('CanonicalBlock failed to dissect payload: %s', err)
 
-        return AbstractBlock.post_dissect(self, s)
+        return super().post_dissect(s)
 
     def default_payload_class(self, payload):
         return scapy.packet.Raw

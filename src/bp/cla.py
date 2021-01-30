@@ -72,6 +72,8 @@ class UdpclAdaptor(AbstractAdaptor):
     #: Interface name
     DBUS_IFACE = 'org.ietf.dtn.udpcl.Agent'
 
+    TAG_ENC = unhexlify('d9d9f7')
+
     def __init__(self):
         AbstractAdaptor.__init__(self)
         self.obj_path = '/org/ietf/dtn/udpcl/Agent'
@@ -89,11 +91,12 @@ class UdpclAdaptor(AbstractAdaptor):
     def send_bundle_func(self, **kwargs):
         address = kwargs['address']
         port = kwargs.get('port', 4556)
+        do_tag = kwargs.get('do_tag', False)
 
         def sender(data):
-            tag = unhexlify('d9d9f7')
-            if not data.startswith(tag):
-                data = tag + data
+            if do_tag:
+                if not data.startswith(UdpclAdaptor.TAG_ENC):
+                    data = UdpclAdaptor.TAG_ENC + data
             self.agent_obj.send_bundle_data(address, port, dbus.ByteArray(data))
 
         return sender
