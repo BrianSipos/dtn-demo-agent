@@ -554,7 +554,8 @@ class Agent(dbus.service.Object):
         orig_size = len(ctr.bundle)
         bundle_flags = ctr.bundle.primary.bundle_flags
         should_fragment = (
-            orig_size > route.mtu
+            route.mtu is not None
+            and orig_size > route.mtu
             and not bundle_flags & PrimaryBlock.Flag.NO_FRAGMENT
             and not bundle_flags & PrimaryBlock.Flag.IS_FRAGMENT
         )

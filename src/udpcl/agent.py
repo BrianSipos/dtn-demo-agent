@@ -3,6 +3,7 @@ Implementation of a symmetric UDPCL agent.
 '''
 import copy
 from dataclasses import dataclass
+import enum
 from typing import Optional, Tuple, BinaryIO
 import ipaddress
 import logging
@@ -10,6 +11,8 @@ import os
 from io import BytesIO
 import socket
 import struct
+import cbor2
+import portion
 import dbus.service
 from gi.repository import GLib as glib
 
@@ -21,6 +24,16 @@ def addr_family(ipaddr):
         return socket.AF_INET6
     else:
         raise ValueError('Not an IP address')
+
+
+@enum.unique
+class ControlKey(enum.IntFlag):
+    ''' Control map keys.
+    '''
+    XFER_ID = 0x01
+    XFER_LEN = 0x02
+    XFER_FRAG_OFFSET = 0x03
+    XFER_FRAG_DATA = 0x04
 
 
 @dataclass
@@ -38,6 +51,37 @@ class BundleItem(object):
     transfer_id: Optional[int] = None
     #: Size of the bundle data
     total_length: Optional[int] = None
+
+
+@dataclass
+class Transfer(object):
+    ''' State for fragmented transfers.
+    '''
+
+    #: The remote address
+    address: str
+    #: The remote port
+    port: int
+    #: Transfer ID
+    xfer_id: int
+    #: Total transfer size
+    total_length: int
+    # Range of full data expected
+    total_valid: Optional[portion.Interval] = None
+    #: Range of real data present
+    valid: Optional[portion.Interval] = None
+    #: Accumulated byte string
+    data: Optional[bytearray] = None
+
+    @property
+    def key(self):
+        return tuple((self.address, self.port, self.xfer_id))
+
+    def validate(self, other):
+        ''' Validate an other transfer against this base.
+        '''
+        if other.total_length != self.total_length:
+            raise ValueError('Mismatched total length')
 
 
 class Agent(dbus.service.Object):
@@ -60,6 +104,8 @@ class Agent(dbus.service.Object):
         self._bindsocks = {}
         self._tx_id = 0
         self._tx_queue = []
+        #: map from transfer ID to :py:cls:`Transfer`
+        self._rx_fragments = {}
         self._rx_id = 0
         self._rx_queue = {}
 
@@ -142,7 +188,7 @@ class Agent(dbus.service.Object):
                 self.__logger.info('Listening for multicast %s on %s (%s)', addr, iface, iface_ix)
                 mreq = (
                     socket.inet_pton(socket.AF_INET6, addr)
-                    + struct.pack("@I", iface_ix)
+                    +struct.pack("@I", iface_ix)
                 )
                 sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
 
@@ -176,8 +222,55 @@ class Agent(dbus.service.Object):
         port = fromaddr[1]
         self.__logger.info('Received %d octets from %s:%d',
                            len(data), address, port)
-        if data[:1] == b'\x00':
+
+        first_octet = data[0]
+        if first_octet == 0x00:
             self.__logger.info('Ignorning padding data')
+            return True
+
+        major_type = first_octet >> 5
+        if major_type == 5:
+            ctrl = cbor2.loads(data)
+            if ControlKey.XFER_ID in ctrl:
+                new_xfer = Transfer(
+                    address=address,
+                    port=port,
+                    xfer_id=ctrl[ControlKey.XFER_ID],
+                    total_length=ctrl[ControlKey.XFER_LEN],
+                )
+
+                xfer = self._rx_fragments.get(new_xfer.key)
+                if xfer:
+                    xfer.validate(new_xfer)
+                else:
+                    xfer = new_xfer
+                    self._rx_fragments[xfer.key] = xfer
+                    xfer.total_valid = portion.closedopen(0, xfer.total_length)
+                    xfer.valid = portion.empty()
+                    xfer.data = bytearray(xfer.total_length)
+
+                offset = ctrl[ControlKey.XFER_FRAG_OFFSET]
+                frag = ctrl[ControlKey.XFER_FRAG_DATA]
+                end = offset + len(frag)
+
+                self.__logger.debug('Handling transfer %d fragment offset %d size %d', xfer.xfer_id, offset, len(frag))
+                xfer.data[offset:end] = frag
+
+                xfer.valid |= portion.closedopen(offset, end)
+                if xfer.valid == xfer.total_valid:
+                    self.__logger.info('Finished transfer %d size %d', xfer.xfer_id, xfer.total_length)
+                    del self._rx_fragments[xfer.key]
+                    self._add_rx_item(
+                        BundleItem(
+                            address=xfer.address,
+                            port=xfer.port,
+                            total_length=xfer.total_length,
+                            file=BytesIO(xfer.data)
+                        )
+                    )
+
+            else:
+                self.__logger.info('Ignorning unknown control data: %s', ctrl)
             return True
 
         self._add_rx_item(
@@ -188,7 +281,6 @@ class Agent(dbus.service.Object):
                 file=BytesIO(data)
             )
         )
-
         return True
 
     def _add_rx_item(self, item):
@@ -267,6 +359,46 @@ class Agent(dbus.service.Object):
         if self._tx_queue:
             glib.idle_add(self._process_tx_queue)
 
+    def _send_transfer(self, sock, item, addr):
+        ''' Send a transfer, fragmenting if necessary.
+        '''
+        mtu = self._config.mtu_default
+        data = item.file.read()
+
+        segments = []
+        self.__logger.info('Transfer %d size %d relative to MTU %d',
+                           item.transfer_id, len(data), mtu)
+        if len(data) < mtu:
+            segments = [data]
+        else:
+            # The base control map with the largest values present
+            ctrl_base = {
+                ControlKey.XFER_ID: item.transfer_id,
+                ControlKey.XFER_LEN: item.total_length,
+                ControlKey.XFER_FRAG_OFFSET: item.total_length,
+                ControlKey.XFER_FRAG_DATA: b'',
+            }
+            ctrl_base_encsize = len(cbor2.dumps(ctrl_base))
+            # Largest bstr head size
+            data_size_encsize = len(cbor2.dumps(item.total_length))
+            # Size left for fragment data
+            remain_size = mtu - (ctrl_base_encsize - 1 + data_size_encsize)
+
+            offset = 0
+            while offset < len(data):
+                ctrl = {
+                    ControlKey.XFER_ID: item.transfer_id,
+                    ControlKey.XFER_LEN: item.total_length,
+                    ControlKey.XFER_FRAG_OFFSET: offset,
+                    ControlKey.XFER_FRAG_DATA: data[offset:(offset + remain_size)]
+                }
+                offset += remain_size
+                segments.append(cbor2.dumps(ctrl))
+
+        for seg in segments:
+            self.__logger.debug('Sending packet size %d', len(seg))
+            sock.sendto(seg, 0, addr)
+
     def _process_tx_queue(self):
         ''' Perform the next TX bundle if possible.
 
@@ -298,7 +430,6 @@ class Agent(dbus.service.Object):
         else:
             addr = (item.address, item.port, 0, 0)
 
-        data = item.file.read()
         if ipaddr.is_multicast:
             multicast = self._config.multicast
 
@@ -319,17 +450,17 @@ class Agent(dbus.service.Object):
                 for src in multicast.v4sources:
                     self.__logger.debug('Using multicast %s', src)
                     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(src))
-                    sock.sendto(data, 0, addr)
+                    self._send_transfer(sock, item, addr)
             elif is_ipv6 and multicast.v6sources:
                 for src in multicast.v6sources:
                     iface_ix = socket.if_nametoindex(src)
                     self.__logger.debug('Using multicast %s (%s)', src, iface_ix)
                     sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, iface_ix)
-                    sock.sendto(data, 0, addr)
+                    self._send_transfer(sock, item, addr)
             else:
-                sock.sendto(data, 0, addr)
+                self._send_transfer(sock, item, addr)
         else:
-            sock.sendto(data, 0, addr)
+            self._send_transfer(sock, item, addr)
 
         self.send_bundle_finished(
             str(item.transfer_id),

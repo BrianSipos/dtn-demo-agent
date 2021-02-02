@@ -52,6 +52,9 @@ class Config(object):
     #: DBus service name to register as
     bus_service: Optional[str] = None
 
+    #: Default MTU when not discoverable
+    mtu_default: int = 1280
+
     #: Multicast options with defaults
     multicast: MulticastConfig = field(default_factory=MulticastConfig)
 

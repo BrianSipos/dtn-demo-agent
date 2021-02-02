@@ -21,8 +21,8 @@ class RouteItem(object):
     next_nodeid: str
     #: Convergence layer name
     cl_type: str
-    #: Maximum data size for this CL
-    mtu: int = 1280
+    #: Maximum total bundle size for this CL
+    mtu: Optional[int] = None
     #: The raw config object with additional parameters
     raw_config: object = field(default_factory=object)
 
