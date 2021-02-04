@@ -67,6 +67,7 @@ def main(*argv):
     if args.config_file:
         with open(args.config_file, 'rb') as infile:
             config.from_file(infile)
+    config.validate()
 
     if args.action == 'listen':
         config.init_listen.append(
@@ -81,7 +82,7 @@ def main(*argv):
         agent.send_bundle_data('ff02::1', 4556, pad)
         return None
 
-    glib.idle_add(init_padding)
+    #glib.idle_add(init_padding)
 
     agent.exec_loop()
 

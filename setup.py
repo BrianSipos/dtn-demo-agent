@@ -35,6 +35,7 @@ and dynamic segment sizing.
         'certvalidator',
         'portion >=2.1',
         'PyGObject >=3.34', # glib integration
+        'python-mbedtls',
         'scapy >=2.4',
     ],
     extras_require={},

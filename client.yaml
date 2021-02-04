@@ -4,17 +4,25 @@ udpcl:
     multicast:
         v4sources:
           - 127.0.0.2
-#        v6sources:
-#          - wlp0s20f3
+        v6sources:
+          - vboxnet0
+
+    dtls_ca_file: testpki/ca.crt
+    dtls_key_file: testpki/client-transport.key
+    dtls_cert_file: testpki/client-transport.crt
+    dtls_ciphers:
+      - TLS-RSA-WITH-AES-128-GCM-SHA256
+   
+    mtu_default: 1280
 
     init_listen:
       - address: 127.0.0.2
         multicast_member:
           - addr: 224.0.0.1
-#      - address: "::2"
-#        multicast_member:
-#          - addr: ff02::1
-#            iface: wlp0s20f3
+      - address: "fd66:29e9:f422:8dfe::2"
+        multicast_member:
+          - addr: ff02::1
+            iface: vboxnet0
 
 tcpcl:
     bus_service: dtn.tcpcl.Client

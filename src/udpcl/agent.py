@@ -2,6 +2,7 @@
 Implementation of a symmetric UDPCL agent.
 '''
 import copy
+from contextlib import suppress
 from dataclasses import dataclass
 import enum
 from typing import Optional, Tuple, BinaryIO
@@ -15,6 +16,7 @@ import cbor2
 import portion
 import dbus.service
 from gi.repository import GLib as glib
+from mbedtls import tls
 
 
 def addr_family(ipaddr):
@@ -27,13 +29,12 @@ def addr_family(ipaddr):
 
 
 @enum.unique
-class ControlKey(enum.IntFlag):
-    ''' Control map keys.
+class ExtensionKey(enum.IntFlag):
+    ''' Extension map keys.
     '''
-    XFER_ID = 0x01
-    XFER_LEN = 0x02
-    XFER_FRAG_OFFSET = 0x03
-    XFER_FRAG_DATA = 0x04
+    NODEID = 0x01
+    TRANSFER = 0x02
+    STARTTLS = 0x05
 
 
 @dataclass
@@ -102,6 +103,8 @@ class Agent(dbus.service.Object):
         self._on_stop = None
 
         self._bindsocks = {}
+        self._listen_plain = {}
+
         self._tx_id = 0
         self._tx_queue = []
         #: map from transfer ID to :py:cls:`Transfer`
@@ -193,7 +196,39 @@ class Agent(dbus.service.Object):
                 sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
 
         self._bindsocks[bindspec] = sock
-        glib.io_add_watch(sock, glib.IO_IN, self._recv)
+        self._listen_plain[sock] = glib.io_add_watch(sock, glib.IO_IN, self._sock_recvfrom)
+
+    def _starttls(self, sock, connect_addr=None):
+        from mbedtls.secrets import token_bytes
+
+        # ignore plaintext during handshake
+        if sock in self._listen_plain:
+            glib.source_remove(self._listen_plain.pop(sock))
+
+        cfg = self._config.get_tls_config()
+        if connect_addr:
+            ctx = tls.ClientContext(cfg)
+            sock = ctx.wrap_socket(sock, None)
+            sock.connect(connect_addr)
+        else:
+            ctx = tls.ServerContext(cfg)
+            sock = ctx.wrap_socket(sock)
+            sock, addr = sock.accept()
+            cookie = token_bytes(16)
+            sock.setcookieparam(cookie)
+
+        tls._set_debug_level(4)
+        tls._enable_debug_output(cfg)
+
+        self.__logger.info('Starting TLS handshake on %s', sock)
+
+        while True:
+            try:
+                with suppress(tls.WantReadError, tls.WantWriteError):
+                    sock.do_handshake()
+                    break
+            except tls.HelloVerifyRequest:
+                sock.setcookieparam(cookie)
 
     @dbus.service.method(DBUS_IFACE, in_signature='si')
     def listen_stop(self, address, port):
@@ -211,32 +246,55 @@ class Agent(dbus.service.Object):
             self.__logger.warning('Bind socket shutdown error: %s', err)
         sock.close()
 
-    def _recv(self, bindsock, *_args, **_kwargs):
+    def _sock_recvfrom(self, sock, *_args, **_kwargs):
         ''' Callback to handle incoming datagrams.
 
         :return: True to continue listening.
         '''
-        data, fromaddr = bindsock.recvfrom(64 * 1024)
+        data, fromaddr = sock.recvfrom(64 * 1024)
 
         address = fromaddr[0]
         port = fromaddr[1]
         self.__logger.info('Received %d octets from %s:%d',
                            len(data), address, port)
+        self._recv_datagram(sock, data, address, port)
+        return True
 
+    def _recv_datagram(self, sock, data, address, port):
         first_octet = data[0]
+        major_type = first_octet >> 5
         if first_octet == 0x00:
             self.__logger.info('Ignorning padding data')
-            return True
 
-        major_type = first_octet >> 5
-        if major_type == 5:
-            ctrl = cbor2.loads(data)
-            if ControlKey.XFER_ID in ctrl:
+        elif first_octet == 0x16:
+            self.__logger.error('Unexpected DTLS handshake')
+            self._starttls(sock)
+
+        elif first_octet == 0x06:
+            self.__logger.error('Ignoring BPv6 bundle')
+
+        elif major_type == 4:
+            self._add_rx_item(
+                BundleItem(
+                    address=address,
+                    port=port,
+                    total_length=len(data),
+                    file=BytesIO(data)
+                )
+            )
+
+        elif major_type == 5:
+            # Map type
+            extmap = cbor2.loads(data)
+            if ExtensionKey.STARTTLS in extmap:
+                self._starttls(sock)
+
+            if ExtensionKey.TRANSFER in extmap:
                 new_xfer = Transfer(
                     address=address,
                     port=port,
-                    xfer_id=ctrl[ControlKey.XFER_ID],
-                    total_length=ctrl[ControlKey.XFER_LEN],
+                    xfer_id=extmap[ExtensionKey.XFER_ID],
+                    total_length=extmap[ExtensionKey.XFER_LEN],
                 )
 
                 xfer = self._rx_fragments.get(new_xfer.key)
@@ -249,8 +307,8 @@ class Agent(dbus.service.Object):
                     xfer.valid = portion.empty()
                     xfer.data = bytearray(xfer.total_length)
 
-                offset = ctrl[ControlKey.XFER_FRAG_OFFSET]
-                frag = ctrl[ControlKey.XFER_FRAG_DATA]
+                offset = extmap[ExtensionKey.XFER_FRAG_OFFSET]
+                frag = extmap[ExtensionKey.XFER_FRAG_DATA]
                 end = offset + len(frag)
 
                 self.__logger.debug('Handling transfer %d fragment offset %d size %d', xfer.xfer_id, offset, len(frag))
@@ -270,18 +328,10 @@ class Agent(dbus.service.Object):
                     )
 
             else:
-                self.__logger.info('Ignorning unknown control data: %s', ctrl)
-            return True
+                self.__logger.warn('Ignorning unknown extension data: %s', extmap)
 
-        self._add_rx_item(
-            BundleItem(
-                address=address,
-                port=port,
-                total_length=len(data),
-                file=BytesIO(data)
-            )
-        )
-        return True
+        else:
+            self.__logger.warn('Ignorning unknown datagram type')
 
     def _add_rx_item(self, item):
         if item.transfer_id is None:
@@ -368,15 +418,15 @@ class Agent(dbus.service.Object):
         segments = []
         self.__logger.info('Transfer %d size %d relative to MTU %d',
                            item.transfer_id, len(data), mtu)
-        if len(data) < mtu:
+        if mtu is None or len(data) < mtu:
             segments = [data]
         else:
-            # The base control map with the largest values present
+            # The base extension map with the largest values present
             ctrl_base = {
-                ControlKey.XFER_ID: item.transfer_id,
-                ControlKey.XFER_LEN: item.total_length,
-                ControlKey.XFER_FRAG_OFFSET: item.total_length,
-                ControlKey.XFER_FRAG_DATA: b'',
+                ExtensionKey.XFER_ID: item.transfer_id,
+                ExtensionKey.XFER_LEN: item.total_length,
+                ExtensionKey.XFER_FRAG_OFFSET: item.total_length,
+                ExtensionKey.XFER_FRAG_DATA: b'',
             }
             ctrl_base_encsize = len(cbor2.dumps(ctrl_base))
             # Largest bstr head size
@@ -387,17 +437,21 @@ class Agent(dbus.service.Object):
             offset = 0
             while offset < len(data):
                 ctrl = {
-                    ControlKey.XFER_ID: item.transfer_id,
-                    ControlKey.XFER_LEN: item.total_length,
-                    ControlKey.XFER_FRAG_OFFSET: offset,
-                    ControlKey.XFER_FRAG_DATA: data[offset:(offset + remain_size)]
+                    ExtensionKey.XFER_ID: item.transfer_id,
+                    ExtensionKey.XFER_LEN: item.total_length,
+                    ExtensionKey.XFER_FRAG_OFFSET: offset,
+                    ExtensionKey.XFER_FRAG_DATA: data[offset:(offset + remain_size)]
                 }
                 offset += remain_size
                 segments.append(cbor2.dumps(ctrl))
 
+        sock.sendto(cbor2.dumps({ExtensionKey.STARTTLS: None}), addr)
+
+        self._starttls(sock, connect_addr=addr)
+
         for seg in segments:
             self.__logger.debug('Sending packet size %d', len(seg))
-            sock.sendto(seg, 0, addr)
+            sock.send(seg)
 
     def _process_tx_queue(self):
         ''' Perform the next TX bundle if possible.
