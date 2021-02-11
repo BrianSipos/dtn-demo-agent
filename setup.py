@@ -33,6 +33,7 @@ and dynamic segment sizing.
         'crcmod >=1.7',
         'cryptography >=0.9',
         'certvalidator',
+        'dbus-python',
         'portion >=2.1',
         'psutil',
         'PyGObject >=3.34', # glib integration
