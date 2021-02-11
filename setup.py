@@ -40,6 +40,7 @@ and dynamic segment sizing.
         'PyYAML',
         'python-mbedtls',
         'scapy >=2.4',
+        'six',
     ],
     extras_require={},
 
