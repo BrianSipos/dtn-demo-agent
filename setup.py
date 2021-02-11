@@ -37,6 +37,7 @@ and dynamic segment sizing.
         'portion >=2.1',
         'psutil',
         'PyGObject >=3.34', # glib integration
+        'PyYAML',
         'python-mbedtls',
         'scapy >=2.4',
     ],
