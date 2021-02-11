@@ -34,6 +34,7 @@ and dynamic segment sizing.
         'cryptography >=0.9',
         'certvalidator',
         'portion >=2.1',
+        'psutil',
         'PyGObject >=3.34', # glib integration
         'python-mbedtls',
         'scapy >=2.4',

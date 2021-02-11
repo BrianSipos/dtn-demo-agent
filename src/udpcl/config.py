@@ -3,9 +3,9 @@
 from dataclasses import dataclass, field, fields
 from typing import Any, Optional, Dict, List, Set
 import logging
+import os
 import dbus.bus
 import yaml
-from mbedtls import tls
 
 LOGGER = logging.getLogger(__name__)
 
@@ -53,10 +53,11 @@ class Config(object):
     #: DBus service name to register as
     bus_service: Optional[str] = None
 
-    #: Allow use of TLS during contact negotiation
-    dtls_enable: bool = True
-    dtls_version: Optional[str] = None
-    dtls_ciphers: Optional[Set[str]] = None
+    #: Allow use of TLS for sending
+    dtls_enable_tx: bool = True
+#    dtls_version: Optional[str] = None
+    # OpenSSL cipher filter
+    dtls_ciphers: Optional[str] = None
     #: Trusted root CA PEM file
     dtls_ca_file: Optional[str] = None
     #: Local certificate (chain) PEM file
@@ -64,9 +65,11 @@ class Config(object):
     #: Local private key PEM file
     dtls_key_file: Optional[str] = None
 #    tls_dhparam: Optional[str] = None
-    #: If not None, the required negotiated use-TLS state.
-#    require_tls: Optional[bool] = None
+    #: If True, plaintext bundles are rejected
+#    require_tls: bool = False
 
+    #: Fixed UDP port to send on
+    tx_port: Optional[int] = None
     #: Default MTU when not discoverable
     mtu_default: Optional[int] = None
 
@@ -98,12 +101,6 @@ class Config(object):
                 else:
                     setattr(self, fld.name, cldat[fld.name])
 
-    def validate(self):
-        ''' Check that this config is valid.
-        :throw RuntimeError: If something is wrong.
-        '''
-        self.get_tls_config()
-
     @property
     def bus_conn(self):
         cur_conn = getattr(self, '_bus_conn', None)
@@ -112,58 +109,3 @@ class Config(object):
             LOGGER.debug('Connecting to DBus: %s', addr_or_type)
             self._bus_conn = dbus.bus.BusConnection(addr_or_type)
         return self._bus_conn
-
-    def get_tls_config(self):
-        ''' Get an :py:class:`mbedtls.tls.ClientContext` object configured for this peer.
-        '''
-        from mbedtls import x509, pk
-        if not self.dtls_enable:
-            return None
-
-        version_map = {
-            None: None,
-            '1.0': tls.DTLSVersion.DTLSv1_0,
-            '1.2': tls.DTLSVersion.DTLSv1_2,
-        }
-        try:
-            vers_enum = version_map[self.dtls_version]
-        except KeyError:
-            raise ValueError('Invalid TLS version "{0}"'.format(self.dtls_version))
-
-        trust = tls.TrustStore()
-        if self.dtls_ca_file:
-#            trust.add(x509.Certificate.from_file(self.dtls_ca_file))
-            trust = tls.TrustStore.from_pem_file(self.dtls_ca_file)
-        LOGGER.info('TRUST %s', trust)
-
-#        cfg.keylog_filename = os.environ.get('SSLKEYLOGFILE')
-#        if self.dtls_ciphers:
-#            cfg.set_ciphers(self.dtls_ciphers)
-
-        if self.dtls_cert_file or self.dtls_key_file:
-            if not self.dtls_cert_file or not self.dtls_key_file:
-                raise ValueError('Neither or both of tls_cert_file and tls_key_file are needed')
-
-            cert_chain = [[], None]
-            with open(self.dtls_cert_file, 'r') as infile:
-                cert_chain[0].append(
-                    x509.CRT.from_PEM(infile.read())
-                )
-
-            with open(self.dtls_key_file, 'r') as infile:
-                infile.readline()
-                print(self.dtls_key_file)
-#                cert_chain[1] = pk.RSA.from_PEM(infile.read())
-                cert_chain[1] = pk.RSA(pk.RSA().generate())
-        else:
-            cert_chain = None
-        LOGGER.debug('cert from %s: %s', self.dtls_cert_file, cert_chain)
-
-        cfg = tls.DTLSConfiguration(
-            trust_store=trust,
-            certificate_chain=cert_chain,
-            validate_certificates=False,
-            ciphers=self.dtls_ciphers,
-        )
-        LOGGER.info('cfg %s', cfg)
-        return cfg

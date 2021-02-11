@@ -590,7 +590,7 @@ class Agent(dbus.service.Object):
             fctr.bundle.primary.total_app_data_len = payload_size
 
             for blk in ctr.bundle.blocks:
-                if (not ctrlist 
+                if (not ctrlist
                     or blk.block_flags & CanonicalBlock.Flag.REPLICATE_IN_FRAGMENT
                     or blk.type_code == Bundle.BLOCK_NUM_PAYLOAD):
                     fctr.bundle.blocks.append(blk.copy())
@@ -689,7 +689,7 @@ class Agent(dbus.service.Object):
 
     @dbus.service.method(DBUS_IFACE, in_signature='si', out_signature='')
     def ping(self, nodeid, datalen):
-        ''' Ping via TCPCL and an admin record.
+        ''' Ping with random data via the routing table.
 
         :param str nodeid: The destination Node ID.
         :param int datalen: The payload data length.
@@ -712,6 +712,106 @@ class Agent(dbus.service.Object):
                 block_num=1,
                 crc_type=AbstractBlock.CrcType.CRC32,
                 btsd=bytes(scapy.volatile.RandString(datalen)),
+            ),
+        ]
+
+        self.send_bundle(ctr)
+
+    @dbus.service.method(DBUS_IFACE, in_signature='', out_signature='')
+    def hello(self):
+        ''' Send a NHDP HELLO message.
+
+        '''
+        cts = self.timestamp()
+        dest = 'dtn:~neighbor'
+
+        import enum
+
+        class MsgKeys(enum.IntEnum):
+            MSG_KEY_TYPE = 1
+
+            HELLO_KEY_VALIDITY_TIME = -1
+            HELLO_KEY_INTERVAL_TIME = -2
+            HELLO_KEY_NODESET = -3
+            HELLO_KEY_NODEID = -4
+            HELLO_KEY_CLS = -5
+
+        @enum.unique
+        class MsgType(enum.IntEnum):
+            HELLO = 1
+
+        class ClKeys(enum.IntEnum):
+            CL_KEY_TYPE = 1
+            CL_KEY_DNSNAME = 2
+            CL_KEY_ADDR = 3
+            CL_KEY_PORT = 4
+            CL_KEY_REQ_SEC = 5
+
+        @enum.unique
+        class ClType(enum.IntEnum):
+            TCPCL = 1
+            UDPCL = 2
+
+        import ipaddress
+        import psutil
+        import socket
+        from scapy_cbor.util import encode_diagnostic
+        print(psutil.net_if_addrs())
+
+        addr_objs = []
+        for (_name, items) in psutil.net_if_addrs().items():
+            for item in items:
+                if item.family not in (socket.AF_INET, socket.AF_INET6):
+                    continue
+
+                if item.family == socket.AF_INET6 and '%' in item.address:
+                    addr = item.address.split('%')[0]
+                else:
+                    addr = item.address
+                addr = ipaddress.ip_address(addr)
+                if addr.is_loopback or addr.is_link_local:
+                    continue
+
+                addr_objs.append(
+                    addr.packed
+                )
+
+        msg = {
+            MsgKeys.MSG_KEY_TYPE: MsgType.HELLO,
+            MsgKeys.HELLO_KEY_VALIDITY_TIME: 123,
+            MsgKeys.HELLO_KEY_INTERVAL_TIME: 456,
+            MsgKeys.HELLO_KEY_NODESET: [
+                {
+                    MsgKeys.HELLO_KEY_NODEID: self._config.node_id,
+                    MsgKeys.HELLO_KEY_CLS: [
+                        {
+                            ClKeys.CL_KEY_TYPE: ClType.UDPCL,
+                            ClKeys.CL_KEY_DNSNAME: [
+                                socket.gethostname(),
+                            ],
+                            ClKeys.CL_KEY_ADDR: addr_objs,
+                        },
+                    ],
+                },
+            ],
+        }
+        print('HELLO msg: ', encode_diagnostic(msg))
+
+        ctr = BundleContainer()
+        ctr.bundle.primary = PrimaryBlock(
+            bundle_flags=(PrimaryBlock.Flag.REQ_RECEPTION_REPORT | PrimaryBlock.Flag.REQ_STATUS_TIME),
+            destination=dest,
+            source=self._config.node_id,
+            report_to=self._config.node_id,
+            create_ts=cts,
+            crc_type=AbstractBlock.CrcType.CRC32,
+        )
+        ctr.bundle.blocks = [
+            CanonicalBlock(
+                type_code=1,
+                block_num=1,
+                crc_type=AbstractBlock.CrcType.CRC32,
+                btsd=cbor2.dumps(msg),
             ),
         ]
 

@@ -67,7 +67,6 @@ def main(*argv):
     if args.config_file:
         with open(args.config_file, 'rb') as infile:
             config.from_file(infile)
-    config.validate()
 
     if args.action == 'listen':
         config.init_listen.append(

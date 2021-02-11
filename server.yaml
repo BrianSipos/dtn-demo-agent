@@ -7,6 +7,7 @@ udpcl:
         v6sources:
           - vboxnet0
 
+    dtls_enable_tx: False
     dtls_ca_file: testpki/ca.crt
     dtls_key_file: testpki/server-transport.key
     dtls_cert_file: testpki/server-transport.crt
