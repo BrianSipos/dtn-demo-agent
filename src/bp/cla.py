@@ -24,7 +24,6 @@ class AbstractAdaptor(object):
     ''' Interface for a CL.
 
     :ivar agent_obj: The bus proxy object when it is valid.
-    :ivar conns: List of connections on this agent.
     :ivar recv_bundle_finish: A callback to handle received bundle data.
     '''
 
@@ -78,15 +77,14 @@ class UdpclAdaptor(AbstractAdaptor):
         AbstractAdaptor.__init__(self)
         self.obj_path = '/org/ietf/dtn/udpcl/Agent'
 
+    def _handle_recv_bundle_finish(self, bid, _length):
+        data = self.agent_obj.recv_bundle_pop_data(bid)
+        data = bytes(data)
+        if callable(self.recv_bundle_finish):
+            self.recv_bundle_finish(data)
+
     def _do_bind(self):
-
-        def handle_recv_bundle_finish(bid, _length):
-            data = self.agent_obj.recv_bundle_pop_data(bid)
-            data = dbus.ByteArray(data)
-            if callable(self.recv_bundle_finish):
-                self.recv_bundle_finish(data)
-
-        self.agent_obj.connect_to_signal('recv_bundle_finished', handle_recv_bundle_finish, dbus_interface=UdpclAdaptor.DBUS_IFACE)
+        self.agent_obj.connect_to_signal('recv_bundle_finished', self._handle_recv_bundle_finish, dbus_interface=UdpclAdaptor.DBUS_IFACE)
 
     def send_bundle_func(self, **kwargs):
         address = kwargs['address']

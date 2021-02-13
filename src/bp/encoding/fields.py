@@ -100,7 +100,7 @@ class DtnTimeField(UintField):
         dtval = DtnTimeField.dtntime_to_datetime(x)
         if dtval is None:
             return None
-        return dtval.isoformat()
+        return dtval
 
     def i2repr(self, pkt, x):
         return self.i2h(pkt, x)

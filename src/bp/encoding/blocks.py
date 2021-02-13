@@ -24,7 +24,7 @@ class Timestamp(CborArray):
     :py:cls:`datetime.datetime` object and text.
     '''
     fields_desc = (
-        DtnTimeField('time', default=0),
+        DtnTimeField('dtntime', default=0),
         UintField('seqno', default=0),
     )
 

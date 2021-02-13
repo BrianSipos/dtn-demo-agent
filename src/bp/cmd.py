@@ -56,7 +56,7 @@ def main():
     args = parser.parse_args()
 
     log_level = args.log_level.upper()
-    log_queue = tcpcl.cmd.root_logging(log_level)
+    tcpcl.cmd.root_logging(log_level)
     logging.debug('command args: %s', args)
 
     # Must run before connection or real main loop is constructed
@@ -69,41 +69,6 @@ def main():
 
     agent = Agent(config)
 
-    CHILD_INFO = {
-        'tcpcl': {
-            'config': tcpcl.Config,
-            'agent': tcpcl.Agent,
-        },
-        'udpcl': {
-            'config': udpcl.Config,
-            'agent': udpcl.Agent,
-        },
-    }
-    for cl_type in config.cl_fork:
-        try:
-            info = CHILD_INFO[cl_type]
-        except KeyError:
-            LOGGER.warning('Ignored unknown cl_fork name: %s', cl_type)
-            continue
-
-        cl_config = info['config']()
-        with open(args.config_file, 'rb') as infile:
-            cl_config.from_file(infile)
-
-        # Fork CL child
-        def run_cl(cl_config):
-            tcpcl.cmd.root_logging(log_level, log_queue)
-            logging.getLogger().info('CL child started: %s', cl_type)
-            agent = info['agent'](cl_config)
-            agent.exec_loop()
-            logging.getLogger().info('CL child ended: %s', cl_type)
-
-        LOGGER.info('Spawning CL process for %s', cl_config.bus_service)
-        worker_proc = multiprocessing.Process(target=run_cl, args=[cl_config])
-        worker_proc.start()
-    else:
-        worker_proc = None
-
     for (cltype, servname) in config.cl_attach.items():
         # Immediately attach to the CL
         glib.idle_add(agent.cl_attach, cltype, servname)
@@ -113,9 +78,6 @@ def main():
 
     if args.eloop:
         agent.exec_loop()
-
-    if worker_proc:
-        worker_proc.join()
 
 
 if __name__ == '__main__':

@@ -7,38 +7,20 @@ from tcpcl.config import Config, ListenConfig, ConnectConfig
 from tcpcl.agent import Agent
 
 
-def root_logging(log_level, log_queue=None):
-    ''' Initialize multiprocessing-safe logging.
+def root_logging(log_level):
+    ''' Initialize logging.
     '''
-    import multiprocessing
-    from logging.handlers import QueueHandler, QueueListener
-
-    if log_queue is None:
-        log_queue = multiprocessing.Queue()
-
-        # ql gets records from the queue and sends them to the stream handler
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s PID:%(process)s TID:%(threadName)s <%(levelname)s> %(name)s: %(message)s"))
-        ql = QueueListener(log_queue, handler)
-        ql.start()
-
-    # Root logger gets queued
-    logger = logging.getLogger()
-    logger.setLevel(log_level)
-    for hdl in logger.handlers:
-        logger.removeHandler(hdl)
-
-    qh = QueueHandler(log_queue)
-    logger.addHandler(qh)
-
-    return log_queue
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s PID:%(process)s TID:%(threadName)s <%(levelname)s> %(name)s: %(message)s"
+    )
 
 
-def main(*argv):
+def main():
     ''' Agent command entry point. '''
     from dbus.mainloop.glib import DBusGMainLoop
 
-    parser = argparse.ArgumentParser(argv[0])
+    parser = argparse.ArgumentParser()
     parser.add_argument('--log-level', dest='log_level', default='info',
                         metavar='LEVEL',
                         help='Console logging lowest level displayed.')
@@ -60,8 +42,8 @@ def main(*argv):
     parser_conn.add_argument('--port', type=int, default=4556,
                              help='Host TCP port')
 
-    args = parser.parse_args(argv[1:])
-    log_queue = root_logging(args.log_level.upper())
+    args = parser.parse_args()
+    root_logging(args.log_level.upper())
     logging.debug('command args: %s', args)
 
     # Must run before connection or real main loop is constructed

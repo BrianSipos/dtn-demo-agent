@@ -2,12 +2,52 @@
 '''
 import cbor2
 from binascii import (hexlify, unhexlify)
+import datetime
 from bp.encoding.fields import (EidField)
 from bp.encoding.blocks import (Timestamp, PrimaryBlock, CanonicalBlock,
                                 PreviousNodeBlock, BundleAgeBlock,
                                 HopCountBlock)
 from bp.encoding.bundle import (Bundle)
 from bp.test.base import (DTN_NONE, BaseTestPacket)
+
+
+class TestTimestamp(BaseTestPacket):
+
+    def testEncodeDefault(self):
+        obj = Timestamp()
+        item = [
+            0,
+            0,
+        ]
+        self.assertEqual(self._encode(obj), item)
+
+        self.assertEqual(0, obj.getfieldval('dtntime'))
+        self.assertEqual(None, obj.dtntime)
+        self.assertEqual(0, obj.seqno)
+
+    def testEncodeParam(self):
+        obj = Timestamp(dtntime=1000000, seqno=5)
+        item = [
+            1000000,
+            5,
+        ]
+        self.assertEqual(self._encode(obj), item)
+
+        self.assertEqual(1000000, obj.getfieldval('dtntime'))
+        self.assertEqual(
+            datetime.datetime(2000, 1, 1, 0, 16, 40, 0, datetime.timezone.utc),
+            obj.dtntime
+        )
+        self.assertEqual(5, obj.seqno)
+
+    def testDecodeParam(self):
+        item = [1000000, 3]
+        obj = self._decode(Timestamp, item)
+        fields = dict(
+            dtntime=1000000,
+            seqno=3,
+        )
+        self.assertEqual(obj.fields, fields)
 
 
 class TestPrimaryBlock(BaseTestPacket):
@@ -32,7 +72,7 @@ class TestPrimaryBlock(BaseTestPacket):
             destination='dtn://dst/',
             source='dtn://src/',
             report_to='dtn://rpt/',
-            create_ts=Timestamp(time=1000000, seqno=5),
+            create_ts=Timestamp(dtntime=1000000, seqno=5),
             lifetime=300,
         )
         self.assertEqual(
@@ -70,7 +110,7 @@ class TestPrimaryBlock(BaseTestPacket):
             destination='dtn://dst/',
             source='dtn://src/',
             report_to='dtn://rpt/',
-            create_ts=Timestamp(time=1000000, seqno=5),
+            create_ts=Timestamp(dtntime=1000000, seqno=5),
             lifetime=300,
             crc_value=None,
         )
@@ -84,7 +124,7 @@ class TestPrimaryBlock(BaseTestPacket):
             source='dtn://src/',
             report_to='dtn://rpt/',
             create_ts=Timestamp(
-                time='2000-01-01T00:16:40+00:00',
+                dtntime='2000-01-01T00:16:40+00:00',
                 seqno=3,
             ),
             lifetime=300,
@@ -130,7 +170,7 @@ class TestPrimaryBlock(BaseTestPacket):
             destination='dtn://dst/',
             source='dtn://src/',
             report_to='dtn://rpt/',
-            create_ts=Timestamp(time=1000000, seqno=3),
+            create_ts=Timestamp(dtntime=1000000, seqno=3),
             lifetime=300,
             fragment_offset=1000,
             total_app_data_len=2000,
@@ -252,7 +292,7 @@ class TestBundle(BaseTestPacket):
             destination='dtn:none',
             source='dtn:none',
             report_to='dtn:none',
-            create_ts=Timestamp(time=1000, seqno=5),
+            create_ts=Timestamp(dtntime=1000, seqno=5),
             lifetime=0,
         )
         self.assertEqual(blk.fields, fields)
@@ -325,7 +365,7 @@ class TestBundle(BaseTestPacket):
             destination='dtn:none',
             source='dtn:none',
             report_to='dtn:none',
-            create_ts=Timestamp(time=0, seqno=0),
+            create_ts=Timestamp(dtntime=0, seqno=0),
             lifetime=0,
         )
         self.assertEqual(blk.fields, fields)

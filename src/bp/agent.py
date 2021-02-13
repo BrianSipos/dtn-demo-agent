@@ -1,11 +1,11 @@
-'''
-Implementation of a symmetric BPv6 agent.
+''' Implementation of a symmetric BPv7 agent.
 '''
 import datetime
 import logging
 import dbus.service
 from gi.repository import GLib as glib
 import cbor2
+from urllib.parse import urlsplit, urlunsplit
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography import x509
@@ -70,7 +70,7 @@ class BundleContainer(object):
         pri = self.bundle.getfieldval('primary')
         ident = [
             pri.source,
-            pri.create_ts.getfieldval('time'),
+            pri.create_ts.getfieldval('dtntime'),
             pri.create_ts.getfieldval('seqno')
         ]
         if pri.bundle_flags & PrimaryBlock.Flag.IS_FRAGMENT:
@@ -137,7 +137,7 @@ class BundleContainer(object):
 
     def create_report_reception(self, timestamp, own_nodeid):
         status_ts = bool(self.bundle.primary.getfieldval('bundle_flags') & PrimaryBlock.Flag.REQ_STATUS_TIME)
-        status_at = timestamp.getfieldval('time') if status_ts else None
+        status_at = timestamp.getfieldval('dtntime') if status_ts else None
 
         report = StatusReport(
             status=StatusInfoArray(
@@ -168,7 +168,6 @@ class BundleContainer(object):
             ) / report,
         ]
         return reply
-
 
 def get_bpsec_cose_aad(ctr, target, secblk, aad_scope):
     ''' Extract AAD from a bundle container.
@@ -217,7 +216,7 @@ class Timestamper(object):
             self._seqno = 0
 
         return Timestamp(
-            time=self._time,
+            dtntime=self._time,
             seqno=self._seqno
         )
 
@@ -338,9 +337,9 @@ class Agent(dbus.service.Object):
     def _cl_recv_bundle(self, data):
         ''' Handle a new received bundle from a CL.
         '''
-        self._logger.debug('recv_bundle data %s', encode_diagnostic(cbor2.loads(data)))
+        self._logger.debug('_recv_bundle data %s', encode_diagnostic(cbor2.loads(data)))
         ctr = BundleContainer(Bundle(data))
-        self.recv_bundle(ctr)
+        self._recv_bundle(ctr)
 
     def _get_route_to(self, eid):
         ''' Get a route table entry.
@@ -355,6 +354,7 @@ class Agent(dbus.service.Object):
                 break
         if found is None:
             raise KeyError('No route to destination: {}'.format(eid))
+        self._logger.debug('Route found: %s', found)
         return found
 
     def _apply_integrity(self, ctr):
@@ -471,7 +471,7 @@ class Agent(dbus.service.Object):
                         der_chains.append(param.value)
 
                 bundle_at = DtnTimeField.dtntime_to_datetime(
-                    ctr.bundle.primary.create_ts.getfieldval('time')
+                    ctr.bundle.primary.create_ts.getfieldval('dtntime')
                 )
                 val_ctx = ValidationContext(
                     trust_roots=[
@@ -610,7 +610,7 @@ class Agent(dbus.service.Object):
 
         return ctrlist
 
-    def recv_bundle(self, ctr):
+    def _recv_bundle(self, ctr):
         ''' Perform agent handling of a received bundle.
 
         :param ctr: The bundle container just recieved.
@@ -634,7 +634,8 @@ class Agent(dbus.service.Object):
         self._verify_integrity(ctr)
 
         if ctr.do_report_reception():
-            self.send_bundle(ctr.create_report_reception(self.timestamp(), self._config.node_id))
+            status = ctr.create_report_reception(self.timestamp(), self._config.node_id)
+            glib.idle_add(self.send_bundle, status)
 
     def send_bundle(self, ctr):
         ''' Perform agent handling to send a bundle.
@@ -699,7 +700,10 @@ class Agent(dbus.service.Object):
 
         ctr = BundleContainer()
         ctr.bundle.primary = PrimaryBlock(
-            bundle_flags=(PrimaryBlock.Flag.REQ_RECEPTION_REPORT | PrimaryBlock.Flag.REQ_STATUS_TIME),
+            bundle_flags=(
+                PrimaryBlock.Flag.REQ_RECEPTION_REPORT
+                | PrimaryBlock.Flag.REQ_STATUS_TIME
+            ),
             destination=str(nodeid),
             source=self._config.node_id,
             report_to=self._config.node_id,
@@ -717,103 +721,21 @@ class Agent(dbus.service.Object):
 
         self.send_bundle(ctr)
 
-    @dbus.service.method(DBUS_IFACE, in_signature='', out_signature='')
-    def hello(self):
-        ''' Send a NHDP HELLO message.
-
+    @dbus.service.method(DBUS_IFACE, in_signature='ay', out_signature='')
+    def send_bundle_data(self, data):
+        ''' Send bundle data directly.
         '''
-        cts = self.timestamp()
-        dest = 'dtn:~neighbor'
+        data = bytes(data)
+        self._logger.warning("RECV %s", cbor2.loads(data))
+        ctr = BundleContainer(Bundle(data))
 
-        import enum
-
-        class MsgKeys(enum.IntEnum):
-            MSG_KEY_TYPE = 1
-
-            HELLO_KEY_VALIDITY_TIME = -1
-            HELLO_KEY_INTERVAL_TIME = -2
-            HELLO_KEY_NODESET = -3
-            HELLO_KEY_NODEID = -4
-            HELLO_KEY_CLS = -5
-
-        @enum.unique
-        class MsgType(enum.IntEnum):
-            HELLO = 1
-
-        class ClKeys(enum.IntEnum):
-            CL_KEY_TYPE = 1
-            CL_KEY_DNSNAME = 2
-            CL_KEY_ADDR = 3
-            CL_KEY_PORT = 4
-            CL_KEY_REQ_SEC = 5
-
-        @enum.unique
-        class ClType(enum.IntEnum):
-            TCPCL = 1
-            UDPCL = 2
-
-        import ipaddress
-        import psutil
-        import socket
-        from scapy_cbor.util import encode_diagnostic
-        print(psutil.net_if_addrs())
-
-        addr_objs = []
-        for (_name, items) in psutil.net_if_addrs().items():
-            for item in items:
-                if item.family not in (socket.AF_INET, socket.AF_INET6):
-                    continue
-
-                if item.family == socket.AF_INET6 and '%' in item.address:
-                    addr = item.address.split('%')[0]
-                else:
-                    addr = item.address
-                addr = ipaddress.ip_address(addr)
-                if addr.is_loopback or addr.is_link_local:
-                    continue
-
-                addr_objs.append(
-                    addr.packed
-                )
-
-        msg = {
-            MsgKeys.MSG_KEY_TYPE: MsgType.HELLO,
-            MsgKeys.HELLO_KEY_VALIDITY_TIME: 123,
-            MsgKeys.HELLO_KEY_INTERVAL_TIME: 456,
-            MsgKeys.HELLO_KEY_NODESET: [
-                {
-                    MsgKeys.HELLO_KEY_NODEID: self._config.node_id,
-                    MsgKeys.HELLO_KEY_CLS: [
-                        {
-                            ClKeys.CL_KEY_TYPE: ClType.UDPCL,
-                            ClKeys.CL_KEY_DNSNAME: [
-                                socket.gethostname(),
-                            ],
-                            ClKeys.CL_KEY_ADDR: addr_objs,
-                        },
-                    ],
-                },
-            ],
-        }
-        print('HELLO msg: ', encode_diagnostic(msg))
-
-        ctr = BundleContainer()
-        ctr.bundle.primary = PrimaryBlock(
-            bundle_flags=(PrimaryBlock.Flag.REQ_RECEPTION_REPORT | PrimaryBlock.Flag.REQ_STATUS_TIME),
-            destination=dest,
-            source=self._config.node_id,
-            report_to=self._config.node_id,
-            create_ts=cts,
-            crc_type=AbstractBlock.CrcType.CRC32,
-        )
-        ctr.bundle.blocks = [
-            CanonicalBlock(
-                type_code=1,
-                block_num=1,
-                crc_type=AbstractBlock.CrcType.CRC32,
-                btsd=cbor2.dumps(msg),
-            ),
-        ]
+        # apply local policy
+        self._logger.info('Relaying app bundle %s', ctr.bundle)
+        if ctr.bundle.primary.create_ts.getfieldval('dtntime') == 0:
+            ctr.bundle.primary.create_ts = self.timestamp()
+        if ctr.bundle.primary.getfieldval('lifetime') == 0:
+            td = datetime.timedelta(hours=1)
+            ctr.bundle.primary.lifetime = td.total_seconds() * 1e6 + td.microseconds
+        self._logger.info('Relaying app bundle %s', ctr.bundle)
 
         self.send_bundle(ctr)
-

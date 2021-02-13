@@ -57,8 +57,6 @@ class Config(object):
     #: Include certificate chain in integrity parameters
     integrity_include_chain: bool = True
 
-    #: The names of CL to read config for and fork
-    cl_fork: List[str] = field(default_factory=list)
     #: The bus service names of CLs to attach to
     cl_attach: Dict[str, str] = field(default_factory=dict)
 

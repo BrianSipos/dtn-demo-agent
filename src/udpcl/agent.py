@@ -532,7 +532,7 @@ class Agent(dbus.service.Object):
         if ipaddr.is_multicast:
             multicast = self._config.multicast
 
-            loop = 0
+            loop = 1
             if loop is not None:
                 if is_ipv4:
                     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loop)

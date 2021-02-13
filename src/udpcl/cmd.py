@@ -37,11 +37,11 @@ def root_logging(log_level, log_queue=None):
     return log_queue
 
 
-def main(*argv):
+def main():
     ''' Agent command entry point. '''
     from dbus.mainloop.glib import DBusGMainLoop
 
-    parser = argparse.ArgumentParser(argv[0])
+    parser = argparse.ArgumentParser()
     parser.add_argument('--log-level', dest='log_level', default='info',
                         metavar='LEVEL',
                         help='Console logging lowest level displayed.')
@@ -56,8 +56,8 @@ def main(*argv):
     parser_listen.add_argument('--port', type=int, default=4556,
                                help='Listen TCP port')
 
-    args = parser.parse_args(argv[1:])
-    log_queue = root_logging(args.log_level.upper())
+    args = parser.parse_args()
+    root_logging(args.log_level.upper())
     logging.debug('command args: %s', args)
 
     # Must run before connection or real main loop is constructed

@@ -1,6 +1,7 @@
 ''' Test the module :py:mod:`bp.blocks`.
 '''
 import unittest
+import datetime
 from bp.encoding.fields import (EidField, DtnTimeField)
 
 
@@ -114,7 +115,7 @@ class TestDtnTimeField(unittest.TestCase):
 
         self.assertEqual(
             fld.i2h(None, 1000000),
-            '2000-01-01T00:16:40+00:00',
+            datetime.datetime(2000, 1, 1, 0, 16, 40, 0, datetime.timezone.utc)
         )
 
     def testHumanDecode(self):
