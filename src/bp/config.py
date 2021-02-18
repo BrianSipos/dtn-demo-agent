@@ -1,6 +1,5 @@
 ''' Agent configuration data.
 '''
-import copy
 from dataclasses import dataclass, field, fields
 from typing import Optional, Set, Dict, List
 import logging
@@ -12,8 +11,21 @@ LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
-class RouteItem(object):
-    ''' Each item in the routing table.
+class RxRouteItem(object):
+    ''' Each item in the receive routing table.
+    '''
+    #: The regex pattern to match on the Destination EID
+    eid_pattern: re.Pattern
+    #: The local action to perform.
+    # One of: delete, deliver, forward
+    action: str
+    #: The raw config object with additional parameters
+    raw_config: object = field(default_factory=object)
+
+
+@dataclass
+class TxRouteItem(object):
+    ''' Each item in the transmit routing table.
     '''
     #: The regex pattern to match on the Destination EID
     eid_pattern: re.Pattern
@@ -30,11 +42,10 @@ class RouteItem(object):
 @dataclass
 class Config(object):
     ''' Agent configuration.
-
-    .. py:attribute:: route_table
-        A map from destination EID to next-hop Node ID.
     '''
 
+    #: Default log level when command option not provided
+    log_level: Optional[str] = None
     #: A set of test-mode behaviors to enable.
     enable_test: Set[str] = field(default_factory=set)
     #: The D-Bus address to register handlers on.
@@ -44,7 +55,10 @@ class Config(object):
 
     #: The Node ID of this agent, which is a URI.
     node_id: str = u''
-    route_table: List[RouteItem] = field(default_factory=list)
+    #: Receive routing
+    rx_route_table: List[RxRouteItem] = field(default_factory=list)
+    #: Transmit routing
+    tx_route_table: List[TxRouteItem] = field(default_factory=list)
 
     #: Trusted root CA PEM file
     verify_ca_file: Optional[str] = None
@@ -72,22 +86,29 @@ class Config(object):
 
         for fld in fields(self):
             if fld.name in bpdat:
-                if fld.name == 'route_table':
-                    self.route_table = []
+                if fld.name == 'rx_route_table':
+                    self.rx_route_table = []
                     for item in bpdat[fld.name]:
-                        item_cpy = copy.copy(item)
                         try:
-                            eid_pattern = re.compile(item_cpy.pop('eid_pattern'))
-                            next_nodeid = item_cpy.pop('next_nodeid')
-                            cl_type = item_cpy.pop('cl_type')
-                            self.route_table.append(RouteItem(
-                                eid_pattern=eid_pattern,
-                                next_nodeid=next_nodeid,
-                                cl_type=cl_type,
+                            self.rx_route_table.append(RxRouteItem(
+                                eid_pattern=re.compile(item['eid_pattern']),
+                                action=item['action'],
                                 raw_config=item
                             ))
                         except Exception as err:
-                            LOGGER.error('Ignoring invalid route_table entry %s because (%s): %s', item, type(err).__name__, err)
+                            LOGGER.error('Ignoring invalid rx_route_table entry %s because (%s): %s', item, type(err).__name__, err)
+                elif fld.name == 'tx_route_table':
+                    self.tx_route_table = []
+                    for item in bpdat[fld.name]:
+                        try:
+                            self.tx_route_table.append(TxRouteItem(
+                                eid_pattern=re.compile(item['eid_pattern']),
+                                next_nodeid=item['next_nodeid'],
+                                cl_type=item['cl_type'],
+                                raw_config=item
+                            ))
+                        except Exception as err:
+                            LOGGER.error('Ignoring invalid tx_route_table entry %s because (%s): %s', item, type(err).__name__, err)
                 else:
                     setattr(self, fld.name, bpdat[fld.name])
 
@@ -101,7 +122,12 @@ class Config(object):
     def bus_conn(self):
         cur_conn = getattr(self, '_bus_conn', None)
         if cur_conn is None:
-            addr_or_type = self.bus_addr if self.bus_addr else dbus.bus.BUS_SESSION
+            if not self.bus_addr or self.bus_addr == 'session':
+                addr_or_type = dbus.bus.BUS_SESSION
+            elif self.bus_addr == 'system':
+                addr_or_type = dbus.bus.BUS_SYSTEM
+            else:
+                addr_or_type = self.bus_addr
             LOGGER.debug('Connecting to DBus: %s', addr_or_type)
             self._bus_conn = dbus.bus.BusConnection(addr_or_type)
         return self._bus_conn

@@ -5,13 +5,10 @@ import logging
 import sys
 from urllib.parse import urlsplit
 from gi.repository import GLib as glib
-import multiprocessing
 
+from tcpcl.cmd import root_logging
 from bp.config import Config
 from bp.agent import Agent
-import tcpcl
-import tcpcl.cmd
-import udpcl
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,13 +37,11 @@ def main():
     from dbus.mainloop.glib import DBusGMainLoop
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--log-level', dest='log_level', default='info',
+    parser.add_argument('--log-level', dest='log_level',
                         metavar='LEVEL',
                         help='Console logging lowest level displayed.')
     parser.add_argument('--config-file', type=str,
                         help='Configuration file to load from')
-    parser.add_argument('--eloop', type=str2bool, default=True,
-                        help='If enabled, waits in an event loop.')
     subp = parser.add_subparsers(dest='action', help='action')
 
     parser_ping = subp.add_parser('ping',
@@ -55,8 +50,7 @@ def main():
 
     args = parser.parse_args()
 
-    log_level = args.log_level.upper()
-    tcpcl.cmd.root_logging(log_level)
+    root_logging(args.log_level.upper() if args.log_level else 'WARNING')
     logging.debug('command args: %s', args)
 
     # Must run before connection or real main loop is constructed
@@ -66,6 +60,8 @@ def main():
     if args.config_file:
         with open(args.config_file, 'rb') as infile:
             config.from_file(infile)
+    if config.log_level and not args.log_level:
+        logging.getLogger().setLevel(config.log_level.upper())
 
     agent = Agent(config)
 
@@ -76,8 +72,7 @@ def main():
     if args.action == 'ping':
         agent.ping(args.destination)
 
-    if args.eloop:
-        agent.exec_loop()
+    agent.exec_loop()
 
 
 if __name__ == '__main__':

@@ -28,7 +28,7 @@ class Worker(object):
     ]
 
     def __init__(self, args):
-        self._logger = logging.getLogger(self.__class__.__name__)
+        self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self.args = args
         self._on_stop = None
 
@@ -93,7 +93,7 @@ class Worker(object):
         
         :return: True to continue listening.
         '''
-        sock, fromaddr = bindsock.accept()
+        sock, fromaddr = bindsock.deliver()
         self._logger.info('Connecting')
         self._passive_sock = sock
 

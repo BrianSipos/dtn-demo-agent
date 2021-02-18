@@ -25,13 +25,10 @@ class ConnectConfig():
 @dataclass
 class Config(object):
     ''' Agent configuration.
-
-    .. py:attribute:: keepalive_time
-        The desired keepalive time to negotiate.
-    .. py:attribute:: idle_time
-        The session idle-timeout time.
     '''
 
+    #: Default log level when command option not provided
+    log_level: Optional[str] = None
     #: A set of test-mode behaviors to enable.
     enable_test: Set[str] = field(default_factory=set)
     #: The D-Bus address to register handlers on.
@@ -107,7 +104,12 @@ class Config(object):
     def bus_conn(self):
         cur_conn = getattr(self, '_bus_conn', None)
         if cur_conn is None:
-            addr_or_type = self.bus_addr if self.bus_addr else dbus.bus.BUS_SESSION
+            if not self.bus_addr or self.bus_addr == 'session':
+                addr_or_type = dbus.bus.BUS_SESSION
+            elif self.bus_addr == 'system':
+                addr_or_type = dbus.bus.BUS_SYSTEM
+            else:
+                addr_or_type = self.bus_addr
             LOGGER.debug('Connecting to DBus: %s', addr_or_type)
             self._bus_conn = dbus.bus.BusConnection(addr_or_type)
         return self._bus_conn

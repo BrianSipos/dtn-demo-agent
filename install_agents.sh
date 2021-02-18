@@ -1,4 +1,5 @@
 #!/bin/bash
+# Install local-user services to run on the session bus.
 set -e
 
 SYSTEMCTL="systemctl --user"
@@ -59,21 +60,24 @@ IPADDR="127.0.0.2"
 mkdir -p "$HOME/.config/dtn"
 cat <<EOF >"$HOME/.config/dtn/client.yaml"
 udpcl:
+    log_level: info
     bus_service: dtn.${NODENAME}.udpcl
 
-    multicast:
-        v4sources:
-          - ${IPADDR}
+#    multicast:
+#        v4sources:
+#          - ${IPADDR}
 
     dtls_enable_tx: False
 
     mtu_default: 1280
     init_listen:
       - address: ${IPADDR}
-        multicast_member:
-          - addr: 224.0.0.1
+      - address: 224.0.0.1
+#        multicast_member:
+#          - addr: 224.0.0.1
 
 tcpcl:
+    log_level: info
     bus_service: dtn.${NODENAME}.tcpcl
     node_id: dtn://${NODENAME}/
 
@@ -82,10 +86,17 @@ tcpcl:
         address: ${IPADDR}
 
 bp:
+    log_level: debug
     bus_service: dtn.${NODENAME}.bp
     node_id: dtn://${NODENAME}/
 
-    route_table:
+    rx_route_table:
+      - eid_pattern: "dtn:~neighbor"
+        action: deliver
+      - eid_pattern: "dtn://client/.*"
+        action: deliver
+
+    tx_route_table:
       - eid_pattern: "dtn:~neighbor"
         next_nodeid: "dtn:~neighbor"
         cl_type: udpcl
@@ -97,6 +108,12 @@ bp:
 #        cl_type: tcpcl
         address: 127.0.0.3
 
+        # default route
+      - eid_pattern: ".*"
+        next_nodeid: dtn://server/
+        cl_type: udpcl
+        address: 127.0.0.3
+
 nmp:
     bus_service: dtn.${NODENAME}.nmp
 EOF
@@ -106,21 +123,24 @@ IPADDR="127.0.0.3"
 mkdir -p "$HOME/.config/dtn"
 cat <<EOF >"$HOME/.config/dtn/server.yaml"
 udpcl:
+    log_level: info
     bus_service: dtn.${NODENAME}.udpcl
 
-    multicast:
-        v4sources:
-          - ${IPADDR}
+#    multicast:
+#        v4sources:
+#          - ${IPADDR}
 
     dtls_enable_tx: False
 
     mtu_default: 1280
     init_listen:
-      - address: 0.0.0.0
-        multicast_member:
-          - addr: 224.0.0.1
+      - address: ${IPADDR}
+      - address: 224.0.0.1
+#        multicast_member:
+#          - addr: 224.0.0.1
 
 tcpcl:
+    log_level: info
     bus_service: dtn.${NODENAME}.tcpcl
     node_id: dtn://${NODENAME}/
 
@@ -129,10 +149,17 @@ tcpcl:
         address: ${IPADDR}
 
 bp:
+    log_level: debug
     bus_service: dtn.${NODENAME}.bp
     node_id: dtn://${NODENAME}/
 
-    route_table:
+    rx_route_table:
+      - eid_pattern: "dtn:~neighbor"
+        action: deliver
+      - eid_pattern: "dtn://server/.*"
+        action: deliver
+
+    tx_route_table:
       - eid_pattern: "dtn:~neighbor"
         next_nodeid: "dtn:~neighbor"
         cl_type: udpcl
@@ -143,13 +170,20 @@ bp:
         cl_type: udpcl
 #        cl_type: tcpcl
         address: 127.0.0.2
+
+        # default route
+#      - eid_pattern: ".*"
+#        next_nodeid: dtn:none
+#        cl_type: udpcl
+#       address: 127.0.0.8
+
 EOF
 
 pip3 install --user .
 $SYSTEMCTL daemon-reload
 for NODE in client server; do
     for SVC in bp udpcl; do
-	$SYSTEMCTL restart dtn-${SVC}-agent@${NODE}
+    $SYSTEMCTL restart dtn-${SVC}-agent@${NODE}
     done
 done
 $SYSTEMCTL status "dtn.slice"

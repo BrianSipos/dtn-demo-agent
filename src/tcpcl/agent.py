@@ -26,7 +26,7 @@ class Agent(dbus.service.Object):
     DBUS_IFACE = 'org.ietf.dtn.tcpcl.Agent'
 
     def __init__(self, config, bus_kwargs=None):
-        self._logger = logging.getLogger(self.__class__.__name__)
+        self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self._config = config
         self._on_stop = None
         #: Set when shutdown() is called and waiting on sessions
@@ -202,7 +202,7 @@ class Agent(dbus.service.Object):
 
         :return: True to continue listening.
         '''
-        newsock, fromaddr = bindsock.accept()
+        newsock, fromaddr = bindsock.deliver()
         self._logger.info('Connecting')
         hdl = self._bind_handler(
             config=self._config, sock=newsock, fromaddr=fromaddr)

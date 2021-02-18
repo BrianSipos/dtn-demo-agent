@@ -101,7 +101,7 @@ class Agent(dbus.service.Object):
     DBUS_IFACE = 'org.ietf.dtn.udpcl.Agent'
 
     def __init__(self, config, bus_kwargs=None):
-        self.__logger = logging.getLogger(self.__class__.__name__)
+        self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self._config = config
         self._on_stop = None
 
@@ -532,7 +532,7 @@ class Agent(dbus.service.Object):
         if ipaddr.is_multicast:
             multicast = self._config.multicast
 
-            loop = 1
+            loop = 0
             if loop is not None:
                 if is_ipv4:
                     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loop)

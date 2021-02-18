@@ -6,35 +6,9 @@ import logging
 import sys
 from gi.repository import GLib as glib
 
+from tcpcl.cmd import root_logging
 from udpcl.config import Config, ListenConfig
 from udpcl.agent import Agent
-
-
-def root_logging(log_level, log_queue=None):
-    ''' Initialize multiprocessing-safe logging.
-    '''
-    import multiprocessing
-    from logging.handlers import QueueHandler, QueueListener
-
-    if log_queue is None:
-        log_queue = multiprocessing.Queue()
-
-        # ql gets records from the queue and sends them to the stream handler
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s PID:%(process)s TID:%(threadName)s <%(levelname)s> %(name)s: %(message)s"))
-        ql = QueueListener(log_queue, handler)
-        ql.start()
-
-    # Root logger gets queued
-    logger = logging.getLogger()
-    logger.setLevel(log_level)
-    for hdl in logger.handlers:
-        logger.removeHandler(hdl)
-
-    qh = QueueHandler(log_queue)
-    logger.addHandler(qh)
-
-    return log_queue
 
 
 def main():
@@ -42,7 +16,7 @@ def main():
     from dbus.mainloop.glib import DBusGMainLoop
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--log-level', dest='log_level', default='info',
+    parser.add_argument('--log-level', dest='log_level',
                         metavar='LEVEL',
                         help='Console logging lowest level displayed.')
     parser.add_argument('--config-file', type=str,
@@ -57,7 +31,8 @@ def main():
                                help='Listen TCP port')
 
     args = parser.parse_args()
-    root_logging(args.log_level.upper())
+
+    root_logging(args.log_level.upper() if args.log_level else 'WARNING')
     logging.debug('command args: %s', args)
 
     # Must run before connection or real main loop is constructed
@@ -67,6 +42,8 @@ def main():
     if args.config_file:
         with open(args.config_file, 'rb') as infile:
             config.from_file(infile)
+    if config.log_level and not args.log_level:
+        logging.getLogger().setLevel(config.log_level.upper())
 
     if args.action == 'listen':
         config.init_listen.append(

@@ -66,7 +66,7 @@ class Connection(object):
     '''
 
     def __init__(self, sock, as_passive, peer_name):
-        self._logger = logging.getLogger(self.__class__.__name__)
+        self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
 
         self._on_close = None
         self._as_passive = as_passive
@@ -433,7 +433,7 @@ class Messenger(Connection):
     '''
 
     def __init__(self, config, sock, fromaddr=None, toaddr=None):
-        self._logger = logging.getLogger(self.__class__.__name__)
+        self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self._config = config
 
         self._on_state_change = None
@@ -1149,7 +1149,7 @@ class ContactHandler(Messenger, dbus.service.Object):
     DBUS_IFACE = 'org.ietf.dtn.tcpcl.Contact'
 
     def __init__(self, hdl_kwargs, bus_kwargs):
-        self._logger = logging.getLogger(self.__class__.__name__)
+        self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         Messenger.__init__(self, **hdl_kwargs)
         dbus.service.Object.__init__(self, **bus_kwargs)
         self.object_path = bus_kwargs['object_path']
@@ -1284,7 +1284,7 @@ class ContactHandler(Messenger, dbus.service.Object):
             delta_b = length - self._segment_last_ack_len
             self._segment_last_ack_len = length
 
-            rx_time = datetime.datetime.utcnow()
+            rx_time = datetime.datetime.now(datetime.timezone.utc)
             tx_time = self._segment_tx_times.pop(length)
             delta_t = (rx_time - tx_time).total_seconds()
 
@@ -1517,7 +1517,7 @@ class ContactHandler(Messenger, dbus.service.Object):
         # Actual segment
         self.send_xfer_data(self._tx_tmp.transfer_id, data, flg, ext_items)
         # Mark the transmit time
-        self._segment_tx_times[self._tx_length] = datetime.datetime.utcnow()
+        self._segment_tx_times[self._tx_length] = datetime.datetime.now(datetime.timezone.utc)
 
         if flg & messages.TransferSegment.Flag.END:
             if not self._do_send_ack_final:

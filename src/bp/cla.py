@@ -28,7 +28,7 @@ class AbstractAdaptor(object):
     '''
 
     def __init__(self):
-        self._logger = logging.getLogger(self.__class__.__name__)
+        self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
 
         self.serv_name = None
         self.obj_path = None
@@ -220,7 +220,7 @@ class TcpclConnection(object):
     DBUS_IFACE = 'org.ietf.dtn.tcpcl.Contact'
 
     def __init__(self):
-        self._logger = logging.getLogger(self.__class__.__name__)
+        self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
 
         self.serv_name = None
         self.obj_path = None
