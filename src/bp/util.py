@@ -24,6 +24,7 @@ class BundleContainer(object):
     :ivar bundle: The decoded bundle itself.
     :ivar actions: Processing recorded on this bundle.
     :ivar status_reason: The last status reason.
+    :ivar route: The transmit route (type :py:cls:`TxRouteItem`) chosen for this bundle.
     :ivar sender: The transmit function to send this bundle.
     '''
 
@@ -41,6 +42,8 @@ class BundleContainer(object):
         self.actions = {}
         # Last status reason
         self.status_reason = None
+
+        self.route = None
         self.sender = None
 
         self.reload()
@@ -64,6 +67,14 @@ class BundleContainer(object):
         :return: A list of blocks of that type, which may be empty.
         '''
         return self._block_type.get(type_code, [])
+
+    def log_name(self):
+        ''' Get a log-friendly name for this bundle.
+        '''
+        return '(dest {}, ident {})'.format(
+            self.bundle.primary.destination,
+            self.bundle_ident()
+        )
 
     def bundle_ident(self):
         ''' Get the bundle identity (source + timestamp) as a tuple.
@@ -92,6 +103,7 @@ class BundleContainer(object):
         ''' Add an extension block.
         The block is added just before the payload.
         :param blk: The existing block to remove (and reindex).
+        This block will have its BTSD set if not already.
         '''
         if not isinstance(blk, CanonicalBlock):
             raise TypeError()
@@ -103,6 +115,8 @@ class BundleContainer(object):
             blk.setfieldval('block_num', self.get_block_num())
         elif blk_num in self._block_num:
             raise KeyError('add_block() given duplicate block number {}'.foramt(blk_num))
+
+        blk.ensure_block_type_specific_data()
 
         self.bundle.blocks.insert(-1, blk)
         self._block_num[blk_num] = blk
@@ -176,12 +190,13 @@ class BundleContainer(object):
                     set_num = self.get_block_num()
                 blk.overloaded_fields['block_num'] = set_num
 
-    def record_action(self, action, reason=0):
+    def record_action(self, action, reason=None):
         ''' Mark an action on this bundle.
         '''
         self.actions[action] = datetime.datetime.now(datetime.timezone.utc)
-        # supersede any earlier reason
-        self.status_reason = reason
+        if reason is not None:
+            # supersede any earlier reason
+            self.status_reason = reason
 
     def create_report(self):
         # Request for each action status
@@ -201,12 +216,13 @@ class BundleContainer(object):
 
         status_dest = self.bundle.primary.report_to
         if status_dest is None or status_dest == 'dtn:none':
-            return False
+            return None
 
         own_flags = self.bundle.primary.getfieldval('bundle_flags')
         status_ts = bool(own_flags & PrimaryBlock.Flag.REQ_STATUS_TIME)
 
         status_array = StatusInfoArray()
+        any_status = False
         for (action, timestamp) in self.actions.items():
             try:
                 flag = FLAGS[action]
@@ -220,10 +236,14 @@ class BundleContainer(object):
                 at=(timestamp if status_ts else None),
             )
             status_array.setfieldval(STATUS_FIELD[action], status_info)
+            any_status = True
+
+        if not any_status:
+            return None
 
         report = StatusReport(
             status=status_array,
-            reason_code=self.status_reason,
+            reason_code=(self.status_reason if self.status_reason else StatusReport.ReasonCode.NO_INFO),
             subj_source=self.bundle.primary.source,
             subj_ts=self.bundle.primary.create_ts,
         )

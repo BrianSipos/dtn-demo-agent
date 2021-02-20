@@ -91,8 +91,6 @@ bp:
     node_id: dtn://${NODENAME}/
 
     rx_route_table:
-      - eid_pattern: "dtn:~neighbor"
-        action: deliver
       - eid_pattern: "dtn://client/.*"
         action: deliver
 
@@ -154,8 +152,6 @@ bp:
     node_id: dtn://${NODENAME}/
 
     rx_route_table:
-      - eid_pattern: "dtn:~neighbor"
-        action: deliver
       - eid_pattern: "dtn://server/.*"
         action: deliver
 

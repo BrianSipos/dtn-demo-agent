@@ -1,0 +1,12 @@
+[Unit]
+Description=DTN UDPCL Agent for %i
+After=network-online.target
+
+[Service]
+Slice=dtn.slice
+Type=dbus
+ExecStart=udpcl-agent --config-file /etc/xdg/dtn/%i.yaml
+BusName=org.ietf.dtn.%i.udpcl
+
+[Install]
+WantedBy=dtn-bp-agent@%i.service

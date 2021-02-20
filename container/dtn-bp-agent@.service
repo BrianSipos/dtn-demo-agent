@@ -1,0 +1,13 @@
+[Unit]
+Description=DTN BP Agent for %i
+After=syslog.target network-online.target
+Wants=dtn-udpcl-agent@%i.service dtn-tcpcl-agent@%i.service
+
+[Service]
+Slice=dtn.slice
+Type=dbus
+ExecStart=bp-agent --config-file /etc/xdg/dtn/%i.yaml
+BusName=org.ietf.dtn.%i.bp
+
+[Install]
+WantedBy=multi-user.target

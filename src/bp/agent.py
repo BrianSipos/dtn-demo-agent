@@ -114,7 +114,9 @@ class Agent(dbus.service.Object):
         # Seen bundle identities
         self._seen_bundle_ident = set()
         # Forwarding queue
-        self._fwd_ctrs = []
+        self._fwd_queue = []
+        # Transmit queue
+        self._tx_queue = []
 
         if self._config.bus_service:
             self._bus_serv = dbus.service.BusName(
@@ -178,7 +180,7 @@ class Agent(dbus.service.Object):
                     cl_agent.bind(self._config.bus_conn)
 
     def _show_chain(self, chain, name):
-        parts = ['{:3.1f}: {}'.format(item.order, item.name) for item in chain]
+        parts = ['{:5.1f}: {}'.format(item.order, item.name) for item in chain]
         self._logger.debug('Items in %s:\n%s', name, '\n'.join(parts))
 
     def _cl_recv_bundle(self, data):
@@ -191,6 +193,9 @@ class Agent(dbus.service.Object):
     def _do_rx_step(self, ctr):
         ''' Perform the static RX routing step.
         '''
+        if 'deliver' in ctr.actions:
+            return
+
         eid = ctr.bundle.primary.destination
         self._logger.info('Getting RX route for: %s', eid)
         found = None
@@ -203,7 +208,8 @@ class Agent(dbus.service.Object):
         if found:
             self._logger.debug('Route found: %s', found)
             ctr.record_action(found.action)
-        return False
+
+        return
 
     def _do_tx_step(self, ctr):
         ''' Perform the static TX routing step.
@@ -217,71 +223,14 @@ class Agent(dbus.service.Object):
             if match is not None:
                 found = item
                 break
+
         if found:
             self._logger.debug('Route found: %s', found)
-            ctr.sender = self._cl_agent[found.cl_type].send_bundle_func(**found.raw_config)
+            ctr.route = found
+        else:
+            self._logger.debug('No static route for: %s', eid)
 
-        return found
-
-    def _fragment(self, ctr, route):
-        orig_size = len(ctr.bundle)
-        bundle_flags = ctr.bundle.primary.bundle_flags
-        should_fragment = (
-            route.mtu is not None
-            and orig_size > route.mtu
-            and not bundle_flags & PrimaryBlock.Flag.NO_FRAGMENT
-            and not bundle_flags & PrimaryBlock.Flag.IS_FRAGMENT
-        )
-        self._logger.info('Unfragmented size %d, should fragment %s', orig_size, should_fragment)
-
-        if not should_fragment:
-            # no fragmentation
-            return [ctr]
-
-        # take the payload data to fragment it
-        pyld_blk = ctr.block_num(Bundle.BLOCK_NUM_PAYLOAD)
-        payload_data = pyld_blk.getfieldval('btsd')
-        pyld_blk.delfieldval('btsd')
-        payload_size = len(payload_data)
-        self._logger.info('Payload data size %d', payload_size)
-        # maximum size of each fragment field
-        pyld_size_enc = len(cbor2.dumps(payload_size))
-
-        # two encoded sizes for fragment, one for payload bstr head
-        non_pyld_size = orig_size - payload_size + 3 * pyld_size_enc
-        self._logger.info('Non-payload size %d', non_pyld_size)
-        if non_pyld_size > route.mtu:
-            raise RuntimeError('Non-payload size {} too large for route MTU {}'.format(orig_size, route.mtu))
-
-        frag_offset = 0
-        ctrlist = []
-        while frag_offset < len(payload_data):
-            fctr = BundleContainer()
-            fctr.bundle.primary = ctr.bundle.primary.copy()
-            fctr.bundle.primary.bundle_flags |= PrimaryBlock.Flag.IS_FRAGMENT
-            fctr.bundle.primary.fragment_offset = frag_offset
-            fctr.bundle.primary.total_app_data_len = payload_size
-
-            for blk in ctr.bundle.blocks:
-                if (not ctrlist
-                    or blk.block_flags & CanonicalBlock.Flag.REPLICATE_IN_FRAGMENT
-                    or blk.type_code == Bundle.BLOCK_NUM_PAYLOAD):
-                    fctr.bundle.blocks.append(blk.copy())
-            # ensure full size (with zero-size payload)
-            fctr.reload()
-            fctr.bundle.fill_fields()
-
-            non_pyld_size = len(fctr.bundle)
-            # zero-length payload has one-octet encoded bstr head
-            frag_size = route.mtu - (non_pyld_size - 1 + pyld_size_enc)
-            self._logger.info('Fragment non-payload size %d, offset %d, (max) size %d', non_pyld_size, frag_offset, frag_size)
-            frag_data = payload_data[frag_offset:(frag_offset + frag_size)]
-            frag_offset += frag_size
-
-            fctr.block_num(Bundle.BLOCK_NUM_PAYLOAD).setfieldval('btsd', frag_data)
-            ctrlist.append(fctr)
-
-        return ctrlist
+        return
 
     def _finish_bundle(self, ctr):
         ''' Handle the end of processing for a bundle.
@@ -317,33 +266,34 @@ class Agent(dbus.service.Object):
         ctr.record_action('receive')
 
         for step in self._rx_chain:
-            self._logger.debug('Performing RX step %.1f: %s', step.order, step.name)
+            self._logger.debug('Performing RX step %5.1f: %s', step.order, step.name)
             if step.action(ctr):
-                self._logger.debug('Step %.1f interrupted the chain', step.order)
+                self._logger.debug('Step %5.1f interrupted the chain', step.order)
                 break
 
         if 'delete' in ctr.actions:
-            self._logger.warning('Deleting bundle ident %s', ctr.bundle_ident())
+            self._logger.warning('Deleting bundle %s', ctr.log_name())
             self._finish_bundle(ctr)
             return
 
         if 'deliver' in ctr.actions:
-            self._logger.warning('Delivered bundle ident %s', ctr.bundle_ident())
+            self._logger.info('Delivered bundle %s', ctr.log_name())
             self._finish_bundle(ctr)
-        else:
-            # assume we want to forward
-            self._fwd_ctrs.append(ctr)
+
+        if 'forward' in ctr.actions:
+            # defer forwarded status until actually sent
+            self._fwd_queue.append(ctr)
             glib.idle_add(self._do_fwd)
 
     def _do_fwd(self):
         ''' Process the forwarding queue.
         :return: True if there are more items to process.
         '''
-        if not self._fwd_ctrs:
+        if not self._fwd_queue:
             return False
 
         try:
-            ctr = self._fwd_ctrs.pop(0)
+            ctr = self._fwd_queue.pop(0)
 
             for blk in ctr.block_type(PreviousNodeBlock):
                 ctr.remove_block(blk)
@@ -362,9 +312,10 @@ class Agent(dbus.service.Object):
 
             self.send_bundle(ctr)
             # Status after send 'success'
+            self._logger.info('Forwarded bundle %s: %s', ctr.log_name())
             ctr.record_action('forward')
         except Exception as err:
-            self._logger.error('Failed to forward bundle %s: %s', ctr.bundle_ident(), err)
+            self._logger.error('Failed to forward bundle %s: %s', ctr.log_name(), err)
             ctr.record_action('delete', StatusReport.ReasonCode.NO_ROUTE)
 
         self._finish_bundle(ctr)
@@ -372,12 +323,26 @@ class Agent(dbus.service.Object):
     def _apply_primary(self, ctr):
         ''' Touch up primary block content from defaults.
         '''
+        pri_blk = ctr.bundle.primary
         # apply local policy
-        if ctr.bundle.primary.create_ts.getfieldval('dtntime') == 0:
-            ctr.bundle.primary.create_ts = self.timestamp()
-        if ctr.bundle.primary.getfieldval('lifetime') == 0:
+        if pri_blk.source is None:
+            pri_blk.source = self._config.node_id
+
+        any_report = (
+            PrimaryBlock.Flag.REQ_DELETION_REPORT
+            | PrimaryBlock.Flag.REQ_DELIVERY_REPORT
+            | PrimaryBlock.Flag.REQ_FORWARDING_REPORT
+            | PrimaryBlock.Flag.REQ_RECEPTION_REPORT
+        )
+        if pri_blk.bundle_flags & any_report and pri_blk.report_to is None:
+            pri_blk.report_to = self._config.node_id
+
+        if pri_blk.create_ts.getfieldval('dtntime') == 0:
+            pri_blk.create_ts = self.timestamp()
+
+        if pri_blk.getfieldval('lifetime') == 0:
             td = datetime.timedelta(hours=1)
-            ctr.bundle.primary.lifetime = td.total_seconds() * 1e3 + td.microseconds // 1e3
+            pri_blk.lifetime = td.total_seconds() * 1e3 + td.microseconds // 1e3
 
     def send_bundle(self, ctr):
         ''' Perform agent handling to send a bundle.
@@ -389,28 +354,31 @@ class Agent(dbus.service.Object):
         '''
         ctr.reload()
         self._apply_primary(ctr)
-
-        for step in self._tx_chain:
-            self._logger.debug('Performing TX step %.1f: %s', step.order, step.name)
-            if step.action(ctr):
-                self._logger.debug('Step %.1f interrupted the chain', step.order)
-                break
-
         ctr.fix_block_num()
         ctr.bundle.fill_fields()
 
-        # Remember outgoing identities
-        self._seen_bundle_ident.add(ctr.bundle_ident())
-#FIXME        ctrlist = self._fragment(ctr, route)
-        ctrlist = [ctr]
-        for ctr in ctrlist:
-            ctr.bundle.update_all_crc()
-            self._seen_bundle_ident.add(ctr.bundle_ident())
-            self._logger.debug('Sending bundle\n%s', ctr.bundle.show(dump=True))
-            data = bytes(ctr.bundle)
-            self._logger.info('send_bundle size %d', len(data))
-            self._logger.debug('send_bundle data %s', encode_diagnostic(cbor2.loads(data)))
-            ctr.sender(data)
+        for step in self._tx_chain:
+            self._logger.debug('Performing TX step %5.1f: %s', step.order, step.name)
+            if step.action(ctr):
+                self._logger.debug('Step %5.1f interrupted the chain', step.order)
+                break
+
+        if ctr.route and not ctr.sender:
+            # Assume the route is a TxRouteItem
+            ctr.sender = self._cl_agent[ctr.route.cl_type].send_bundle_func(**ctr.route.raw_config)
+
+        if ctr.sender is None:
+            raise RuntimeError('TX chain completed with no sender for %s', ctr.log_name())
+
+        ctr.fix_block_num()
+        ctr.bundle.fill_fields()
+        ctr.bundle.update_all_crc()
+
+        self._logger.debug('Sending bundle\n%s', ctr.bundle.show(dump=True))
+        data = bytes(ctr.bundle)
+        self._logger.info('send_bundle size %d', len(data))
+        self._logger.debug('send_bundle data %s', encode_diagnostic(cbor2.loads(data)))
+        ctr.sender(data)
 
     @dbus.service.method(DBUS_IFACE, in_signature='ss', out_signature='')
     def cl_attach(self, cltype, servname):
@@ -453,7 +421,6 @@ class Agent(dbus.service.Object):
                 | PrimaryBlock.Flag.REQ_FORWARDING_REPORT
                 | PrimaryBlock.Flag.REQ_RECEPTION_REPORT
                 | PrimaryBlock.Flag.REQ_STATUS_TIME
-                | PrimaryBlock.Flag.NO_FRAGMENT
             ),
             destination=str(nodeid),
             source=self._config.node_id,

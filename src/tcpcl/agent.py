@@ -5,7 +5,6 @@ import argparse
 import logging
 import socket
 import sys
-
 import dbus.service
 from gi.repository import GLib as glib
 

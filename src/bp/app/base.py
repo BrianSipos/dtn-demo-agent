@@ -12,6 +12,8 @@ def app(path: str):
     '''
 
     def func(cls):
+        if path in APPLICATIONS:
+            raise KeyError('Duplicate app path: {}'.format(path))
         APPLICATIONS[path] = cls
         return cls
 

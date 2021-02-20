@@ -3,12 +3,12 @@ from setuptools import setup, find_packages
 
 setup(
     # Basic info
-    name='ietf-dtn-tcpcl-demo',
+    name='ietf-dtn-demo-agent',
     version='0.0',
     author='Brian Sipos',
     author_email='bsipos@rkf-eng.com',
-    url='https://github.com/BSipos-RKF/dtn-bpbis-tcpcl',
-    description='A demonstration agent for the DTN TCPCLv4.',
+    url='https://github.com/BSipos-RKF/dtn-demo-agent',
+    description='A demonstration agent for the DTN BPv7/TCPCLv4/UDPCL.',
     long_description='''\
 This implements all of the required behavior of the TCPCLv4 specification as
 well as some proof-of-concept behaviors such as segment/transfer pipelining 

@@ -79,7 +79,7 @@ class Bpsec(AbstractApplication):
 
     def add_chains(self, rx_chain, tx_chain):
         rx_chain.append(ChainStep(
-            order=-10,
+            order=20,
             name='BPSec verify integrity',
             action=self._verify_bib
         ))
@@ -144,9 +144,9 @@ class Bpsec(AbstractApplication):
 
             ext_aad_enc = get_bpsec_cose_aad(ctr, target_blk, bib, aad_scope)
             cose_key = RSA.from_cryptograpy_key_obj(self._priv_key)
-            self._logger.debug('Signing target %d AAD %s payload %s',
-                                blk_num, encode_diagnostic(ext_aad_enc),
-                                encode_diagnostic(target_plaintext))
+            LOGGER.debug('Signing target %d AAD %s payload %s',
+                         blk_num, encode_diagnostic(ext_aad_enc),
+                         encode_diagnostic(target_plaintext))
             msg_obj = Sign1Message(
                 phdr={
                     CoseHeaderKeys.ALG: CoseAlgorithms.PS256,
@@ -167,7 +167,7 @@ class Bpsec(AbstractApplication):
             msg_dec = cbor2.loads(msg_enc)
             msg_dec[2] = None
             msg_enc = cbor2.dumps(msg_dec)
-            self._logger.debug('Sending COSE message\n%s', encode_diagnostic(msg_dec))
+            LOGGER.debug('Sending COSE message\n%s', encode_diagnostic(msg_dec))
 
             target_result.append(
                 TypeValuePair(
@@ -182,15 +182,17 @@ class Bpsec(AbstractApplication):
             for result in target_result
         ])
         bib.add_payload(bib_data)
-        bib.ensure_block_type_specific_data()
-        ctr.bundle.blocks.insert(0, bib)
+        ctr.add_block(bib)
 
     def _verify_bib(self, ctr):
         ''' Check for and verify any BIBs.
         '''
+        if 'deliver' not in ctr.actions:
+            return
+
         integ_blocks = ctr.block_type(BlockIntegrityBlock)
         for bib in integ_blocks:
-            self._logger.debug('Verifying BIB in %d with targets %s', bib.block_num, bib.payload.targets)
+            LOGGER.debug('Verifying BIB in %d with targets %s', bib.block_num, bib.payload.targets)
             if bib.payload.context_id == BPSEC_COSE_CONTEXT_ID:
                 from cose import CoseMessage, CoseHeaderKeys, RSA
 
@@ -225,13 +227,13 @@ class Bpsec(AbstractApplication):
                         # replace detached payload
                         msg_enc = bytes(result.getfieldval('value'))
                         msg_dec = cbor2.loads(msg_enc)
-                        self._logger.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
+                        LOGGER.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
                         msg_dec[2] = target_blk.getfieldval('btsd')
 
                         msg_obj = msg_cls.from_cose_obj(msg_dec)
                         msg_obj.external_aad = get_bpsec_cose_aad(ctr, target_blk, bib, aad_scope)
 
-                        self._logger.debug('Validating certificate at time %s', bundle_at)
+                        LOGGER.debug('Validating certificate at time %s', bundle_at)
 
                         try:
                             x5t = msg_obj.uhdr[CoseHeaderKeys.X5_T]
@@ -239,18 +241,18 @@ class Bpsec(AbstractApplication):
                                 chain for chain in der_chains
                                 if x5t.matches(chain[0])
                             ]
-                            self._logger.debug('Found %d chains matcing end-entity cert for %s', len(found_chains), encode_diagnostic(x5t.encode()))
+                            LOGGER.debug('Found %d chains matcing end-entity cert for %s', len(found_chains), encode_diagnostic(x5t.encode()))
                             if not found_chains:
                                 raise RuntimeError('No chain matcing end-entity cert for {}'.format(x5t.encode()))
                             if len(found_chains) > 1:
                                 raise RuntimeError('Multiple chains matcing end-entity cert for {}'.format(x5t.encode()))
                         except Exception as err:
-                            self._logger.error('Failed to find cert chain for block num %d: %s', blk_num, err)
+                            LOGGER.error('Failed to find cert chain for block num %d: %s', blk_num, err)
                             continue
 
                         try:
                             chain = found_chains[0]
-                            self._logger.debug('Validating chain with %d certs against %d CAs', len(chain), len(self._ca_certs))
+                            LOGGER.debug('Validating chain with %d certs against %d CAs', len(chain), len(self._ca_certs))
                             val = CertificateValidator(
                                 end_entity_cert=chain[0],
                                 intermediate_certs=chain[1:],
@@ -261,14 +263,14 @@ class Bpsec(AbstractApplication):
                                 #key_usage={u'digital_signature', u'non_repudiation'},
                             )
                         except Exception as err:
-                            self._logger.error('Failed to verify chain on block num %d: %s', blk_num, err)
+                            LOGGER.error('Failed to verify chain on block num %d: %s', blk_num, err)
                             continue
 
                         peer_nodeid = bib.payload.source or ctr.bundle.primary.source
                         end_cert = x509.load_der_x509_certificate(chain[0], default_backend())
-                        authn_nodeid = tcpcl.session.match_id(peer_nodeid, end_cert, x509.UniformResourceIdentifier, self._logger, 'NODE-ID')
+                        authn_nodeid = tcpcl.session.match_id(peer_nodeid, end_cert, x509.UniformResourceIdentifier, LOGGER, 'NODE-ID')
                         if not authn_nodeid:
-                            self._logger.error('Failed to authenticate peer "%s" on block num %d', peer_nodeid, blk_num)
+                            LOGGER.error('Failed to authenticate peer "%s" on block num %d', peer_nodeid, blk_num)
                             continue
 
                         try:
@@ -277,7 +279,7 @@ class Bpsec(AbstractApplication):
                                 public_key=cose_key,
                                 alg=msg_obj.phdr[CoseHeaderKeys.ALG],
                             )
-                            self._logger.info('Verified signature on block num %d', blk_num)
+                            LOGGER.info('Verified signature on block num %d', blk_num)
                         except Exception as err:
-                            self._logger.error('Failed to verify signature on block num %d: %s', blk_num, err)
+                            LOGGER.error('Failed to verify signature on block num %d: %s', blk_num, err)
                             continue
