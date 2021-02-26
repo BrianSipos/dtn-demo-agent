@@ -10,7 +10,7 @@ import subprocess
 import sys
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import rsa, ec
 
 LOGGER = logging.getLogger()
 
@@ -71,7 +71,7 @@ class Runner:
     def __init__(self, args):
         self._docker = re.split(r'\s+', os.environ.get('DOCKER', 'docker').strip())
         self._node_names = [
-            'dtn{:03d}'.format(ix)
+            'node{:03d}'.format(ix)
             for ix in range(args.node_count)
         ]
 
@@ -108,10 +108,7 @@ class Runner:
                     os.makedirs(configPath)
 
                 # Generate node key
-                node_key = rsa.generate_private_key(
-                    public_exponent=65537,
-                    key_size=2048,
-                )
+                node_key = ec.generate_private_key(ec.SECP256R1) # Curve for COSE ES256
                 with open(os.path.join(configPath, 'sign.key'), 'wb') as outfile:
                     outfile.write(node_key.private_bytes(
                         encoding=serialization.Encoding.PEM,
@@ -157,7 +154,7 @@ class Runner:
                     critical=False,
                 ).add_extension(
                     x509.ExtendedKeyUsage([
-                        x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.3.255')
+                        x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.3.35')  # id-kp-bundleSecurity
                     ]),
                     critical=False,
                 ).sign(ca_key, hashes.SHA256())

@@ -74,7 +74,7 @@ class OneHopNeighbor(object):
     tx_routes: List[TxRouteItem] = field(default_factory=list)
 
 
-@app('/org/ietf/dtn/bp/nmp')
+@app('nmp')
 class Nmp(AbstractApplication):
     ''' Neighbor messaging protocol.
     '''
@@ -108,7 +108,7 @@ class Nmp(AbstractApplication):
             action=self._rx_route
         ))
         rx_chain.append(ChainStep(
-            order=20,
+            order=30,
             name='NMP handling',
             action=self._recv_bundle
         ))
@@ -120,12 +120,13 @@ class Nmp(AbstractApplication):
 
     def _rx_route(self, ctr):
         eid = ctr.bundle.primary.destination
-        if eid != 'dtn:~neighbor':
-            return
-
-        ctr.record_action('deliver')
+        if eid == 'dtn:~neighbor':
+            ctr.record_action('deliver')
 
     def _recv_bundle(self, ctr):
+        if not self._recv_for(ctr, 'dtn:~neighbor'):
+            return
+
         msg = cbor2.loads(ctr.block_num(1).getfieldval('btsd'))
         LOGGER.info('Message RX: %s', encode_diagnostic(msg))
 
@@ -172,7 +173,7 @@ class Nmp(AbstractApplication):
             for peer in peerset:
                 (peer_nodeid, peer_link_status) = peer
                 if (
-                    self._config.node_id == peer_nodeid 
+                    self._config.node_id == peer_nodeid
                     and peer_link_status in (LinkStatus.HEARD, LinkStatus.SYMMETRIC)
                 ):
                     neighbor.link_status = LinkStatus.SYMMETRIC
@@ -181,6 +182,8 @@ class Nmp(AbstractApplication):
 
         else:
             LOGGER.warning('Ignoring unknown NMP message type %s', msg_type)
+
+        return True
 
     def _tx_route(self, ctr):
         eid = ctr.bundle.primary.destination

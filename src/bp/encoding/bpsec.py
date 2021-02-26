@@ -59,13 +59,13 @@ class AbstractSecurityBlock(CborArray):
     )
 
 
-@CanonicalBlock.bind_type(192)  #FIXME: not a real allocation
+@CanonicalBlock.bind_type(11)
 class BlockIntegrityBlock(AbstractSecurityBlock):
     ''' Block data from 'draft-ietf-dtn-bpsec-22'
     '''
 
 
-@CanonicalBlock.bind_type(193)  #FIXME: not a real allocation
+@CanonicalBlock.bind_type(12)
 class BlockConfidentalityBlock(AbstractSecurityBlock):
     ''' Block data from 'draft-ietf-dtn-bpsec-22'
     '''

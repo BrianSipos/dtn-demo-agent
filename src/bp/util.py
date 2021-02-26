@@ -6,12 +6,10 @@ import functools
 from typing import Optional, Callable
 import logging
 from bp.encoding import (
-    Timestamp,
     Bundle, AbstractBlock, PrimaryBlock, CanonicalBlock,
     AdminRecord,
     StatusReport, StatusInfoArray, StatusInfo
 )
-from bp.encoding.fields import DtnTimeField
 
 LOGGER = logging.getLogger(__name__)
 

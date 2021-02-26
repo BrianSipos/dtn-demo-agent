@@ -6,15 +6,16 @@ from certvalidator import CertificateValidator, ValidationContext
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, ec
 
 from scapy_cbor.util import encode_diagnostic
 import tcpcl.session
 from bp.encoding import (
     DtnTimeField, Timestamp,
-    Bundle, AbstractBlock, PrimaryBlock, CanonicalBlock,
+    AbstractBlock, PrimaryBlock, CanonicalBlock, StatusReport,
     BlockIntegrityBlock, AbstractSecurityBlock, TypeValuePair, TargetResultList,
 )
-from bp.util import BundleContainer, ChainStep
+from bp.util import ChainStep
 from bp.app.base import app, AbstractApplication
 
 LOGGER = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ def get_bpsec_cose_aad(ctr, target, secblk, aad_scope):
     return cbor2.dumps(aad_struct)
 
 
-@app('/org/ietf/dtn/bp/bpsec')
+@app('bpsec')
 class Bpsec(AbstractApplication):
     ''' Bundle Protocol security.
     '''
@@ -89,11 +90,83 @@ class Bpsec(AbstractApplication):
             action=self._apply_bib
         ))
 
+    def _extract_cose_key(self, keyobj):
+        from cose import (CoseAlgorithms, CoseEllipticCurves, EC2, RSA)
+        import cose.attributes.algorithms
+
+        if isinstance(keyobj, (rsa.RSAPrivateKey, rsa.RSAPublicKey)):
+            cose_key = RSA.from_cryptograpy_key_obj(keyobj)
+            cose_key.alg = CoseAlgorithms.PS256
+
+        elif isinstance(keyobj, (ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey)):
+            found_crv = None
+            found_alg_crv = None
+            for crvobj in CoseEllipticCurves:
+                try:
+                    crv_types = cose.attributes.algorithms.config(crvobj).curve
+                except AttributeError:
+                    continue
+                if not crv_types:
+                    continue
+                LOGGER.debug('compare crv %s vs %s', keyobj.curve, crv_types)
+                if type(keyobj.curve) in crv_types:
+                    found_crv = crvobj
+                    found_alg_crv = crv_types[0]
+                    break
+            if not found_crv:
+                raise TypeError('Cannot match crv for {}'.format(repr(keyobj.curve)))
+
+            found_alg = None
+            for algobj in CoseAlgorithms:
+                try:
+                    alg_crv = cose.attributes.algorithms.config(algobj).curve
+                except AttributeError:
+                    continue
+                if not alg_crv:
+                    continue
+                LOGGER.debug('compare alg %s vs %s', found_alg_crv, alg_crv)
+                if found_alg_crv is alg_crv:
+                    found_alg = algobj
+                    break
+            if not found_alg:
+                raise TypeError('Cannot match alg for {}'.format(repr(keyobj)))
+
+            if hasattr(keyobj, 'private_numbers'):
+                priv_nums = keyobj.private_numbers()
+                pub_nums = keyobj.public_key().public_numbers()
+            else:
+                priv_nums = None
+                pub_nums = keyobj.public_numbers()
+
+            kwargs = {}
+            if pub_nums:
+                x_coor = pub_nums.x
+                y_coor = pub_nums.y
+                kwargs.update(dict(
+                    x=x_coor.to_bytes((x_coor.bit_length() + 7) // 8, byteorder="big"),
+                    y=y_coor.to_bytes((y_coor.bit_length() + 7) // 8, byteorder="big")
+                ))
+            if priv_nums:
+                d_value = priv_nums.private_value
+                kwargs.update(dict(
+                    d=d_value.to_bytes((d_value.bit_length() + 7) // 8, byteorder="big"),
+                ))
+
+            cose_key = EC2(
+                alg=found_alg,
+                crv=found_crv,
+                **kwargs
+            )
+        else:
+            raise TypeError('Cannot handle key {}'.format(repr(keyobj)))
+
+        return cose_key
+
     def _apply_bib(self, ctr):
         ''' If configured add a BIB.
         The container must be reloaded beforehand.
         '''
-        from cose import Sign1Message, CoseHeaderKeys, CoseAlgorithms, RSA
+        from cose import (Sign1Message, CoseHeaderKeys, CoseAlgorithms)
         from cose.extensions.x509 import X5T
 
         if not self._priv_key:
@@ -135,6 +208,19 @@ class Bpsec(AbstractApplication):
                 TypeValuePair(type_code=3, value=x5chain)
             )
 
+        try:
+            cose_key = self._extract_cose_key(self._priv_key)
+        except Exception as err:
+            LOGGER.error('Cannot handle private key: %s', err)
+            return
+
+        phdr = {
+            CoseHeaderKeys.ALG: cose_key.alg,
+        }
+        uhdr = {
+            CoseHeaderKeys.X5_T: X5T.from_certificate(CoseAlgorithms.SHA_256, x5chain[0]).encode(),
+        }
+
         # Sign each target with one result per
         target_result = []
         for blk_num in bib_data.getfieldval('targets'):
@@ -143,24 +229,21 @@ class Bpsec(AbstractApplication):
             target_plaintext = target_blk.getfieldval('btsd')
 
             ext_aad_enc = get_bpsec_cose_aad(ctr, target_blk, bib, aad_scope)
-            cose_key = RSA.from_cryptograpy_key_obj(self._priv_key)
             LOGGER.debug('Signing target %d AAD %s payload %s',
                          blk_num, encode_diagnostic(ext_aad_enc),
                          encode_diagnostic(target_plaintext))
             msg_obj = Sign1Message(
-                phdr={
-                    CoseHeaderKeys.ALG: CoseAlgorithms.PS256,
-                },
-                uhdr={
-                    CoseHeaderKeys.X5_T: X5T.from_certificate(CoseAlgorithms.SHA_256, x5chain[0]).encode(),
-                },
+                phdr=phdr,
+                uhdr=uhdr,
                 payload=target_plaintext,
                 # Non-encoded parameters
                 external_aad=ext_aad_enc,
             )
+            LOGGER.debug('Signing with COSE key %s', repr(cose_key))
             msg_enc = msg_obj.encode(
                 private_key=cose_key,
-                alg=msg_obj.phdr[CoseHeaderKeys.ALG],
+                alg=cose_key.alg,
+                curve=getattr(cose_key, 'crv', None),
                 tagged=False
             )
             # detach payload
@@ -190,11 +273,14 @@ class Bpsec(AbstractApplication):
         if 'deliver' not in ctr.actions:
             return
 
+        # Report status reason
+        failure = None
+
         integ_blocks = ctr.block_type(BlockIntegrityBlock)
         for bib in integ_blocks:
             LOGGER.debug('Verifying BIB in %d with targets %s', bib.block_num, bib.payload.targets)
             if bib.payload.context_id == BPSEC_COSE_CONTEXT_ID:
-                from cose import CoseMessage, CoseHeaderKeys, RSA
+                from cose import CoseMessage, CoseHeaderKeys
 
                 aad_scope = 0x7
                 der_chains = []
@@ -212,10 +298,10 @@ class Bpsec(AbstractApplication):
                         cert.public_bytes(serialization.Encoding.DER)
                         for cert in self._ca_certs
                     ],
-#                    other_certs=[
-#                        cert.public_bytes(serialization.Encoding.DER)
-#                        for cert in self._cert_chain
-#                    ],
+                    other_certs=[
+                        cert.public_bytes(serialization.Encoding.DER)
+                        for cert in self._cert_chain
+                    ],
                     moment=bundle_at,
                 )
 
@@ -248,6 +334,7 @@ class Bpsec(AbstractApplication):
                                 raise RuntimeError('Multiple chains matcing end-entity cert for {}'.format(x5t.encode()))
                         except Exception as err:
                             LOGGER.error('Failed to find cert chain for block num %d: %s', blk_num, err)
+                            failure = StatusReport.ReasonCode.FAILED_SEC
                             continue
 
                         try:
@@ -264,22 +351,30 @@ class Bpsec(AbstractApplication):
                             )
                         except Exception as err:
                             LOGGER.error('Failed to verify chain on block num %d: %s', blk_num, err)
+                            failure = StatusReport.ReasonCode.FAILED_SEC
                             continue
 
-                        peer_nodeid = bib.payload.source or ctr.bundle.primary.source
+                        peer_nodeid = bib.payload.source
                         end_cert = x509.load_der_x509_certificate(chain[0], default_backend())
                         authn_nodeid = tcpcl.session.match_id(peer_nodeid, end_cert, x509.UniformResourceIdentifier, LOGGER, 'NODE-ID')
                         if not authn_nodeid:
                             LOGGER.error('Failed to authenticate peer "%s" on block num %d', peer_nodeid, blk_num)
-                            continue
+                            failure = StatusReport.ReasonCode.FAILED_SEC
+                            # Continue on to verification
 
                         try:
-                            cose_key = RSA.from_cryptograpy_key_obj(end_cert.public_key())
+                            cose_key = self._extract_cose_key(end_cert.public_key())
                             msg_obj.verify_signature(
                                 public_key=cose_key,
-                                alg=msg_obj.phdr[CoseHeaderKeys.ALG],
+                                alg=cose_key.alg,
+                                curve=getattr(cose_key, 'crv', None),
                             )
                             LOGGER.info('Verified signature on block num %d', blk_num)
                         except Exception as err:
                             LOGGER.error('Failed to verify signature on block num %d: %s', blk_num, err)
-                            continue
+                            failure = StatusReport.ReasonCode.FAILED_SEC
+
+        if failure is not None:
+            del ctr.actions['deliver']
+            ctr.record_action('delete', failure)
+        return failure is not None

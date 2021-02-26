@@ -1,20 +1,23 @@
 ''' Base class and registrar.
 '''
 import dbus.service
+from bp.encoding import (
+    AbstractBlock, PrimaryBlock, CanonicalBlock,
+)
 
 #: Dictionary of BP applications
 APPLICATIONS = {}
 
 
-def app(path: str):
+def app(name: str):
     ''' Decorator to register a CL adaptor class.
-    :param str path: DBus object path to register.
+    :param str name: Unique application name.
     '''
 
     def func(cls):
-        if path in APPLICATIONS:
-            raise KeyError('Duplicate app path: {}'.format(path))
-        APPLICATIONS[path] = cls
+        if name in APPLICATIONS:
+            raise KeyError('Duplicate app name: {}'.format(name))
+        APPLICATIONS[name] = cls
         return cls
 
     return func
@@ -43,3 +46,12 @@ class AbstractApplication(dbus.service.Object):
         :param tx_chain: The list of :py:cls:`util.ChainStep`.
         '''
         return
+
+    def _recv_for(self, ctr, dest_eid):
+        if 'deliver' not in ctr.actions:
+            return False
+        if ctr.bundle.primary.destination != dest_eid:
+            return False
+        if ctr.bundle.primary.bundle_flags & PrimaryBlock.Flag.IS_FRAGMENT:
+            return False
+        return True

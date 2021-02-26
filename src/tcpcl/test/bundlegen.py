@@ -168,8 +168,8 @@ class Generator(object):
     
     BLOCK_NUM_PRIMARY = 1
     BLOCK_TYPE_PRIMARY = 1
-    BLOCK_TYPE_BIB = 192  #FIXME: not a real allocation
-    BLOCK_TYPE_BCB = 193  #FIXME: not a real allocation
+    BLOCK_TYPE_BIB = 11
+    BLOCK_TYPE_BCB = 12
     
     @enum.unique
     class BlockType(enum.IntFlag):

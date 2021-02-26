@@ -58,12 +58,6 @@ class CborField(scapy.fields.Field):
         '''
         return x
 
-    def i2repr(self, pkt, x):
-        if isinstance(x, (bytes, )):
-            return encode_diagnostic(x)
-        else:
-            return scapy.fields.Field.i2repr(self, pkt, x)
-
     def any2i(self, pkt, x):
         # Coerce all values to internal type
         return self.m2i(pkt, x)
@@ -245,6 +239,9 @@ class BoolField(CborField):
         except TypeError:
             return None
 
+    def i2repr(self, pkt, x):
+        return encode_diagnostic(x)
+
     def randval(self):
         return volatile.RandChoice(False, True)
 
@@ -276,6 +273,9 @@ class UintField(CborField):
             return int(x)
         except TypeError:
             return None
+
+    def i2repr(self, pkt, x):
+        return encode_diagnostic(x)
 
     def randval(self):
         return volatile.RandNum(0, self.maxval)
@@ -350,6 +350,9 @@ class TstrField(CborField):
         except TypeError:
             return None
 
+    def i2repr(self, pkt, x):
+        return encode_diagnostic(x)
+
     def randval(self):
         return volatile.RandString(1000)
 
@@ -373,6 +376,9 @@ class BstrField(CborField):
         except TypeError:
             return None
 
+    def i2repr(self, pkt, x):
+        return encode_diagnostic(x)
+
     def randval(self):
         return volatile.RandBin(1000)
 
@@ -394,3 +400,6 @@ class CborEncodedField(BstrField):
             return dec
         except cbor2.CBORDecodeError:
             return None
+
+    def i2repr(self, pkt, x):
+        return encode_diagnostic(x)

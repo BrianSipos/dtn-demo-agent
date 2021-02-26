@@ -1,6 +1,7 @@
 #!/bin/bash
 # Install local-user services to run on the session bus.
 set -e
+SELFDIR=$(readlink -f $(dirname "${BASH_SOURCE[0]}"))
 
 SYSTEMCTL="systemctl --user"
 
@@ -90,6 +91,10 @@ bp:
     bus_service: dtn.${NODENAME}.bp
     node_id: dtn://${NODENAME}/
 
+    verify_ca_file: ${SELFDIR}/testpki/ca.crt
+    sign_key_file: ${SELFDIR}/testpki/client-sign.key
+    sign_cert_file: ${SELFDIR}/testpki/client-sign.crt
+
     rx_route_table:
       - eid_pattern: "dtn://client/.*"
         action: deliver
@@ -150,6 +155,10 @@ bp:
     log_level: debug
     bus_service: dtn.${NODENAME}.bp
     node_id: dtn://${NODENAME}/
+
+    verify_ca_file: ${SELFDIR}/testpki/ca.crt
+    sign_key_file: ${SELFDIR}/testpki/server-sign.key
+    sign_cert_file: ${SELFDIR}/testpki/server-sign.crt
 
     rx_route_table:
       - eid_pattern: "dtn://server/.*"

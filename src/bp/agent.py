@@ -97,14 +97,15 @@ class Agent(dbus.service.Object):
         ))
         # Bound delivery applications
         self._app = {}
-        for (path, cls) in bp.app.base.APPLICATIONS.items():
+        for (name, cls) in bp.app.base.APPLICATIONS.items():
+            path = '/org/ietf/dtn/bp/app/{}'.format(name)
             self._logger.debug('Registering application %s at %s', cls, path)
             bus_kwargs = dict(
                 conn=config.bus_conn,
                 object_path=path
             )
             app = cls(self, bus_kwargs)
-            self._app[path] = app
+            self._app[name] = app
             app.load_config(self._config)
             app.add_chains(self._rx_chain, self._tx_chain)
         self._rx_chain.sort()
@@ -324,7 +325,7 @@ class Agent(dbus.service.Object):
         ''' Touch up primary block content from defaults.
         '''
         pri_blk = ctr.bundle.primary
-        # apply local policy
+
         if pri_blk.source is None:
             pri_blk.source = self._config.node_id
 
@@ -411,8 +412,6 @@ class Agent(dbus.service.Object):
         :param int datalen: The payload data length.
         '''
 
-        cts = self.timestamp()
-
         ctr = BundleContainer()
         ctr.bundle.primary = PrimaryBlock(
             bundle_flags=(
@@ -423,9 +422,6 @@ class Agent(dbus.service.Object):
                 | PrimaryBlock.Flag.REQ_STATUS_TIME
             ),
             destination=str(nodeid),
-            source=self._config.node_id,
-            report_to=self._config.node_id,
-            create_ts=cts,
             crc_type=AbstractBlock.CrcType.CRC32,
         )
         ctr.bundle.blocks = [
@@ -436,5 +432,4 @@ class Agent(dbus.service.Object):
                 btsd=bytes(scapy.volatile.RandString(datalen)),
             ),
         ]
-
         self.send_bundle(ctr)

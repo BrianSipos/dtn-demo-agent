@@ -35,7 +35,7 @@ class Reassembly(object):
     data: Optional[bytearray] = None
 
 
-@app('/org/ietf/dtn/bp/fragment')
+@app('fragment')
 class Fragment(AbstractApplication):
     ''' Bundle Protocol security.
     '''
