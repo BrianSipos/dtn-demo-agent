@@ -215,6 +215,9 @@ class Agent(dbus.service.Object):
     def _do_tx_step(self, ctr):
         ''' Perform the static TX routing step.
         '''
+        if ctr.route:
+            return
+
         eid = ctr.bundle.primary.destination
         self._logger.info('Getting TX route for: %s', eid)
         found = None

@@ -61,12 +61,8 @@ IPADDR="127.0.0.2"
 mkdir -p "$HOME/.config/dtn"
 cat <<EOF >"$HOME/.config/dtn/client.yaml"
 udpcl:
-    log_level: info
+    log_level: debug
     bus_service: dtn.${NODENAME}.udpcl
-
-#    multicast:
-#        v4sources:
-#          - ${IPADDR}
 
     dtls_enable_tx: False
 
@@ -87,7 +83,7 @@ tcpcl:
         address: ${IPADDR}
 
 bp:
-    log_level: debug
+    log_level: info
     bus_service: dtn.${NODENAME}.bp
     node_id: dtn://${NODENAME}/
 
@@ -100,11 +96,6 @@ bp:
         action: deliver
 
     tx_route_table:
-      - eid_pattern: "dtn:~neighbor"
-        next_nodeid: "dtn:~neighbor"
-        cl_type: udpcl
-        address: 224.0.0.1
-
       - eid_pattern: "dtn://server/.*"
         next_nodeid: dtn://server/
         cl_type: udpcl
@@ -126,12 +117,8 @@ IPADDR="127.0.0.3"
 mkdir -p "$HOME/.config/dtn"
 cat <<EOF >"$HOME/.config/dtn/server.yaml"
 udpcl:
-    log_level: info
+    log_level: warn
     bus_service: dtn.${NODENAME}.udpcl
-
-#    multicast:
-#        v4sources:
-#          - ${IPADDR}
 
     dtls_enable_tx: False
 
@@ -143,7 +130,7 @@ udpcl:
 #          - addr: 224.0.0.1
 
 tcpcl:
-    log_level: info
+    log_level: warn
     bus_service: dtn.${NODENAME}.tcpcl
     node_id: dtn://${NODENAME}/
 
@@ -152,7 +139,7 @@ tcpcl:
         address: ${IPADDR}
 
 bp:
-    log_level: debug
+    log_level: warn
     bus_service: dtn.${NODENAME}.bp
     node_id: dtn://${NODENAME}/
 
@@ -169,6 +156,9 @@ bp:
         next_nodeid: "dtn:~neighbor"
         cl_type: udpcl
         address: 224.0.0.1
+#    multicast:
+#        v4sources:
+#          - ${IPADDR}
 
       - eid_pattern: "dtn://client/.*"
         next_nodeid: dtn://client/

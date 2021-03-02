@@ -156,7 +156,7 @@ class Nmp(AbstractApplication):
                     import re
                     addr_list = cldef.get(ClKeys.ADDR, [])
                     route = TxRouteItem(
-                        eid_pattern=re.compile('.*'),
+                        eid_pattern=re.compile(r''),
                         next_nodeid=node_id,
                         cl_type='udpcl',
                         raw_config=dict(
@@ -186,13 +186,20 @@ class Nmp(AbstractApplication):
         return True
 
     def _tx_route(self, ctr):
+        ''' Use discovered routes.
+        '''
         eid = ctr.bundle.primary.destination
         if eid in self._one_hop:
             ctr.route = self._one_hop[eid].tx_routes[0]
 
         ctr.record_action('deliver')
 
-    def _send_msg(self, msg):
+    def _send_msg(self, msg, remote_addr, local_addr):
+        ''' Send an NMP message
+
+        :param msg: The message content.
+        :param local_addr: The address to send from.
+        '''
         LOGGER.info('Message TX: %s', encode_diagnostic(msg))
 
         ctr = BundleContainer()
@@ -212,6 +219,17 @@ class Nmp(AbstractApplication):
                 btsd=cbor2.dumps(msg),
             ),
         ]
+        # Force the route
+        ctr.route = TxRouteItem(
+            eid_pattern=None,
+            next_nodeid=ctr.bundle.primary.destination,
+            cl_type='udpcl',
+            raw_config=dict(
+                address=remote_addr,
+                port=4556,
+                local_addr=local_addr,
+            ),
+        )
 
         self._agent.send_bundle(ctr)
 
@@ -241,6 +259,8 @@ class Nmp(AbstractApplication):
         for (_if_name, items) in psutil.net_if_addrs().items():
             name_objs = []
             addr_objs = []
+            local_ipv4 = None
+            local_ipv6 = None
             for item in items:
                 if item.family not in (socket.AF_INET, socket.AF_INET6):
                     continue
@@ -252,6 +272,11 @@ class Nmp(AbstractApplication):
                 addr = ipaddress.ip_address(addr)
                 if addr.is_loopback or addr.is_link_local:
                     continue
+
+                if not local_ipv4 and item.family == socket.AF_INET:
+                    local_ipv4 = str(addr)
+                if not local_ipv6 and item.family == socket.AF_INET6:
+                    local_ipv6 = str(addr)
 
                 if addr == own_addr:
                     name_objs.append(own_name)
@@ -283,6 +308,10 @@ class Nmp(AbstractApplication):
                 ],
                 MsgKeys.HELLO_PEERSET: peer_objs,
             }
-            self._send_msg(msg)
+
+            if local_ipv4:
+                self._send_msg(msg, '224.0.0.1', local_ipv4)
+            if local_ipv6:
+                self._send_msg(msg, 'FF02::1', local_ipv6)
 
         self._last_hello = self._now()

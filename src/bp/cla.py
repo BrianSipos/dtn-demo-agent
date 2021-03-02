@@ -89,13 +89,17 @@ class UdpclAdaptor(AbstractAdaptor):
     def send_bundle_func(self, **kwargs):
         address = kwargs['address']
         port = kwargs.get('port', 4556)
+        local_addr = kwargs.get('local_addr', '')
         do_tag = kwargs.get('do_tag', False)
 
         def sender(data):
             if do_tag:
                 if not data.startswith(UdpclAdaptor.TAG_ENC):
                     data = UdpclAdaptor.TAG_ENC + data
-            self.agent_obj.send_bundle_data(address, port, dbus.ByteArray(data))
+            self.agent_obj.send_bundle_data(
+                address, port, local_addr,
+                dbus.ByteArray(data)
+            )
 
         return sender
 

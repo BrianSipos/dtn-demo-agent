@@ -30,10 +30,6 @@ class ListenConfig():
 class MulticastConfig():
     #: Multicast TTL value
     ttl: Optional[int] = None
-    #: List of source addresses for IPv4 multicast
-    v4sources: List[str] = field(default_factory=list)
-    #: List of source devices for IPv6 multicast
-    v6sources: List[str] = field(default_factory=list)
 
 
 @dataclass

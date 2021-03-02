@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, ec
 
 LOGGER = logging.getLogger()
 
-nodeConfTemplate = '''\
+nodeConfTemplateIpv4 = '''\
 udpcl:
     log_level: info
     bus_addr: system
@@ -34,10 +34,10 @@ tcpcl:
 
     tls_enable: False
     init_listen:
-        address: 0.0.0.0
+      - address: 0.0.0.0
 
 bp:
-    log_level: debug
+    log_level: info
     bus_addr: system
     bus_service: org.ietf.dtn.node.bp
     node_id: dtn://{NODENAME}/
@@ -52,16 +52,46 @@ bp:
       - eid_pattern: ".*"
         action: forward
 
-    tx_route_table:
-      - eid_pattern: "dtn:~neighbor"
-        next_nodeid: "dtn:~neighbor"
-        cl_type: udpcl
-        address: 224.0.0.1
+'''
+nodeConfTemplateIpv6 = '''\
+udpcl:
+    log_level: info
+    bus_addr: system
+    bus_service: org.ietf.dtn.node.udpcl
 
-      - eid_pattern: "dtn://server/.*"
-        next_nodeid: dtn://server/
-        cl_type: udpcl
-        address: 127.0.0.3
+    dtls_enable_tx: False
+    init_listen:
+      - address: "::"
+        multicast_member:
+          - addr: FF02:0:0:0:0:0:0:1
+            iface: eth0
+
+tcpcl:
+    log_level: info
+    bus_addr: system
+    bus_service: org.ietf.dtn.node.tcpcl
+    node_id: dtn://{NODENAME}/
+
+    tls_enable: False
+    init_listen:
+        address: "::"
+
+bp:
+    log_level: info
+    bus_addr: system
+    bus_service: org.ietf.dtn.node.bp
+    node_id: dtn://{NODENAME}/
+
+    verify_ca_file: /etc/xdg/dtn/ca.crt
+    sign_cert_file: /etc/xdg/dtn/sign.crt
+    sign_key_file: /etc/xdg/dtn/sign.key
+
+    rx_route_table:
+      - eid_pattern: "dtn://{NODENAME}/.*"
+        action: deliver
+      - eid_pattern: ".*"
+        action: forward
+
 '''
 
 
@@ -95,7 +125,8 @@ class Runner:
                 self.run_docker(['network', 'inspect', net_name])
             except subprocess.CalledProcessError:
                 LOGGER.info("Creating network...")
-                self.run_docker(['network', 'create', net_name, '--subnet', '192.168.100.0/24'])
+                #self.run_docker(['network', 'create', net_name, '--subnet', '192.168.100.0/24'])
+                self.run_docker(['network', 'create', net_name, '--subnet', 'fd12:3456:789a:1::/64'])
 
             with open(os.path.join('testpki', 'ca.key'), 'rb') as infile:
                 ca_key = serialization.load_pem_private_key(infile.read(), None)
@@ -166,7 +197,7 @@ class Runner:
                 )
 
                 with open(os.path.join(configPath, 'node.yaml'), 'w') as outfile:
-                    outfile.write(nodeConfTemplate.format(NODENAME=name))
+                    outfile.write(nodeConfTemplateIpv6.format(NODENAME=name))
 
                 self.run_docker([
                     'container', 'create',

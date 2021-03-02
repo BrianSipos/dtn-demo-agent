@@ -47,6 +47,8 @@ class BundleItem(object):
     port: int
     #: Binary file to store in
     file: BinaryIO
+    #: Optional local address
+    local_addr: Optional[str] = None
     #: The unique transfer ID number.
     transfer_id: Optional[int] = None
     #: Size of the bundle data
@@ -108,6 +110,8 @@ class Agent(dbus.service.Object):
         self._bindsocks = {}
         #: Map from socket to glib io-watch ID
         self._listen_plain = {}
+        # Existing sockets for (src, dest) addrs
+        self._plain_sock = {}
         # Existing DTLS sessions, map from addr tuple to `dtls.SSLConnection`
         self._dtls_sess = {}
 
@@ -396,8 +400,8 @@ class Agent(dbus.service.Object):
         out_file = open(filepath, 'wb')
         shutil.copyfileobj(item.file, out_file)
 
-    @dbus.service.method(DBUS_IFACE, in_signature='siay', out_signature='s')
-    def send_bundle_data(self, address, port, data):
+    @dbus.service.method(DBUS_IFACE, in_signature='sisay', out_signature='s')
+    def send_bundle_data(self, address, port, local_addr, data):
         ''' Send bundle data directly.
         '''
         # byte array to bytes
@@ -406,17 +410,19 @@ class Agent(dbus.service.Object):
         item = BundleItem(
             address=str(address),
             port=int(port),
+            local_addr=(str(local_addr) if local_addr else None),
             file=BytesIO(data)
         )
         return str(self._add_tx_item(item))
 
-    @dbus.service.method(DBUS_IFACE, in_signature='sis', out_signature='s')
-    def send_bundle_file(self, address, port, filepath):
+    @dbus.service.method(DBUS_IFACE, in_signature='siss', out_signature='s')
+    def send_bundle_file(self, address, port, local_addr, filepath):
         ''' Send a bundle from the filesystem.
         '''
         item = BundleItem(
             address=str(address),
             port=int(port),
+            local_addr=(str(local_addr) if local_addr else None),
             file=open(filepath, 'rb')
         )
         return str(self._add_tx_item(item))
@@ -511,23 +517,29 @@ class Agent(dbus.service.Object):
         is_ipv6 = isinstance(ipaddr, ipaddress.IPv6Address)
         self.__logger.info('Sending %d octets to %s:%d',
                            item.total_length, item.address, item.port)
-        sock = socket.socket(addr_family(ipaddr), socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 
-        if self._config.tx_port:
-            self.__logger.debug('Sending from fixed port %d', self._config.tx_port)
-            anyaddress = '127.0.0.2' if is_ipv4 else '::'
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.bind((anyaddress, self._config.tx_port))
+        tx_port = self._config.tx_port or 0
 
         if is_ipv4:
-            addr = (item.address, item.port)
+            src_addr = (item.local_addr or '0.0.0.0', tx_port)
+            dst_addr = (item.address, item.port)
         else:
-            addr = (item.address, item.port, 0, 0)
+            src_addr = (item.local_addr or '::', tx_port)
+            dst_addr = (item.address, item.port, 0, 0)
+
+        sock_key = (src_addr, dst_addr)
+        sock = self._plain_sock.get(sock_key, None)
+        if sock is None:
+            self.__logger.debug('New address tuple seen %s', sock_key)
+            sock = socket.socket(addr_family(ipaddr), socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(src_addr)
+            self._plain_sock[sock_key] = sock
 
         def simplesender(data):
             ''' Send to a single destination
             '''
-            sock.sendto(data, addr)
+            sock.sendto(data, dst_addr)
 
         if ipaddr.is_multicast:
             multicast = self._config.multicast
@@ -545,32 +557,19 @@ class Agent(dbus.service.Object):
                 else:
                     sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, multicast.ttl)
 
-            # if provided, iterate over different source interfaces
-            if is_ipv4 and multicast.v4sources:
-                for src in multicast.v4sources:
-                    self.__logger.debug('Using multicast %s', src)
-                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(src))
-                    self._send_transfer(simplesender, item)
-            elif is_ipv6 and multicast.v6sources:
-                for src in multicast.v6sources:
-                    iface_ix = socket.if_nametoindex(src)
-                    self.__logger.debug('Using multicast %s (%s)', src, iface_ix)
-                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, iface_ix)
-                    self._send_transfer(simplesender, item)
-            else:
-                self._send_transfer(simplesender, item)
+            self._send_transfer(simplesender, item)
 
         else:
             # unicast transfer
 
             if self._config.dtls_enable_tx:
-                conn = self._dtls_sess.get(addr)
+                conn = self._dtls_sess.get(dst_addr)
                 if conn:
-                    self.__logger.debug('Using existing session with %s', addr)
+                    self.__logger.debug('Using existing session with %s', dst_addr)
                 else:
-                    self.__logger.debug('Need new session with %s', addr)
-                    sock.sendto(cbor2.dumps({ExtensionKey.STARTTLS: None}), addr)
-                    conn = self._starttls(sock, addr, server_side=False)
+                    self.__logger.debug('Need new session with %s', dst_addr)
+                    sock.sendto(cbor2.dumps({ExtensionKey.STARTTLS: None}), dst_addr)
+                    conn = self._starttls(sock, dst_addr, server_side=False)
                 sender = conn.write
             else:
                 sender = simplesender
