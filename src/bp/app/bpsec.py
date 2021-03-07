@@ -7,6 +7,12 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
+from cose import headers
+from cose.messages import Sign1Message
+from cose import algorithms, curves
+from cose.keys import (EC2Key, RSAKey)
+from cose.exceptions import CoseIllegalAlgorithm, CoseIllegalCurve
+#from cose.extensions.x509 import X5T
 
 from scapy_cbor.util import encode_diagnostic
 import tcpcl.session
@@ -91,45 +97,38 @@ class Bpsec(AbstractApplication):
         ))
 
     def _extract_cose_key(self, keyobj):
-        from cose import (CoseAlgorithms, CoseEllipticCurves, EC2, RSA)
-        import cose.attributes.algorithms
-
+        ''' Get a COSE version of the local private key.
+        :param keyobj: The cryptography key object.
+        :return: The associated COSE key.
+        :rtype: :py:cls:`CoseKey`
+        '''
         if isinstance(keyobj, (rsa.RSAPrivateKey, rsa.RSAPublicKey)):
-            cose_key = RSA.from_cryptograpy_key_obj(keyobj)
-            cose_key.alg = CoseAlgorithms.PS256
+            cose_key = RSAKey.from_cryptograpy_key_obj(keyobj)
+            cose_key.alg = algorithms.Ps256
 
         elif isinstance(keyobj, (ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey)):
-            found_crv = None
-            found_alg_crv = None
-            for crvobj in CoseEllipticCurves:
-                try:
-                    crv_types = cose.attributes.algorithms.config(crvobj).curve
-                except AttributeError:
-                    continue
-                if not crv_types:
-                    continue
-                LOGGER.debug('compare crv %s vs %s', keyobj.curve, crv_types)
-                if type(keyobj.curve) in crv_types:
-                    found_crv = crvobj
-                    found_alg_crv = crv_types[0]
-                    break
-            if not found_crv:
-                raise TypeError('Cannot match crv for {}'.format(repr(keyobj.curve)))
+            CURVE_CLS_MAP = {
+                ec.SECP256R1: curves.P256,
+                ec.SECP384R1: curves.P384,
+                ec.SECP521R1: curves.P521,
+            }
+            CURVE_ALG_MAP = {
+                ec.SECP256R1: algorithms.Es256,
+                ec.SECP384R1: algorithms.Es384,
+                ec.SECP521R1: algorithms.Es512,
+            }
 
-            found_alg = None
-            for algobj in CoseAlgorithms:
-                try:
-                    alg_crv = cose.attributes.algorithms.config(algobj).curve
-                except AttributeError:
-                    continue
-                if not alg_crv:
-                    continue
-                LOGGER.debug('compare alg %s vs %s', found_alg_crv, alg_crv)
-                if found_alg_crv is alg_crv:
-                    found_alg = algobj
-                    break
-            if not found_alg:
-                raise TypeError('Cannot match alg for {}'.format(repr(keyobj)))
+            try:
+                curve_cls = CURVE_CLS_MAP[type(keyobj.curve)]
+            except KeyError:
+                raise CoseIllegalCurve('Cannot match curve for {}'.format(repr(keyobj)))
+            LOGGER.debug('Found COSE curve %s', curve_cls)
+
+            try:
+                alg_cls = CURVE_ALG_MAP[type(keyobj.curve)]
+            except KeyError:
+                raise CoseIllegalCurve('Cannot match algorithm for {}'.format(repr(keyobj)))
+            LOGGER.debug('Found COSE algorithm %s', alg_cls)
 
             if hasattr(keyobj, 'private_numbers'):
                 priv_nums = keyobj.private_numbers()
@@ -152,11 +151,12 @@ class Bpsec(AbstractApplication):
                     d=d_value.to_bytes((d_value.bit_length() + 7) // 8, byteorder="big"),
                 ))
 
-            cose_key = EC2(
-                alg=found_alg,
-                crv=found_crv,
+            cose_key = EC2Key(
+                alg=alg_cls,
+                curve=curve_cls,
                 **kwargs
             )
+
         else:
             raise TypeError('Cannot handle key {}'.format(repr(keyobj)))
 
@@ -166,10 +166,8 @@ class Bpsec(AbstractApplication):
         ''' If configured add a BIB.
         The container must be reloaded beforehand.
         '''
-        from cose import (Sign1Message, CoseHeaderKeys, CoseAlgorithms)
-        from cose.extensions.x509 import X5T
-
         if not self._priv_key:
+            LOGGER.warning('No private key')
             return
 
         aad_scope = 0x3
@@ -179,6 +177,7 @@ class Bpsec(AbstractApplication):
             if blk.type_code in self._config.integrity_for_blocks
         ]
         if not target_block_nums:
+            LOGGER.warning('No target blocks have matching type')
             return
 
         x5chain = []
@@ -211,14 +210,14 @@ class Bpsec(AbstractApplication):
         try:
             cose_key = self._extract_cose_key(self._priv_key)
         except Exception as err:
-            LOGGER.error('Cannot handle private key: %s', err)
+            LOGGER.error('Cannot handle private key: %s', repr(err))
             return
 
         phdr = {
-            CoseHeaderKeys.ALG: cose_key.alg,
+            headers.Algorithm: cose_key.alg,
         }
         uhdr = {
-            CoseHeaderKeys.X5_T: X5T.from_certificate(CoseAlgorithms.SHA_256, x5chain[0]).encode(),
+#            headers.X5t: X5T(CoseAlgorithms.SHA_256, x5chain[0]).encode(),
         }
 
         # Sign each target with one result per
@@ -238,19 +237,17 @@ class Bpsec(AbstractApplication):
                 payload=target_plaintext,
                 # Non-encoded parameters
                 external_aad=ext_aad_enc,
+                key=cose_key
             )
             LOGGER.debug('Signing with COSE key %s', repr(cose_key))
             msg_enc = msg_obj.encode(
-                private_key=cose_key,
-                alg=cose_key.alg,
-                curve=getattr(cose_key, 'crv', None),
-                tagged=False
+                tag=False
             )
             # detach payload
             msg_dec = cbor2.loads(msg_enc)
             msg_dec[2] = None
             msg_enc = cbor2.dumps(msg_dec)
-            LOGGER.debug('Sending COSE message\n%s', encode_diagnostic(msg_dec))
+            LOGGER.debug('Sending COSE message %s', encode_diagnostic(msg_dec))
 
             target_result.append(
                 TypeValuePair(
@@ -278,9 +275,10 @@ class Bpsec(AbstractApplication):
 
         integ_blocks = ctr.block_type(BlockIntegrityBlock)
         for bib in integ_blocks:
-            LOGGER.debug('Verifying BIB in %d with targets %s', bib.block_num, bib.payload.targets)
+            LOGGER.debug('Verifying BIB in %d with context %s, targets %s',
+                         bib.block_num, bib.payload.context_id, bib.payload.targets)
             if bib.payload.context_id == BPSEC_COSE_CONTEXT_ID:
-                from cose import CoseMessage, CoseHeaderKeys
+                from cose.messages import CoseMessage
 
                 aad_scope = 0x7
                 der_chains = []
@@ -322,20 +320,29 @@ class Bpsec(AbstractApplication):
                         LOGGER.debug('Validating certificate at time %s', bundle_at)
 
                         try:
-                            x5t = msg_obj.uhdr[CoseHeaderKeys.X5_T]
-                            found_chains = [
-                                chain for chain in der_chains
-                                if x5t.matches(chain[0])
-                            ]
-                            LOGGER.debug('Found %d chains matcing end-entity cert for %s', len(found_chains), encode_diagnostic(x5t.encode()))
-                            if not found_chains:
-                                raise RuntimeError('No chain matcing end-entity cert for {}'.format(x5t.encode()))
-                            if len(found_chains) > 1:
-                                raise RuntimeError('Multiple chains matcing end-entity cert for {}'.format(x5t.encode()))
-                        except Exception as err:
-                            LOGGER.error('Failed to find cert chain for block num %d: %s', blk_num, err)
-                            failure = StatusReport.ReasonCode.FAILED_SEC
-                            continue
+                            x5t = msg_obj.uhdr[headers.X5t]
+                        except KeyError:
+                            x5t = None
+
+                        if x5t is None and len(der_chains) == 1:
+                            # Only one possible end-entity cert
+                            LOGGER.warning('No X5T in header, assuming single chain')
+                            found_chains = der_chains
+                        else:
+                            try:
+                                found_chains = [
+                                    chain for chain in der_chains
+                                    if x5t.matches(chain[0])
+                                ]
+                                LOGGER.debug('Found %d chains matcing end-entity cert for %s', len(found_chains), encode_diagnostic(x5t.encode()))
+                                if not found_chains:
+                                    raise RuntimeError('No chain matcing end-entity cert for {}'.format(x5t.encode()))
+                                if len(found_chains) > 1:
+                                    raise RuntimeError('Multiple chains matcing end-entity cert for {}'.format(x5t.encode()))
+                            except Exception as err:
+                                LOGGER.error('Failed to find cert chain for block num %d: %s', blk_num, err)
+                                failure = StatusReport.ReasonCode.FAILED_SEC
+                                continue
 
                         try:
                             chain = found_chains[0]
@@ -346,8 +353,9 @@ class Bpsec(AbstractApplication):
                                 validation_context=val_ctx
                             )
                             val.validate_usage(
-                                key_usage=set(),
-                                #key_usage={u'digital_signature', u'non_repudiation'},
+                                key_usage={'digital_signature'},
+                                extended_key_usage={'1.3.6.1.5.5.7.3.35'},
+                                extended_optional=True
                             )
                         except Exception as err:
                             LOGGER.error('Failed to verify chain on block num %d: %s', blk_num, err)
@@ -363,12 +371,8 @@ class Bpsec(AbstractApplication):
                             # Continue on to verification
 
                         try:
-                            cose_key = self._extract_cose_key(end_cert.public_key())
-                            msg_obj.verify_signature(
-                                public_key=cose_key,
-                                alg=cose_key.alg,
-                                curve=getattr(cose_key, 'crv', None),
-                            )
+                            msg_obj.key = self._extract_cose_key(end_cert.public_key())
+                            msg_obj.verify_signature()
                             LOGGER.info('Verified signature on block num %d', blk_num)
                         except Exception as err:
                             LOGGER.error('Failed to verify signature on block num %d: %s', blk_num, err)

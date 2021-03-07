@@ -193,15 +193,20 @@ class Agent(dbus.service.Object):
 
             if isinstance(ipaddr, ipaddress.IPv4Address):
                 self.__logger.info('Listening for multicast %s', addr)
-                mreq = struct.pack("=4sl", socket.inet_aton(addr), socket.INADDR_ANY)
+                #mreq = struct.pack("=4sl", socket.inet_aton(addr), socket.INADDR_ANY)
+                mreq = (
+                    socket.inet_pton(socket.AF_INET, addr)
+                    + socket.inet_pton(socket.AF_INET, '0.0.0.0')
+                )
                 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
             elif isinstance(ipaddr, ipaddress.IPv6Address):
                 iface = item['iface']
                 iface_ix = socket.if_nametoindex(iface)
                 self.__logger.info('Listening for multicast %s on %s (%s)', addr, iface, iface_ix)
                 mreq = (
                     socket.inet_pton(socket.AF_INET6, addr)
-                    +struct.pack("@I", iface_ix)
+                    + struct.pack("@I", iface_ix)
                 )
                 sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
 

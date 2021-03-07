@@ -46,7 +46,7 @@ class AbstractSecurityBlock(CborArray):
         ),
         UintField('context_id'),
         FlagsField('context_flags', default=Flag.NONE, flags=Flag),
-        EidField('source', default=None),
+        EidField('source'),
         ConditionalField(
             ArrayWrapField(
                 PacketListField('parameters', default=None, cls=TypeValuePair),

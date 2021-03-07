@@ -106,12 +106,10 @@ class BundleContainer(object):
         if not isinstance(blk, CanonicalBlock):
             raise TypeError()
 
-        blk_num = blk.getfieldval('block_num')
         blk_type = blk.getfieldval('type_code')
+        blk_num = self._fix_blk_num(blk)
         pyld_cls = type(blk.payload)
-        if blk_num is None:
-            blk.setfieldval('block_num', self.get_block_num())
-        elif blk_num in self._block_num:
+        if blk_num in self._block_num:
             raise KeyError('add_block() given duplicate block number {}'.foramt(blk_num))
 
         blk.ensure_block_type_specific_data()
@@ -181,12 +179,17 @@ class BundleContainer(object):
         ''' Assign unique block numbers where needed.
         '''
         for blk in self.bundle.getfieldval('blocks'):
-            if blk.getfieldval('block_num') is None:
-                if blk.getfieldval('type_code') == Bundle.BLOCK_TYPE_PAYLOAD:
-                    set_num = Bundle.BLOCK_NUM_PAYLOAD
-                else:
-                    set_num = self.get_block_num()
-                blk.overloaded_fields['block_num'] = set_num
+            self._fix_blk_num(blk)
+
+    def _fix_blk_num(self, blk):
+        blk_num = blk.getfieldval('block_num')
+        if blk_num is None:
+            if blk.getfieldval('type_code') == Bundle.BLOCK_TYPE_PAYLOAD:
+                blk_num = Bundle.BLOCK_NUM_PAYLOAD
+            else:
+                blk_num = self.get_block_num()
+            blk.overloaded_fields['block_num'] = blk_num
+        return blk_num
 
     def record_action(self, action, reason=None):
         ''' Mark an action on this bundle.
