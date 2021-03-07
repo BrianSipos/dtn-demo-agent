@@ -1,98 +1,76 @@
 #!/usr/bin/python3
 #
 import argparse
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, ec
 import datetime
+import jinja2
 import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, ec
+import yaml
 
 LOGGER = logging.getLogger()
 
-nodeConfTemplateIpv4 = '''\
+nodeConfTemplate = jinja2.Template('''\
 udpcl:
     log_level: info
     bus_addr: system
     bus_service: org.ietf.dtn.node.udpcl
+    node_id: dtn://{{node_name}}/
 
     dtls_enable_tx: False
+
     init_listen:
+{% if useIpv4 %}
       - address: 0.0.0.0
         multicast_member:
           - addr: 224.0.0.1
-
-tcpcl:
-    log_level: info
-    bus_addr: system
-    bus_service: org.ietf.dtn.node.tcpcl
-    node_id: dtn://{NODENAME}/
-
-    tls_enable: False
-    init_listen:
-      - address: 0.0.0.0
-
-bp:
-    log_level: info
-    bus_addr: system
-    bus_service: org.ietf.dtn.node.bp
-    node_id: dtn://{NODENAME}/
-
-    verify_ca_file: /etc/xdg/dtn/ca.crt
-    sign_cert_file: /etc/xdg/dtn/sign.crt
-    sign_key_file: /etc/xdg/dtn/sign.key
-
-    rx_route_table:
-      - eid_pattern: "dtn://{NODENAME}/.*"
-        action: deliver
-      - eid_pattern: ".*"
-        action: forward
-
-'''
-nodeConfTemplateIpv6 = '''\
-udpcl:
-    log_level: info
-    bus_addr: system
-    bus_service: org.ietf.dtn.node.udpcl
-
-    dtls_enable_tx: False
-    init_listen:
+{% endif %}
+{% if useIpv6 %}
       - address: "::"
         multicast_member:
           - addr: FF02:0:0:0:0:0:0:1
             iface: eth0
+{% endif %}
 
 tcpcl:
     log_level: info
     bus_addr: system
     bus_service: org.ietf.dtn.node.tcpcl
-    node_id: dtn://{NODENAME}/
+    node_id: dtn://{{node_name}}/
 
     tls_enable: False
+
     init_listen:
-        address: "::"
+{% if useIpv4 %}
+      - address: 0.0.0.0
+{% endif %}
+{% if useIpv6 %}
+      - address: "::"
+{% endif %}
 
 bp:
     log_level: info
     bus_addr: system
     bus_service: org.ietf.dtn.node.bp
-    node_id: dtn://{NODENAME}/
+    node_id: dtn://{{node_name}}/
 
     verify_ca_file: /etc/xdg/dtn/ca.crt
     sign_cert_file: /etc/xdg/dtn/sign.crt
     sign_key_file: /etc/xdg/dtn/sign.key
 
     rx_route_table:
-      - eid_pattern: "dtn://{NODENAME}/.*"
+      - eid_pattern: "dtn://{{node_name}}/.*"
         action: deliver
       - eid_pattern: ".*"
         action: forward
 
-'''
+''')
 
 
 class Runner:
@@ -100,13 +78,12 @@ class Runner:
 
     def __init__(self, args):
         self._docker = re.split(r'\s+', os.environ.get('DOCKER', 'docker').strip())
-        self._node_names = [
-            'node{:03d}'.format(ix)
-            for ix in range(args.node_count)
-        ]
+
+        with open(args.config, 'rb') as conffile:
+            self._config = yaml.safe_load(conffile)
 
     def runcmd(self, parts):
-        LOGGER.info('Running command %s', parts)
+        LOGGER.info('Running command %s', ' '.join(f'"{part}"' for part in parts))
         subprocess.check_call(parts)
 
     def run_docker(self, args):
@@ -115,31 +92,32 @@ class Runner:
     def action(self, act):
         if act == 'prep':
             img_name_tag = 'dtn-demo'
-            net_name = 'dtn-net'
 
             LOGGER.info('Building image...')
             self.run_docker(['build', '-t', img_name_tag, '.', '-f', 'container/Dockerfile'])
 
-            LOGGER.info("Ensuring network...")
-            try:
-                self.run_docker(['network', 'inspect', net_name])
-            except subprocess.CalledProcessError:
-                LOGGER.info("Creating network...")
-                #self.run_docker(['network', 'create', net_name, '--subnet', '192.168.100.0/24'])
-                self.run_docker(['network', 'create', net_name, '--subnet', 'fd12:3456:789a:1::/64'])
+            LOGGER.info("Ensuring networks...")
+            for (net_name, net_opts) in self._config['nets'].items():
+                try:
+                    self.run_docker(['network', 'inspect', net_name])
+                except subprocess.CalledProcessError:
+                    LOGGER.info("Creating network %s", net_name)
+                    cmd = ['network', 'create', net_name]
+                    cmd += ['--subnet', net_opts['subnet']]
+                    self.run_docker(cmd)
 
             with open(os.path.join('testpki', 'ca.key'), 'rb') as infile:
                 ca_key = serialization.load_pem_private_key(infile.read(), None)
             with open(os.path.join('testpki', 'ca.crt'), 'rb') as infile:
                 ca_cert = x509.load_pem_x509_certificate(infile.read())
 
-            for name in self._node_names:
-                configPath = os.path.join('container', 'workdir', name, 'xdg', 'dtn')
+            for (node_name, node_opts) in self._config['nodes'].items():
+                configPath = os.path.join('container', 'workdir', node_name, 'xdg', 'dtn')
                 if not os.path.isdir(configPath):
                     os.makedirs(configPath)
 
                 # Generate node key
-                node_key = ec.generate_private_key(ec.SECP256R1) # Curve for COSE ES256
+                node_key = ec.generate_private_key(ec.SECP256R1)  # Curve for COSE ES256
                 with open(os.path.join(configPath, 'sign.key'), 'wb') as outfile:
                     outfile.write(node_key.private_bytes(
                         encoding=serialization.Encoding.PEM,
@@ -150,7 +128,7 @@ class Runner:
                 nowtime = datetime.datetime.now(datetime.timezone.utc)
                 node_cert = x509.CertificateBuilder().subject_name(
                     x509.Name([
-                        x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, name),
+                        x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, node_name),
                     ]),
                 ).issuer_name(
                     ca_cert.issuer
@@ -167,7 +145,7 @@ class Runner:
                     critical=True,
                 ).add_extension(
                     x509.SubjectAlternativeName([
-                        x509.UniformResourceIdentifier('dtn://{}/'.format(name)),
+                        x509.UniformResourceIdentifier('dtn://{}/'.format(node_name)),
                     ]),
                     critical=False,
                 ).add_extension(
@@ -197,30 +175,36 @@ class Runner:
                 )
 
                 with open(os.path.join(configPath, 'node.yaml'), 'w') as outfile:
-                    outfile.write(nodeConfTemplateIpv6.format(NODENAME=name))
+                    kwargs = dict(
+                        node_name=node_name,
+                        useIpv4=True,
+                        useIpv6=False,
+                    )
+                    outfile.write(nodeConfTemplate.render(**kwargs))
 
-                self.run_docker([
+                cmd = [
                     'container', 'create',
-                    '--mount', 'type=bind,src=container/workdir/{NODENAME}/xdg/dtn,dst=/etc/xdg/dtn'.format(NODENAME=name),
-                    '--network', net_name,
-                    '--hostname', name,
-                    '--name', name,
-                    img_name_tag
-                ])
+                    '--mount', f'type=bind,src=container/workdir/{node_name}/xdg/dtn,dst=/etc/xdg/dtn',
+                    '--hostname', node_name,
+                    '--name', node_name,
+                ]
+                cmd += ['--network', ','.join(net_name for net_name in node_opts['nets'])]
+                cmd += [img_name_tag]
+                self.run_docker(cmd)
 
         elif act == 'start':
-            for name in self._node_names:
+            for name in self._config['nodes'].keys():
                 self.run_docker(['container', 'start', name])
 
         elif act == 'stop':
-            for name in self._node_names:
+            for name in self._config['nodes'].keys():
                 try:
                     self.run_docker(['container', 'stop', name])
                 except subprocess.CalledProcessError:
                     pass
 
         elif act == 'delete':
-            for name in self._node_names:
+            for name in self._config['nodes'].keys():
                 try:
                     self.run_docker(['container', 'rm', '-f', name])
                 except subprocess.CalledProcessError:
@@ -229,7 +213,7 @@ class Runner:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--node-count', type=int, default=1)
+    parser.add_argument('--config', type=str, required=True)
     parser.add_argument('actions', choices=Runner.ACTIONS, nargs='+')
     args = parser.parse_args()
     LOGGER.debug('args %s', args)

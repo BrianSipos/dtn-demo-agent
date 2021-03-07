@@ -1,0 +1,15 @@
+nets:
+  dtnA:
+    subnet: "192.168.100.0/24"
+  dtnB:
+    subnet: "192.168.110.0/24"
+
+nodes:
+  node000:
+    nets: [dtnA]
+
+  node001:
+    nets: [dtnA, dtnB]
+
+  node002:
+    nets: [dtnB]
