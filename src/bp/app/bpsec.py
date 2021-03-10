@@ -11,8 +11,8 @@ from cose import headers
 from cose.messages import Sign1Message
 from cose import algorithms, curves
 from cose.keys import (EC2Key, RSAKey)
-from cose.exceptions import CoseIllegalAlgorithm, CoseIllegalCurve
-#from cose.extensions.x509 import X5T
+from cose.exceptions import CoseIllegalCurve
+from cose.extensions.x509 import X5T
 
 from scapy_cbor.util import encode_diagnostic
 import tcpcl.session
@@ -217,7 +217,7 @@ class Bpsec(AbstractApplication):
             headers.Algorithm: cose_key.alg,
         }
         uhdr = {
-#            headers.X5t: X5T(CoseAlgorithms.SHA_256, x5chain[0]).encode(),
+            headers.X5t: X5T.from_certificate(algorithms.Sha256, x5chain[0]).encode(),
         }
 
         # Sign each target with one result per
@@ -320,7 +320,7 @@ class Bpsec(AbstractApplication):
                         LOGGER.debug('Validating certificate at time %s', bundle_at)
 
                         try:
-                            x5t = msg_obj.uhdr[headers.X5t]
+                            x5t = X5T.decode(msg_obj.uhdr[headers.X5t])
                         except KeyError:
                             x5t = None
 

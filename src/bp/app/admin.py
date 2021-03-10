@@ -1,5 +1,6 @@
 ''' Administrative endpoint.
 '''
+from base64 import urlsafe_b64encode, urlsafe_b64decode
 import cbor2
 from cryptography.hazmat.primitives import hashes
 from dataclasses import dataclass, field, fields
@@ -7,6 +8,7 @@ import dbus
 import enum
 from gi.repository import GLib as glib
 import logging
+import math
 
 from scapy_cbor.util import encode_diagnostic
 from bp.encoding import (
@@ -44,10 +46,25 @@ class AcmeChallenge(object):
     #: base64url encoded thumbprint
     key_tp_enc: str = None
 
-    def key_auth_hash(self):
+    def key_auth_hash(self) -> bytes:
+        ''' Compute the response digest.
+        '''
+        key_auth = (self.token_part1_enc + self.token_part2_enc + '.' + self.key_tp_enc)
+        LOGGER.info('Key authorization string: %s', key_auth)
         digest = hashes.Hash(hashes.SHA256())
-        digest.update((self.token_part1_enc + self.token_part2_enc + '.' + self.key_tp_enc).encode('utf8'))
+        digest.update(key_auth.encode('utf8'))
         return digest.finalize()
+
+    @staticmethod
+    def b64encode(data: bytes) -> str:
+        enc = urlsafe_b64encode(data).rstrip(b'=')
+        return enc.decode('latin1')
+
+    @staticmethod
+    def b64decode(enc: str) -> bytes:
+        enc = enc.encode('latin1')
+        enc = enc.ljust(int(math.ceil(len(enc) / 4)) * 4, b'=')
+        return urlsafe_b64decode(enc)
 
 
 @app('admin')
@@ -115,10 +132,10 @@ class Administrative(AbstractApplication):
                 LOGGER.warning('Unexpected ACME request from %s', source)
                 ctr.record_action('delete')
                 return
-            chal.token_part1_enc = msg[AcmeKey.TOKEN_PART1]
+            chal.token_part1_enc = AcmeChallenge.b64encode(msg[AcmeKey.TOKEN_PART1])
 
             msg = {
-                AcmeKey.TOKEN_PART1: chal.token_part1_enc,
+                AcmeKey.TOKEN_PART1: AcmeChallenge.b64decode(chal.token_part1_enc),
                 AcmeKey.KEY_AUTH_HASH: chal.key_auth_hash(),
             }
             self.send_acme(ctr.bundle.primary.report_to, msg, False)
@@ -191,7 +208,7 @@ class Administrative(AbstractApplication):
         self._acme_chal[nodeid] = chal
 
         msg = {
-            AcmeKey.TOKEN_PART1: token_part1_enc,
+            AcmeKey.TOKEN_PART1: AcmeChallenge.b64decode(token_part1_enc),
         }
         self.send_acme(nodeid, msg, True)
 

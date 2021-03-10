@@ -31,7 +31,6 @@ class TestBpsecSign(unittest.TestCase):
         config = Config()
         config.node_id = 'dtn://node/'
         self._bp = Agent(config)
-
         self._app = self._bp._app['bpsec']
 
     def _dummy_ca_cert(self, ca_key):
@@ -67,6 +66,12 @@ class TestBpsecSign(unittest.TestCase):
                 decipher_only=False,
             ),
             critical=False,
+        ).add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()),
+            critical=False,
+        ).add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
+            critical=False,
         ).sign(ca_key, hashes.SHA256())
         return cert
 
@@ -91,7 +96,7 @@ class TestBpsecSign(unittest.TestCase):
             critical=True,
         ).add_extension(
             x509.SubjectAlternativeName([
-                x509.UniformResourceIdentifier(self._bp._config.node_id),
+                x509.UniformResourceIdentifier(self._app._config.node_id),
             ]),
             critical=False,
         ).add_extension(
@@ -111,6 +116,12 @@ class TestBpsecSign(unittest.TestCase):
             x509.ExtendedKeyUsage([
                 x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.3.35')  # id-kp-bundleSecurity
             ]),
+            critical=False,
+        ).add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(end_key.public_key()),
+            critical=False,
+        ).add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
             critical=False,
         ).sign(ca_key, hashes.SHA256())
         return cert

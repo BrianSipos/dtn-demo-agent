@@ -88,6 +88,16 @@ python3 -m tcpcl.test.bundlegen <gentype> <gencount>
 ```
 where `gentype` of "fullvalid" generates valid BPv7 test bundles, and `gencount` is the total number of bundles to generate and transfer.
 
+## ACME validation test
+
+To perform an ACME validation exchange between two nodes run the script:
+```
+sh install_agents.sh && \
+  dbus-send --print-reply --dest=dtn.client.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.start_expect_acme_request string:"dtn://server/" string:"tPUZNY4ONIk6LxErRFEjVw" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
+  dbus-send --print-reply --dest=dtn.server.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.send_acme_request string:"dtn://client/" string:"p3yRYFU4KxwQaHQjJ2RdiQ" string:"tPUZNY4ONIk6LxErRFEjVw" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
+  sleep 2; systemctl --user stop dtn.slice
+```
+
 # Wireshark Protocols and Dissectors
 
 The wireshark modules have been moved into separate project [dtn-wireshark](https://github.com/BSipos-RKF/dtn-wireshark).

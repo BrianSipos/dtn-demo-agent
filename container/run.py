@@ -166,6 +166,12 @@ class Runner:
                         x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.3.35')  # id-kp-bundleSecurity
                     ]),
                     critical=False,
+                ).add_extension(
+                    x509.SubjectKeyIdentifier.from_public_key(node_key.public_key()),
+                    critical=False,
+                ).add_extension(
+                    x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
+                    critical=False,
                 ).sign(ca_key, hashes.SHA256())
                 with open(os.path.join(configPath, 'sign.crt'), 'wb') as outfile:
                     outfile.write(node_cert.public_bytes(serialization.Encoding.PEM))
