@@ -61,17 +61,26 @@ IPADDR="127.0.0.2"
 mkdir -p "$HOME/.config/dtn"
 cat <<EOF >"$HOME/.config/dtn/client.yaml"
 udpcl:
-    log_level: debug
+    log_level: info
     bus_service: dtn.${NODENAME}.udpcl
+    node_id: dtn://${NODENAME}/
 
     dtls_enable_tx: False
+    dtls_ca_file: ${SELFDIR}/testpki/ca.crt
+    dtls_key_file: ${SELFDIR}/testpki/client-transport.key
+    dtls_cert_file: ${SELFDIR}/testpki/client-transport.crt
 
+    default_tx_address: ${IPADDR}
     mtu_default: 1280
-    init_listen:
-      - address: ${IPADDR}
-      - address: 224.0.0.1
+
+#    init_listen:
+#      - address: ${IPADDR}
+#      - address: 224.0.0.1
 #        multicast_member:
 #          - addr: 224.0.0.1
+    polling:
+      - address: 127.0.0.3
+        interval_ms: 10000
 
 tcpcl:
     log_level: info
@@ -79,8 +88,12 @@ tcpcl:
     node_id: dtn://${NODENAME}/
 
     tls_enable: False
-    init_listen:
-        address: ${IPADDR}
+    tls_ca_file: ${SELFDIR}/testpki/ca.crt
+    tls_key_file: ${SELFDIR}/testpki/client-transport.key
+    tls_cert_file: ${SELFDIR}/testpki/client-transport.crt
+
+#    init_listen:
+#        address: ${IPADDR}
 
 bp:
     log_level: info
@@ -117,11 +130,16 @@ IPADDR="127.0.0.3"
 mkdir -p "$HOME/.config/dtn"
 cat <<EOF >"$HOME/.config/dtn/server.yaml"
 udpcl:
-    log_level: warn
+    log_level: info
     bus_service: dtn.${NODENAME}.udpcl
+    node_id: dtn://${NODENAME}/
 
     dtls_enable_tx: False
+    dtls_ca_file: ${SELFDIR}/testpki/ca.crt
+    dtls_key_file: ${SELFDIR}/testpki/server-transport.key
+    dtls_cert_file: ${SELFDIR}/testpki/server-transport.crt
 
+    default_tx_address: ${IPADDR}
     mtu_default: 1280
     init_listen:
       - address: ${IPADDR}
@@ -135,11 +153,15 @@ tcpcl:
     node_id: dtn://${NODENAME}/
 
     tls_enable: False
+    tls_ca_file: ${SELFDIR}/testpki/ca.crt
+    tls_key_file: ${SELFDIR}/testpki/server-transport.key
+    tls_cert_file: ${SELFDIR}/testpki/server-transport.crt
+
     init_listen:
         address: ${IPADDR}
 
 bp:
-    log_level: warn
+    log_level: info
     bus_service: dtn.${NODENAME}.bp
     node_id: dtn://${NODENAME}/
 
@@ -160,11 +182,10 @@ bp:
 #        v4sources:
 #          - ${IPADDR}
 
-      - eid_pattern: "dtn://client/.*"
-        next_nodeid: dtn://client/
-        cl_type: udpcl
-#        cl_type: tcpcl
-        address: 127.0.0.2
+#      - eid_pattern: "dtn://client/.*"
+#        next_nodeid: dtn://client/
+#        cl_type: udpcl
+#        address: 127.0.0.2
 
         # default route
 #      - eid_pattern: ".*"
@@ -176,8 +197,8 @@ EOF
 
 pip3 install --user .
 $SYSTEMCTL daemon-reload
-for NODE in client server; do
-    for SVC in bp udpcl; do
+for NODE in server client; do
+    for SVC in udpcl tcpcl bp; do
     $SYSTEMCTL restart dtn-${SVC}-agent@${NODE}
     done
 done

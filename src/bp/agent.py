@@ -18,6 +18,7 @@ from bp.encoding import (
 from bp.util import BundleContainer, ChainStep
 import bp.cla
 import bp.app.base
+from bp.config import TxRouteItem
 
 LOGGER = logging.getLogger(__name__)
 
@@ -184,12 +185,35 @@ class Agent(dbus.service.Object):
         parts = ['{:5.1f}: {}'.format(item.order, item.name) for item in chain]
         self._logger.debug('Items in %s:\n%s', name, '\n'.join(parts))
 
-    def _cl_recv_bundle(self, data):
-        ''' Handle a new received bundle from a CL.
-        '''
-        self._logger.debug('recv_bundle data %s', encode_diagnostic(cbor2.loads(data)))
-        ctr = BundleContainer(Bundle(data))
-        self.recv_bundle(ctr)
+    def _cl_peer_node_seen(self, cltype):
+
+        def func(nodeid:str, tx_params:dict):
+            ''' React to :py:meth:`cla.AbstractAdaptor.peer_node_seen` calls.
+            '''
+            import re
+            self._logger.debug('peer_node_seen from %s node %s with %s', cltype, nodeid, tx_params)
+
+            # Inject static route with fixed pattern
+            route = TxRouteItem(
+                eid_pattern=re.compile(r'^' + re.escape(nodeid)),
+                next_nodeid=nodeid,
+                cl_type=cltype,
+                raw_config=tx_params
+            )
+            self._config.tx_route_table.append(route)
+
+        return func
+
+    def _cl_recv_bundle_finish(self, cltype):
+
+        def func(data:bytes, metadata:dict):
+            ''' React to :py:meth:`cla.AbstractAdaptor.recv_bundle_finish` calls.
+            '''
+            self._logger.debug('recv_bundle_finish from %s with %s', cltype, metadata)
+            ctr = BundleContainer(Bundle(data))
+            self.recv_bundle(ctr)
+
+        return func
 
     def _do_rx_step(self, ctr):
         ''' Perform the static RX routing step.
@@ -369,7 +393,7 @@ class Agent(dbus.service.Object):
 
         if ctr.route and not ctr.sender:
             # Assume the route is a TxRouteItem
-            ctr.sender = self._cl_agent[ctr.route.cl_type].send_bundle_func(**ctr.route.raw_config)
+            ctr.sender = self._cl_agent[ctr.route.cl_type].send_bundle_func(ctr.route.raw_config)
 
         if ctr.sender is None:
             raise RuntimeError('TX chain completed with no sender for %s', ctr.log_name())
@@ -393,13 +417,14 @@ class Agent(dbus.service.Object):
         self._logger.debug('Attaching to %s service %s', cltype, servname)
 
         try:
-            cls = bp.cla.CL_TYPES[cltype]
+            cls:bp.cla.AbstractAdaptor = bp.cla.CL_TYPES[cltype]
         except KeyError:
             raise ValueError('Invalid cltype: {}'.format(cltype))
 
         agent = cls()
         agent.serv_name = servname
-        agent.recv_bundle_finish = self._cl_recv_bundle
+        agent.peer_node_seen = self._cl_peer_node_seen(cltype)
+        agent.recv_bundle_finish = self._cl_recv_bundle_finish(cltype)
         self._cl_agent[cltype] = agent
 
         if self._bus_obj.NameHasOwner(servname):

@@ -12,14 +12,14 @@ from bp.encoding.bpsec import (TargetResultList, TypeValuePair,
                                BlockIntegrityBlock)
 from bp.config import Config
 from bp.agent import Agent
-from bp.app.bpsec import Bpsec
+from bp.app.bpsec import Bpsec, BPSEC_COSE_CONTEXT_ID
 
 
-class TestBpsecSign(unittest.TestCase):
+class TestBpsecCoseSign(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        super(TestBpsecSign, cls).setUpClass()
+        super().setUpClass()
 
         from dbus.mainloop.glib import DBusGMainLoop
         # Must run before connection or real main loop is constructed
@@ -146,9 +146,10 @@ class TestBpsecSign(unittest.TestCase):
         end_key = ec.generate_private_key(ec.SECP256R1)  # Curve for COSE ES256
         end_cert = self._dummy_end_cert(ca_key, ca_cert, end_key)
 
-        self._app._ca_certs = [ca_cert]
-        self._app._cert_chain = [end_cert]
-        self._app._priv_key = end_key
+        ctx = self._app._contexts[BPSEC_COSE_CONTEXT_ID]
+        ctx._ca_certs = [ca_cert]
+        ctx._cert_chain = [end_cert]
+        ctx._priv_key = end_key
 
         ctr = self._dummy_ctr()
         self._app._apply_bib(ctr)
@@ -168,9 +169,10 @@ class TestBpsecSign(unittest.TestCase):
         end_key = rsa.generate_private_key(0x10001, 1024)
         end_cert = self._dummy_end_cert(ca_key, ca_cert, end_key)
 
-        self._app._ca_certs = [ca_cert]
-        self._app._cert_chain = [end_cert]
-        self._app._priv_key = end_key
+        ctx = self._app._contexts[BPSEC_COSE_CONTEXT_ID]
+        ctx._ca_certs = [ca_cert]
+        ctx._cert_chain = [end_cert]
+        ctx._priv_key = end_key
 
         ctr = self._dummy_ctr()
         self._app._apply_bib(ctr)

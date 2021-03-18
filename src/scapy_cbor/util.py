@@ -18,7 +18,9 @@ def encode_diagnostic(obj, **kwargs):
     indent = kwargs.get('indent')
     wsp_indent = ' ' * indent if indent is not None else ''
 
-    if isinstance(obj, list):
+    if isinstance(obj, cbor2.CBORTag):
+        text = '{}({})'.format(obj.tag, obj.value)
+    elif isinstance(obj, list):
         nextkw = copy.copy(kwargs)
         if indent is not None:
             nextkw['indent'] += 2
@@ -42,22 +44,21 @@ def encode_diagnostic(obj, **kwargs):
         wsp_sep = '\n' if indent is not None else ' '
         mid = f',{wsp_sep}'.join(parts)
         text = f'{{{wsp_sep}{mid}{wsp_sep}{wsp_indent}}}'
-    elif isinstance(obj, six.binary_type):
+    elif isinstance(obj, six.integer_types) or hasattr(obj, '__int__'):
+        text = str(int(obj))
+    elif isinstance(obj, bool) or hasattr(obj, '__bool__'):
+        text = 'true' if bool(obj) else 'false'
+    elif isinstance(obj, six.binary_type) or hasattr(obj, '__bytes__'):
+        enc = bytes(obj)
         bstr_as = kwargs.get('bstr_as', 'hex')
         if bstr_as == 'hex':
-            text = "h'{}'".format(binascii.hexlify(obj).decode('utf8'))
+            text = "h'{}'".format(binascii.hexlify(enc).decode('utf8'))
         elif bstr_as == 'base64':
-            text = "b64'{}'".format(binascii.b2a_base64(obj, newline=False).decode('utf8'))
+            text = "b64'{}'".format(binascii.b2a_base64(enc, newline=False).decode('utf8'))
         else:
             raise ValueError('Invalid bstr_as parameter')
     elif isinstance(obj, six.text_type):
         text = '"{}"'.format(obj)
-    elif isinstance(obj, six.integer_types + (enum.Enum,)):
-        text = str(int(obj))
-    elif isinstance(obj, bool):
-        text = 'true' if obj else 'false'
-    elif isinstance(obj, cbor2.CBORTag):
-        text = '{}({})'.format(obj.tag, obj.value)
     elif obj is None:
         text = 'null'
     else:

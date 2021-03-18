@@ -96,10 +96,11 @@ class Nmp(AbstractApplication):
 
         self._hello_min_intvl = datetime.timedelta(seconds=1)
 
-        hello_intvl = int(10e3)
-        LOGGER.info('Sending HELLO at interval %d ms', hello_intvl)
-        glib.timeout_add(hello_intvl, self._timer_hello)
-        #glib.idle_add(self._timer_hello)
+        if False:
+            hello_intvl = int(10e3)
+            LOGGER.info('Sending HELLO at interval %d ms', hello_intvl)
+            glib.timeout_add(hello_intvl, self._timer_hello)
+            #glib.idle_add(self._timer_hello)
 
     def add_chains(self, rx_chain, tx_chain):
         rx_chain.append(ChainStep(

@@ -1,18 +1,22 @@
 ''' Agent configuration data.
 '''
 from dataclasses import dataclass, field, fields
+from datetime import timedelta
 from typing import Any, Optional, Dict, List, Set
 import logging
 import os
 import dbus.bus
 import yaml
+import dtls
 
 LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
 class ListenConfig():
+    #: Local address to listen on
     address: str
+    #: Local port to listen on
     port: int = 4556
     #: Multicast address membership
     multicast_member: List[Dict] = field(default_factory=list)
@@ -24,6 +28,16 @@ class ListenConfig():
         return {
             'multicast_member': self.multicast_member
         }
+
+
+@dataclass
+class PollConfig():
+    #: Local address to send to
+    address: str
+    #: Local port to send to
+    port: int = 4556
+    #: Interval time in milliseconds
+    interval_ms: int = 60000
 
 
 @dataclass
@@ -48,7 +62,8 @@ class Config(object):
 
     #: Allow use of TLS for sending
     dtls_enable_tx: bool = True
-#    dtls_version: Optional[str] = None
+    #: Specific version to allow
+    dtls_version: Optional[str] = None
     # OpenSSL cipher filter
     dtls_ciphers: Optional[str] = None
     #: Trusted root CA PEM file
@@ -57,12 +72,21 @@ class Config(object):
     dtls_cert_file: Optional[str] = None
     #: Local private key PEM file
     dtls_key_file: Optional[str] = None
-#    tls_dhparam: Optional[str] = None
-    #: If True, plaintext bundles are rejected
-#    require_tls: bool = False
+    
+    #: If True, plaintext RX bundles are rejected
+    require_tls: bool = False
+    #: If truthy, the peer must have its host name authenticated (by TLS).
+#    require_host_authn: bool = False
+    #: If truthy, the peer must have its Node ID authenticated (by TLS).
+#    require_node_authn: bool = False
 
-    #: Fixed UDP port to send on
-    tx_port: Optional[int] = None
+    #: The Node ID of this entity, which is a URI.
+    node_id: str = u''
+
+    #: Default source IP to send on
+    default_tx_address: Optional[str] = None
+    #: Default UDP port to send on
+    default_tx_port: Optional[int] = None
     #: Default MTU when not discoverable
     mtu_default: Optional[int] = None
 
@@ -71,6 +95,8 @@ class Config(object):
 
     #: If provided, will listen on the specified address/port
     init_listen: List[ListenConfig] = field(default_factory=list)
+    #: If provided, will poll a peer
+    polling: List[PollConfig] = field(default_factory=list)
 
     def from_file(self, fileobj):
         ''' Load configuration from a YAML file.
@@ -91,6 +117,11 @@ class Config(object):
                         self.init_listen.append(
                             ListenConfig(**item)
                         )
+                elif fld.name == 'polling':
+                    for item in cldat[fld.name]:
+                        self.polling.append(
+                            PollConfig(**item)
+                        )
                 else:
                     setattr(self, fld.name, cldat[fld.name])
 
@@ -107,3 +138,35 @@ class Config(object):
             LOGGER.debug('Connecting to DBus: %s', addr_or_type)
             self._bus_conn = dbus.bus.BusConnection(addr_or_type)
         return self._bus_conn
+
+    def get_ssl_connection(self, sock, server_side:bool):
+        ''' Get an :py:class:`dtls.SSLConnection` object configured for this peer.
+        '''
+        version_map = {
+            None: dtls.sslconnection.PROTOCOL_DTLS,
+            '1.0': dtls.sslconnection.PROTOCOL_DTLSv1,
+            '1.2': dtls.sslconnection.PROTOCOL_DTLSv1_2,
+        }
+        try:
+            vers_enum = version_map[self.dtls_version]
+        except KeyError:
+            raise ValueError('Invalid TLS version "{0}"'.format(self.tls_version))
+
+
+        def ssl_config_ctx(ctx):
+            pass
+
+        conn = dtls.SSLConnection(
+            sock,
+            do_handshake_on_connect=False,
+            server_side=server_side,
+            ssl_version=vers_enum,
+            ciphers=self.dtls_ciphers,
+            ca_certs=self.dtls_ca_file,
+            keyfile=self.dtls_key_file,
+            certfile=self.dtls_cert_file,
+            cert_reqs=dtls.sslconnection.CERT_REQUIRED,
+            cb_user_config_ssl_ctx=ssl_config_ctx,
+        )
+        conn._intf_ssl_ctx.set_ssl_logging(True)
+        return conn
