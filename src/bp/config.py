@@ -74,6 +74,9 @@ class Config(object):
     #: The bus service names of CLs to attach to
     cl_attach: Dict[str, str] = field(default_factory=dict)
 
+    #: Application-specific configurations
+    apps: Dict[str, dict] = field(default_factory=dict)
+
     def from_file(self, fileobj):
         ''' Load configuration from a YAML file.
         :param fileobj: The file to read from.

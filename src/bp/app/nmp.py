@@ -9,11 +9,12 @@ from gi.repository import GLib as glib
 import ipaddress
 import logging
 import psutil
+import re
 import socket
 from typing import List
 
 from scapy_cbor.util import encode_diagnostic
-from bp.config import TxRouteItem
+from bp.config import Config, TxRouteItem
 from bp.encoding import (
     AbstractBlock, PrimaryBlock, CanonicalBlock,
 )
@@ -90,16 +91,24 @@ class Nmp(AbstractApplication):
         self._hello_min_intvl = None
         self._one_hop = {}
 
-    def load_config(self, config):
+    def load_config(self, config:Config):
         super().load_config(config)
         self._config = config
 
-        self._hello_min_intvl = datetime.timedelta(seconds=1)
+        nmp_config = self._config.apps.get(self._app_name, {})
+        LOGGER.debug('nmp_config %s', nmp_config)
 
-        if False:
-            hello_intvl = int(10e3)
-            LOGGER.info('Sending HELLO at interval %d ms', hello_intvl)
-            glib.timeout_add(hello_intvl, self._timer_hello)
+        self._hello_min_intvl = datetime.timedelta(
+            seconds=nmp_config.get('hello_min_intvl', 1)
+        )
+        self._hello_nom_intvl = datetime.timedelta(
+            seconds=nmp_config.get('hello_nom_intvl', 10)
+        )
+
+        if nmp_config.get('enable', False):
+            hello_intvl_ms = self._hello_nom_intvl // datetime.timedelta(milliseconds=1)
+            LOGGER.info('Sending HELLO at interval %d ms', hello_intvl_ms)
+            glib.timeout_add(hello_intvl_ms, self._timer_hello)
             #glib.idle_add(self._timer_hello)
 
     def add_chains(self, rx_chain, tx_chain):
@@ -154,12 +163,22 @@ class Nmp(AbstractApplication):
             for cldef in clset:
                 cltype = cldef.get(ClKeys.CL_TYPE)
                 if cltype == ClType.UDPCL:
-                    import re
                     addr_list = cldef.get(ClKeys.ADDR, [])
                     route = TxRouteItem(
                         eid_pattern=re.compile(r''),
                         next_nodeid=node_id,
                         cl_type='udpcl',
+                        raw_config=dict(
+                            address=str(ipaddress.ip_address(addr_list[0])),
+                            port=cldef.get(ClKeys.PORT, 4556),
+                        ),
+                    )
+                elif cltype == ClType.TCPCL:
+                    addr_list = cldef.get(ClKeys.ADDR, [])
+                    route = TxRouteItem(
+                        eid_pattern=re.compile(r''),
+                        next_nodeid=node_id,
+                        cl_type='tcpcl',
                         raw_config=dict(
                             address=str(ipaddress.ip_address(addr_list[0])),
                             port=cldef.get(ClKeys.PORT, 4556),
@@ -195,11 +214,12 @@ class Nmp(AbstractApplication):
 
         ctr.record_action('deliver')
 
-    def _send_msg(self, msg, remote_addr, local_addr):
+    def _send_msg(self, msg, address, local_address):
         ''' Send an NMP message
 
         :param msg: The message content.
-        :param local_addr: The address to send from.
+        :param address: The remote address to send to.
+        :param local_address: The address to send from.
         '''
         LOGGER.info('Message TX: %s', encode_diagnostic(msg))
 
@@ -226,9 +246,9 @@ class Nmp(AbstractApplication):
             next_nodeid=ctr.bundle.primary.destination,
             cl_type='udpcl',
             raw_config=dict(
-                address=remote_addr,
+                address=address,
                 port=4556,
-                local_addr=local_addr,
+                local_address=local_address,
             ),
         )
 
@@ -257,6 +277,7 @@ class Nmp(AbstractApplication):
         if own_addr.is_loopback or own_addr.is_link_local:
             own_name = None
 
+        # Each interface gets its own message
         for (_if_name, items) in psutil.net_if_addrs().items():
             name_objs = []
             addr_objs = []
@@ -296,10 +317,11 @@ class Nmp(AbstractApplication):
                     item.link_status,
                 ])
 
+            intvl_ms = self._hello_nom_intvl // datetime.timedelta(milliseconds=1)
             msg = {
                 MsgKeys.MSG_TYPE: MsgType.HELLO,
-                MsgKeys.HELLO_VALIDITY_TIME: 123,
-                MsgKeys.HELLO_INTERVAL_TIME: 456,
+                MsgKeys.HELLO_VALIDITY_TIME: 2 * intvl_ms,
+                MsgKeys.HELLO_INTERVAL_TIME: intvl_ms,
                 MsgKeys.HELLO_CLSET: [
                     {
                         ClKeys.CL_TYPE: ClType.UDPCL,

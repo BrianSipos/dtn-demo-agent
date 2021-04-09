@@ -2,8 +2,9 @@
 '''
 import dbus.service
 from bp.encoding import (
-    AbstractBlock, PrimaryBlock, CanonicalBlock,
+    PrimaryBlock,
 )
+from bp.config import Config
 
 #: Dictionary of BP applications
 APPLICATIONS = {}
@@ -25,23 +26,26 @@ def app(name: str):
 
 class AbstractApplication(dbus.service.Object):
     ''' Base class for bundle application delivery.
+
+    :param app_name: The name of this app being configured.
+    :param agent: The parent agent of this application.
     '''
 
-    def __init__(self, agent, bus_kwargs):
+    def __init__(self, app_name:str, agent, bus_kwargs):
         dbus.service.Object.__init__(self, **bus_kwargs)
+        self._app_name = app_name
         self._agent = agent
 
-    def load_config(self, config):
+    def load_config(self, config:Config):
         ''' Read any needed configuration data.
-        
+
         :param config: The agent configuration.
-        :type config: :py:cls:`bp.config.Config`.
         '''
         return
 
     def add_chains(self, rx_chain, tx_chain):
         ''' Add steps to either processing chain.
-        
+
         :param rx_chain: The list of :py:cls:`util.ChainStep`.
         :param tx_chain: The list of :py:cls:`util.ChainStep`.
         '''

@@ -63,7 +63,7 @@ class Agent(dbus.service.Object):
 
     def _bind_handler(self, **kwargs):
         ''' Construct a new handler object.
-        
+
         :param kwargs: The `hdl_kwargs` given to the handler.
         :return: The handler.
         :rtype: :py:cls:`ContactHandler`
@@ -163,7 +163,7 @@ class Agent(dbus.service.Object):
                 # wait for graceful shutdown
                 eloop.run()
 
-    @dbus.service.method(DBUS_IFACE, in_signature='si')
+    @dbus.service.method(DBUS_IFACE, in_signature='sq')
     def listen(self, address, port):
         ''' Begin listening for incoming connections and defer handling
         connections to `glib` event loop.
@@ -180,7 +180,7 @@ class Agent(dbus.service.Object):
         self._bindsocks[bindspec] = sock
         glib.io_add_watch(sock, glib.IO_IN, self._accept)
 
-    @dbus.service.method(DBUS_IFACE, in_signature='si')
+    @dbus.service.method(DBUS_IFACE, in_signature='sq')
     def listen_stop(self, address, port):
         ''' Stop listening for connections on an existing port binding.
         '''
@@ -213,7 +213,7 @@ class Agent(dbus.service.Object):
 
         return True
 
-    @dbus.service.method(DBUS_IFACE, in_signature='si', out_signature='o')
+    @dbus.service.method(DBUS_IFACE, in_signature='sq', out_signature='o')
     def connect(self, address, port):
         ''' Initiate an outgoing connection and defer handling state to
         `glib` event loop.

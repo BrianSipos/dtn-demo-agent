@@ -32,10 +32,14 @@ class ListenConfig():
 
 @dataclass
 class PollConfig():
-    #: Local address to send to
+    #: Local address or DNS name to send to
     address: str
     #: Local port to send to
     port: int = 4556
+    #: Optional local address
+    local_address: Optional[str] = None
+    #: Optional local port
+    local_port: Optional[int] = None
     #: Interval time in milliseconds
     interval_ms: int = 60000
 
@@ -72,7 +76,7 @@ class Config(object):
     dtls_cert_file: Optional[str] = None
     #: Local private key PEM file
     dtls_key_file: Optional[str] = None
-    
+
     #: If True, plaintext RX bundles are rejected
     require_tls: bool = False
     #: If truthy, the peer must have its host name authenticated (by TLS).

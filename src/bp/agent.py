@@ -105,7 +105,7 @@ class Agent(dbus.service.Object):
                 conn=config.bus_conn,
                 object_path=path
             )
-            app = cls(self, bus_kwargs)
+            app = cls(app_name=name, agent=self, bus_kwargs=bus_kwargs)
             self._app[name] = app
             app.load_config(self._config)
             app.add_chains(self._rx_chain, self._tx_chain)
@@ -295,8 +295,12 @@ class Agent(dbus.service.Object):
 
         for step in self._rx_chain:
             self._logger.debug('Performing RX step %5.1f: %s', step.order, step.name)
-            if step.action(ctr):
-                self._logger.debug('Step %5.1f interrupted the chain', step.order)
+            try:
+                if step.action(ctr):
+                    self._logger.debug('Step %5.1f interrupted the chain', step.order)
+                    break
+            except Exception as err:
+                self._logger.error('Step %5.1f failed with exception: %s', step.order, err)
                 break
 
         if 'delete' in ctr.actions:
@@ -387,8 +391,12 @@ class Agent(dbus.service.Object):
 
         for step in self._tx_chain:
             self._logger.debug('Performing TX step %5.1f: %s', step.order, step.name)
-            if step.action(ctr):
-                self._logger.debug('Step %5.1f interrupted the chain', step.order)
+            try:
+                if step.action(ctr):
+                    self._logger.debug('Step %5.1f interrupted the chain', step.order)
+                    break
+            except Exception as err:
+                self._logger.error('Step %5.1f failed with exception: %s', step.order, err)
                 break
 
         if ctr.route and not ctr.sender:
@@ -429,8 +437,9 @@ class Agent(dbus.service.Object):
 
         if self._bus_obj.NameHasOwner(servname):
             agent.bind(self._config.bus_conn)
+            self._logger.info('Bound to %s service %s', cltype, servname)
         else:
-            self._logger.info('Service %s not yet available, but will bind when available', servname)
+            self._logger.info('Could not bind to %s service %s, but will bind when available', cltype, servname)
 
     @dbus.service.method(DBUS_IFACE, in_signature='si', out_signature='')
     def ping(self, nodeid, datalen):

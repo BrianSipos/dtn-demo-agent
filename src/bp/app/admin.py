@@ -9,6 +9,7 @@ import enum
 from gi.repository import GLib as glib
 import logging
 import math
+from typing import List
 
 from scapy_cbor.util import encode_diagnostic
 from bp.encoding import (
@@ -112,6 +113,8 @@ class Administrative(AbstractApplication):
 
         rec = cbor2.loads(ctr.block_num(1).getfieldval('btsd'))
         LOGGER.info('Record RX: %s', encode_diagnostic(rec))
+        if not isinstance(rec, List):
+            raise ValueError('Administrative record is not a list type, got %s', type(rec))
         rec_type = int(rec[0])
         handler = self._rec_type_map[rec_type]
 

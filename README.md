@@ -98,6 +98,26 @@ sh install_agents.sh && \
   sleep 2; systemctl --user stop dtn.slice
 ```
 
+# Containerized nodes
+
+The `run.py` commands use the environment `DOCKER` to control the container tool.
+For example in fedora use the environment `DOCKER="sudo podman"`.
+
+To initialize and start a set of containers:
+```
+python3 container/run.py --config container/example.yaml delete prep start
+```
+
+To observe the log of one of the nodes:
+```
+docker container exec -it node003 journalctl -f
+```
+
+To call DBus methods in one of the nodes:
+```
+docker container exec -it node003 dbus-send --system --print-reply --dest=org.ietf.dtn.node.udpcl /org/ietf/dtn/udpcl/Agent org.ietf.dtn.udpcl.Agent.pmtud_start string:node002. uint16:4556
+```
+
 # Wireshark Protocols and Dissectors
 
 The wireshark modules have been moved into separate project [dtn-wireshark](https://github.com/BSipos-RKF/dtn-wireshark).
