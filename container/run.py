@@ -2,6 +2,7 @@
 #
 import argparse
 from cryptography import x509
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 import datetime
@@ -61,9 +62,9 @@ class Runner:
                     self.run_docker(cmd)
 
             with open(os.path.join('testpki', 'ca.key'), 'rb') as infile:
-                ca_key = serialization.load_pem_private_key(infile.read(), None)
+                ca_key = serialization.load_pem_private_key(infile.read(), None, backend=default_backend())
             with open(os.path.join('testpki', 'ca.crt'), 'rb') as infile:
-                ca_cert = x509.load_pem_x509_certificate(infile.read())
+                ca_cert = x509.load_pem_x509_certificate(infile.read(), backend=default_backend())
 
             for (node_name, node_opts) in self._config['nodes'].items():
                 fqdn = node_name + '.local'
@@ -74,7 +75,7 @@ class Runner:
 
                 # Generate node keys
                 for key_name in ('transport', 'sign'):
-                    node_key = ec.generate_private_key(ec.SECP256R1)  # Curve for COSE ES256
+                    node_key = ec.generate_private_key(ec.SECP256R1, backend=default_backend())  # Curve for COSE ES256
                     with open(os.path.join(configPath, f'{key_name}.key'), 'wb') as outfile:
                         outfile.write(node_key.private_bytes(
                             encoding=serialization.Encoding.PEM,
@@ -140,7 +141,7 @@ class Runner:
                     ).add_extension(
                         x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
                         critical=False,
-                    ).sign(ca_key, hashes.SHA256())
+                    ).sign(ca_key, hashes.SHA256(), backend=default_backend())
                     with open(os.path.join(configPath, f'{key_name}.crt'), 'wb') as outfile:
                         outfile.write(node_cert.public_bytes(serialization.Encoding.PEM))
 

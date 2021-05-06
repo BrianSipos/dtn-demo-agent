@@ -3,6 +3,7 @@
 import datetime
 import unittest
 from cryptography import x509
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from bp.encoding.fields import (EidField)
@@ -72,7 +73,7 @@ class TestBpsecCoseSign(unittest.TestCase):
         ).add_extension(
             x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
             critical=False,
-        ).sign(ca_key, hashes.SHA256())
+        ).sign(ca_key, hashes.SHA256(), backend=default_backend())
         return cert
 
     def _dummy_end_cert(self, ca_key, ca_cert, end_key):
@@ -123,7 +124,7 @@ class TestBpsecCoseSign(unittest.TestCase):
         ).add_extension(
             x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
             critical=False,
-        ).sign(ca_key, hashes.SHA256())
+        ).sign(ca_key, hashes.SHA256(), backend=default_backend())
         return cert
 
     def _dummy_ctr(self):
@@ -141,9 +142,9 @@ class TestBpsecCoseSign(unittest.TestCase):
         return ctr
 
     def test_apply_bib_ec2(self):
-        ca_key = ec.generate_private_key(ec.SECP256R1)
+        ca_key = ec.generate_private_key(ec.SECP256R1, backend=default_backend())
         ca_cert = self._dummy_ca_cert(ca_key)
-        end_key = ec.generate_private_key(ec.SECP256R1)  # Curve for COSE ES256
+        end_key = ec.generate_private_key(ec.SECP256R1, backend=default_backend())  # Curve for COSE ES256
         end_cert = self._dummy_end_cert(ca_key, ca_cert, end_key)
 
         ctx = self._app._contexts[BPSEC_COSE_CONTEXT_ID]
@@ -164,9 +165,9 @@ class TestBpsecCoseSign(unittest.TestCase):
         self.assertEqual({'deliver'}, ctr.actions.keys())
 
     def test_apply_bib_rsa(self):
-        ca_key = rsa.generate_private_key(0x10001, 1024)
+        ca_key = rsa.generate_private_key(0x10001, 1024, backend=default_backend())
         ca_cert = self._dummy_ca_cert(ca_key)
-        end_key = rsa.generate_private_key(0x10001, 1024)
+        end_key = rsa.generate_private_key(0x10001, 1024, backend=default_backend())
         end_cert = self._dummy_end_cert(ca_key, ca_cert, end_key)
 
         ctx = self._app._contexts[BPSEC_COSE_CONTEXT_ID]

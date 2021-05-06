@@ -124,7 +124,32 @@ class CoseContext(AbstractContext):
         :rtype: :py:cls:`CoseKey`
         '''
         if isinstance(keyobj, (rsa.RSAPrivateKey, rsa.RSAPublicKey)):
-            cose_key = RSAKey.from_cryptograpy_key_obj(keyobj)
+            if hasattr(keyobj, 'private_numbers'):
+                priv_nums = keyobj.private_numbers()
+                pub_nums = keyobj.public_key().public_numbers()
+            else:
+                priv_nums = None
+                pub_nums = keyobj.public_numbers()
+
+            kwargs = dict()
+            if pub_nums:
+                def convert(name, attr=None):
+                    val = getattr(pub_nums, attr or name)
+                    kwargs[name] = val.to_bytes((val.bit_length() + 7) // 8, byteorder="big")
+                convert('n')
+                convert('e')
+            if priv_nums:
+                def convert(name, attr=None):
+                    val = getattr(priv_nums, attr or name)
+                    kwargs[name] = val.to_bytes((val.bit_length() + 7) // 8, byteorder="big")
+                convert('d')
+                convert('p')
+                convert('q')
+                convert('dp', 'dmp1')
+                convert('dq', 'dmq1')
+                convert('qinv', 'iqmp')
+
+            cose_key = RSAKey(**kwargs)
             cose_key.alg = algorithms.Ps256
 
         elif isinstance(keyobj, (ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey)):
