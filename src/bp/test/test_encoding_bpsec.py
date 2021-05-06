@@ -2,6 +2,7 @@
 '''
 from binascii import hexlify, unhexlify
 from bp.encoding.fields import (EidField)
+from bp.encoding.blocks import CanonicalBlock
 from bp.encoding.bpsec import (TargetResultList, TypeValuePair,
                                BlockIntegrityBlock)
 from bp.test.base import BaseTestPacket
@@ -58,6 +59,27 @@ class TestBlockIntegrityBlock(BaseTestPacket):
         )
 
         data = b'82010203008201682f2f6e6f6465412f82818201626869818202f4'
+        self.assertEqual(hexlify(bytes(pkt)), data)
+
+    def testEncodeBlock(self):
+        pkt = CanonicalBlock(
+            block_num=3,
+        ) / BlockIntegrityBlock(
+            targets=[1, 2],
+            context_id=3,
+            context_flags=0,
+            source='dtn://nodeA/',
+            results=[
+                TargetResultList(results=[
+                    TypeValuePair(type_code=1, value='hi'),
+                ]),
+                TargetResultList(results=[
+                    TypeValuePair(type_code=2, value=False),
+                ]),
+            ]
+        )
+
+        data = b'850b030000581b' + b'82010203008201682f2f6e6f6465412f82818201626869818202f4'
         self.assertEqual(hexlify(bytes(pkt)), data)
 
     def testDecodeItem(self):

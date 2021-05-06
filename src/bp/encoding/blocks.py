@@ -211,9 +211,10 @@ class CanonicalBlock(AbstractBlock):
             return
         if self.fields.get('btsd') is not None:
             return
-        pay_data = self.payload.do_build()
         if isinstance(self.payload, AbstractCborStruct):
-            pay_data = cbor2.dumps(pay_data)
+            pay_data = bytes(self.payload)
+        else:
+            pay_data = self.payload.do_build()
         self.fields['btsd'] = pay_data
 
     def fill_fields(self):
