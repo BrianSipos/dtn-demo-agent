@@ -93,7 +93,7 @@ class CborArray(AbstractCborStruct):
 
 class CborItem(AbstractCborStruct):
     ''' A special case layer which is undecoded CBOR item storage.
-    There is no packet framing (i.e. array) on this item and no payload 
+    There is no packet framing (i.e. array) on this item and no payload
     or padding is allowed.
 
     Only one field is allowed with an arbitrary name.
@@ -104,7 +104,7 @@ class CborItem(AbstractCborStruct):
         CborField('item', default=None),
     ]
 
-    def self_build(self, field_pos_list=None):
+    def self_build(self, *_args, **_kwargs):
         if len(self.fields_desc) != 1:
             if conf.debug_dissector:
                 raise RuntimeError('CborItem must have exactly one field')
@@ -180,3 +180,23 @@ class TypeValueHead(CborArray):
             return othercls
 
         return func
+
+
+class CborSequence(CborArray):
+    ''' Internally handled as an array but encoded without the array framing.
+    '''
+
+    def dissect(self, s):
+        ''' Synthesize an indefinite-length array frame.
+        :param data: The CBOR array.
+        '''
+        if isinstance(s, bytes):
+            s = b'\x9f' + s + b'\xff'
+        return super().dissect(s)
+
+    def __bytes__(self):
+        ''' Don't include CBOR array framing.
+        :return: The encoded BTSD.
+        '''
+        array = self.build()
+        return b''.join(cbor2.dumps(item) for item in array)

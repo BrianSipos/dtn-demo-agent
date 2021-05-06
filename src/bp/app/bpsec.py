@@ -10,7 +10,11 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from cose.messages import CoseMessage, Sign1Message
 from cose import algorithms, curves, headers
-from cose.keys import (keyparam, EC2Key, RSAKey)
+from cose.keys import keyparam, EC2Key
+try:
+    from cose.keys import RSAKey
+except ImportError:
+    pass
 from cose.exceptions import CoseIllegalCurve
 from cose.extensions.x509 import X5T, X5Chain
 

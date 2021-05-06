@@ -1,11 +1,12 @@
 ''' Blocks for BPSEC.
 '''
+import cbor2
 import enum
 from scapy_cbor.fields import (
     ConditionalField, ArrayWrapField,
     CborField, UintField, FlagsField, FieldListField, PacketListField,
 )
-from scapy_cbor.packets import CborArray
+from scapy_cbor.packets import CborArray, CborSequence
 from .fields import EidField
 from .blocks import CanonicalBlock
 
@@ -28,7 +29,7 @@ class TargetResultList(CborArray):
     )
 
 
-class AbstractSecurityBlock(CborArray):
+class AbstractSecurityBlock(CborSequence):
     ''' Block data from 'draft-ietf-dtn-bpsec-22' Section 3.6.
     '''
 

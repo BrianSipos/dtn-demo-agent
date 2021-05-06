@@ -1,5 +1,6 @@
 ''' Test the module :py:mod:`bp.blocks`.
 '''
+from binascii import hexlify, unhexlify
 from bp.encoding.fields import (EidField)
 from bp.encoding.bpsec import (TargetResultList, TypeValuePair,
                                BlockIntegrityBlock)
@@ -8,7 +9,7 @@ from bp.test.base import BaseTestPacket
 
 class TestBlockIntegrityBlock(BaseTestPacket):
 
-    def testEncode(self):
+    def testEncodeItem(self):
         pkt = BlockIntegrityBlock(
             targets=[1, 2],
             context_id=3,
@@ -23,6 +24,7 @@ class TestBlockIntegrityBlock(BaseTestPacket):
                 ]),
             ]
         )
+
         item = [
             [1, 2],
             3,
@@ -39,7 +41,26 @@ class TestBlockIntegrityBlock(BaseTestPacket):
         ]
         self.assertEqual(self._encode(pkt), item)
 
-    def testDecode(self):
+    def testEncodeBytes(self):
+        pkt = BlockIntegrityBlock(
+            targets=[1, 2],
+            context_id=3,
+            context_flags=0,
+            source='dtn://nodeA/',
+            results=[
+                TargetResultList(results=[
+                    TypeValuePair(type_code=1, value='hi'),
+                ]),
+                TargetResultList(results=[
+                    TypeValuePair(type_code=2, value=False),
+                ]),
+            ]
+        )
+
+        data = b'82010203008201682f2f6e6f6465412f82818201626869818202f4'
+        self.assertEqual(hexlify(bytes(pkt)), data)
+
+    def testDecodeItem(self):
         item = [
             [1, 2],
             3,
@@ -55,6 +76,27 @@ class TestBlockIntegrityBlock(BaseTestPacket):
             ],
         ]
         pkt = self._decode(BlockIntegrityBlock, item)
+
+        fields = dict(
+            targets=[1, 2],
+            context_id=3,
+            context_flags=0,
+            source='dtn://nodeA/',
+            results=[
+                TargetResultList(results=[
+                    TypeValuePair(type_code=1, value='hi'),
+                ]),
+                TargetResultList(results=[
+                    TypeValuePair(type_code=2, value=False),
+                ]),
+            ]
+        )
+        self.assertEqual(pkt.fields, fields)
+
+    def testDecodeBytes(self):
+        data = b'82010203008201682f2f6e6f6465412f82818201626869818202f4'
+        pkt = BlockIntegrityBlock(unhexlify(data))
+
         fields = dict(
             targets=[1, 2],
             context_id=3,

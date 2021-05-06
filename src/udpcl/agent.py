@@ -30,6 +30,9 @@ class ExtensionKey(enum.IntFlag):
     SENDER_NODEID = 0x04
     STARTTLS = 0x05
 
+    PMTUD_PROBE = -1
+    PMTUD_ACK = -2
+
 
 @dataclass
 class BundleItem(object):
@@ -219,6 +222,9 @@ class Agent(dbus.service.Object):
         self._rx_id = 0
         self._rx_queue = {}
 
+        self._pmtud_recv = {}
+        self._pmtud_send = {}
+
         if bus_kwargs is None:
             bus_kwargs = dict(
                 conn=config.bus_conn,
@@ -363,8 +369,8 @@ class Agent(dbus.service.Object):
         self._add_tx_item(item, is_transfer=False)
         return repeat
 
-    @dbus.service.method(DBUS_IFACE, in_signature='sq')
-    def pmtud_start(self, address, port):
+    @dbus.service.method(DBUS_IFACE, in_signature='sqi')
+    def pmtud_start(self, address, port, stepcount):
         ipaddr = Conversation.addr_from_str(address)
 
         base_plpmtu = 1200
@@ -376,14 +382,14 @@ class Agent(dbus.service.Object):
             min_plpmtu = 1280 - txp_overhead
         max_plpmtu = min(2 * base_plpmtu, 2 ** 16 - 1) - txp_overhead
 
-        pkt_step = max(1, (max_plpmtu - min_plpmtu) // 2 ** 4)
+        pkt_step = max(1, (max_plpmtu - min_plpmtu) // stepcount)
+        self.__logger.debug('Sending PMTUD probes to %s', address)
         for pkt_size in range(base_plpmtu, max_plpmtu, pkt_step):
-            data = cbor2.dumps({
-                -1: pkt_size,
-                -2: True,
+            msg = cbor2.dumps({
+                ExtensionKey.PMTUD_PROBE: [0, pkt_size, 1000],
             })
             # Pad out the packet
-            data += b'\0' * (pkt_size - len(data))
+            data = msg + b'\0' * (pkt_size - len(msg))
 
             IP_MTU_DISCOVER = 10
             IP_PMTUDISC_DO = 2  # Always DF
@@ -394,6 +400,44 @@ class Agent(dbus.service.Object):
                 sock_opts=[(socket.SOL_IP, IP_MTU_DISCOVER, IP_PMTUDISC_DO)],
             )
             self._add_tx_item(item, is_transfer=False)
+
+    def _pmtud_recv_probe(self, conv:Conversation, ext):
+        state = self._pmtud_recv.get(conv.key)
+        if state is None:
+            state = {
+                'timer': None,
+                'pids': list(),
+            }
+            self._pmtud_recv[conv.key] = state
+
+        (_seq, pid, timeout) = ext
+        self.__logger.debug('Received PMTUD probe %s from %s', pid, conv.peer_address)
+
+        # Cancel any earlier timer and queue the next timeout
+        if state['timer'] is not None:
+            glib.source_remove(state['timer'])
+
+        state['pids'].append(pid)
+        state['timer'] = glib.timeout_add(timeout, self._pmtud_send_ack, conv)
+
+    def _pmtud_send_ack(self, conv:Conversation):
+        pids = self._pmtud_recv[conv.key]['pids']
+        del self._pmtud_recv[conv.key]
+
+        self.__logger.debug('Sending PMTUD ack %s to %s', pids, conv.peer_address)
+        msg = cbor2.dumps({
+            ExtensionKey.PMTUD_ACK: [0, pids],
+        })
+
+        item = BundleItem(
+            address=str(conv.peer_address),
+            port=conv.peer_port,
+            file=BytesIO(msg),
+        )
+        self._add_tx_item(item, is_transfer=False)
+
+    def _pmtud_recv_ack(self, conv:Conversation, ext):
+        pass
 
     def _sock_recvfrom(self, sock, *_args, **_kwargs):
         ''' Callback to handle incoming datagrams.
@@ -598,6 +642,11 @@ class Agent(dbus.service.Object):
                         file=BytesIO(xfer.data)
                     )
                 )
+
+        if ExtensionKey.PMTUD_PROBE in extmap:
+            self._pmtud_recv_probe(conv, extmap[ExtensionKey.PMTUD_PROBE])
+        if ExtensionKey.PMTUD_ACK in extmap:
+            self._pmtud_recv_ack(conv, extmap[ExtensionKey.PMTUD_ACK])
 
     def _add_rx_item(self, item:BundleItem):
         ''' Add a recevied bundle.
