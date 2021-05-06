@@ -4,9 +4,7 @@ RUN --mount=type=cache,target=/var/cache/dnf dnf -y install git python3-pip pyth
     python3-gobject-base python3-dbus dbus-tools && \
     yum clean all
 
-# workaround version conflict
-RUN --mount=type=cache,target=/root/.cache pip3 install sphinx-rtd-theme==0.5.0
-RUN --mount=type=cache,target=/root/.cache pip3 install git+https://github.com/BSipos-RKF/pycose.git@develop
+RUN --mount=type=cache,target=/root/.cache pip3 install git+https://github.com/TimothyClaeys/pycose.git@master
 
 COPY src/ /root/agent/src/
 COPY setup.py /root/agent/

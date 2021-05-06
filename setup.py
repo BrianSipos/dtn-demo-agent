@@ -11,7 +11,7 @@ setup(
     description='A demonstration agent for the DTN BPv7/TCPCLv4/UDPCL.',
     long_description='''\
 This implements all of the required behavior of the TCPCLv4 specification as
-well as some proof-of-concept behaviors such as segment/transfer pipelining 
+well as some proof-of-concept behaviors such as segment/transfer pipelining
 and dynamic segment sizing.
 ''',
     classifiers=[
@@ -40,7 +40,7 @@ and dynamic segment sizing.
         'PyGObject >=3.34', # glib integration
         'PyYAML',
         'python3-dtls',
-        'scapy >=2.4',
+        'scapy >=2.4,<2.4.5',
         'six',
     ],
     extras_require={},
