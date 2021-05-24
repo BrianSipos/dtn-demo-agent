@@ -18,6 +18,20 @@ import yaml
 LOGGER = logging.getLogger()
 SELFDIR = os.path.dirname(os.path.abspath(__file__))
 
+
+def generate_key(key_opts):
+    keytype = key_opts.get('keytype', 'SECP256R1').upper()
+    if keytype == 'RSA':
+        key_size = 1024
+        node_key = rsa.generate_private_key(65537, key_size, backend=default_backend())
+    elif keytype.startswith('SECP'):
+        curve = getattr(ec, keytype)
+        node_key = ec.generate_private_key(curve, backend=default_backend())  # Curve for COSE ES256
+    else:
+        raise ValueError(f'Unknown keytype: {keytype}')
+    return node_key
+
+
 class Runner:
     ACTIONS = ['prep', 'start', 'stop', 'delete']
 
@@ -61,10 +75,54 @@ class Runner:
                         cmd += ['--ipv6', '--subnet', net_opts['subnet6']]
                     self.run_docker(cmd)
 
-            with open(os.path.join('testpki', 'ca.key'), 'rb') as infile:
-                ca_key = serialization.load_pem_private_key(infile.read(), None, backend=default_backend())
-            with open(os.path.join('testpki', 'ca.crt'), 'rb') as infile:
-                ca_cert = x509.load_pem_x509_certificate(infile.read(), backend=default_backend())
+            nowtime = datetime.datetime.now(datetime.timezone.utc)
+
+            # Private CA
+            ca_key = generate_key({})
+            with open(os.path.join('container', 'workdir', 'ca.key'), 'wb') as outfile:
+                outfile.write(ca_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.TraditionalOpenSSL,
+                    encryption_algorithm=serialization.NoEncryption(),
+                ))
+            ca_name = x509.Name([
+                x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, 'Certificate Authority'),
+            ])
+            ca_cert = x509.CertificateBuilder().subject_name(
+                ca_name
+            ).issuer_name(
+                ca_name
+            ).public_key(
+                ca_key.public_key()
+            ).serial_number(
+                x509.random_serial_number()
+            ).not_valid_before(
+                nowtime
+            ).not_valid_after(
+                nowtime + datetime.timedelta(days=10)
+            ).add_extension(
+                x509.BasicConstraints(ca=True, path_length=1),
+                critical=True,
+            ).add_extension(
+                x509.KeyUsage(
+                    digital_signature=False,
+                    content_commitment=False,
+                    key_encipherment=False,
+                    data_encipherment=False,
+                    key_agreement=False,
+                    key_cert_sign=True,
+                    crl_sign=True,
+                    encipher_only=False,
+                    decipher_only=False,
+                ),
+                critical=False,
+            ).add_extension(
+                x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()),
+                critical=False,
+            ).add_extension(
+                x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
+                critical=False,
+            ).sign(ca_key, hashes.SHA256(), backend=default_backend())
 
             for (node_name, node_opts) in self._config['nodes'].items():
                 fqdn = node_name + '.local'
@@ -73,9 +131,19 @@ class Runner:
                 if not os.path.isdir(configPath):
                     os.makedirs(configPath)
 
+                with open(os.path.join(configPath, 'ca.crt'), 'wb') as outfile:
+                    outfile.write(ca_cert.public_bytes(serialization.Encoding.PEM))
+
                 # Generate node keys
+                sans = [
+                    x509.UniformResourceIdentifier('dtn://{}/'.format(node_name)),
+                ]
+                ekus = [
+                    x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.3.35')  # id-kp-bundleSecurity
+                ]
                 for key_name in ('transport', 'sign'):
-                    node_key = ec.generate_private_key(ec.SECP256R1, backend=default_backend())  # Curve for COSE ES256
+                    key_opts = node_opts.get('keys', {}).get(key_name, {})
+                    node_key = generate_key(key_opts)
                     with open(os.path.join(configPath, f'{key_name}.key'), 'wb') as outfile:
                         outfile.write(node_key.private_bytes(
                             encoding=serialization.Encoding.PEM,
@@ -83,13 +151,6 @@ class Runner:
                             encryption_algorithm=serialization.NoEncryption(),
                         ))
 
-                    nowtime = datetime.datetime.now(datetime.timezone.utc)
-                    sans = [
-                        x509.UniformResourceIdentifier('dtn://{}/'.format(node_name)),
-                    ]
-                    ekus = [
-                        x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.3.35')  # id-kp-bundleSecurity
-                    ]
                     if key_name == 'transport':
                         sans += [
                             x509.DNSName(fqdn),
@@ -104,7 +165,7 @@ class Runner:
                             x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, node_name),
                         ]),
                     ).issuer_name(
-                        ca_cert.issuer
+                        ca_cert.subject
                     ).public_key(
                         node_key.public_key()
                     ).serial_number(
@@ -144,11 +205,6 @@ class Runner:
                     ).sign(ca_key, hashes.SHA256(), backend=default_backend())
                     with open(os.path.join(configPath, f'{key_name}.crt'), 'wb') as outfile:
                         outfile.write(node_cert.public_bytes(serialization.Encoding.PEM))
-
-                shutil.copy(
-                    os.path.join('testpki', 'ca.crt'),
-                    os.path.join(configPath, 'ca.crt')
-                )
 
                 extconfig = node_opts.get('config', {})
                 use_ipv4 = node_opts.get('use_ipv4', True)

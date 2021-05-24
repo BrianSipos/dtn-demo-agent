@@ -8,6 +8,9 @@ nets:
 nodes:
   node000:
     nets: [dtnA]
+    keys:
+       sign:
+          keytype: RSA
     config:
        apps:
           nmp:
