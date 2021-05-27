@@ -94,7 +94,7 @@ To perform an ACME validation exchange between two nodes run the script:
 ```
 sh install_agents.sh && \
   dbus-send --print-reply --dest=dtn.client.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.start_expect_acme_request string:"dtn://server/" string:"tPUZNY4ONIk6LxErRFEjVw" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
-  dbus-send --print-reply --dest=dtn.server.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.send_acme_request string:"dtn://client/" string:"p3yRYFU4KxwQaHQjJ2RdiQ" string:"tPUZNY4ONIk6LxErRFEjVw" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
+  dbus-send --print-reply --dest=dtn.server.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.send_acme_request string:"dtn://client/" string:"tPUZNY4ONIk6LxErRFEjVw" string:"p3yRYFU4KxwQaHQjJ2RdiQ" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
   sleep 2; systemctl --user stop dtn.slice
 ```
 
@@ -116,6 +116,13 @@ docker container exec -it node003 journalctl -f
 To call DBus methods in one of the nodes:
 ```
 docker container exec -it node003 dbus-send --system --print-reply --dest=org.ietf.dtn.node.udpcl /org/ietf/dtn/udpcl/Agent org.ietf.dtn.udpcl.Agent.pmtud_start string:node002. uint16:4556
+```
+
+To perform an ACME validation exchange between two nodes run the script:
+```
+docker container exec -it node000 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.start_expect_acme_request string:"dtn://node001/" string:"tPUZNY4ONIk6LxErRFEjVw" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
+docker container exec -it node001 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.send_acme_request string:"dtn://node000/" string:"tPUZNY4ONIk6LxErRFEjVw" string:"p3yRYFU4KxwQaHQjJ2RdiQ" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
+docker container exec -it node000 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.stop_expect_acme_request string:"dtn://node001/" string:"tPUZNY4ONIk6LxErRFEjVw"
 ```
 
 # Wireshark Protocols and Dissectors
