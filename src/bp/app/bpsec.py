@@ -9,13 +9,13 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from cose.messages import CoseMessage, Sign1Message
-from cose import algorithms, curves, headers
-from cose.keys import keyparam, EC2Key
+from cose import algorithms, headers
+from cose.keys import curves, keyparam, EC2Key
 try:
     from cose.keys import RSAKey
 except ImportError:
     pass
-from cose.exceptions import CoseIllegalCurve
+from cose.exceptions import CoseUnsupportedCurve
 from cose.extensions.x509 import X5T, X5Chain
 
 from scapy_cbor.util import encode_diagnostic
@@ -167,13 +167,13 @@ class CoseContext(AbstractContext):
             try:
                 curve_cls = CURVE_CLS_MAP[type(keyobj.curve)]
             except KeyError:
-                raise CoseIllegalCurve('Cannot match curve for {}'.format(repr(keyobj)))
+                raise CoseUnsupportedCurve('Cannot match curve for {}'.format(repr(keyobj)))
             LOGGER.debug('Found COSE curve %s', curve_cls)
 
             try:
                 alg_cls = CURVE_ALG_MAP[type(keyobj.curve)]
             except KeyError:
-                raise CoseIllegalCurve('Cannot match algorithm for {}'.format(repr(keyobj)))
+                raise CoseUnsupportedCurve('Cannot match algorithm for {}'.format(repr(keyobj)))
             LOGGER.debug('Found COSE algorithm %s', alg_cls)
 
             if hasattr(keyobj, 'private_numbers'):
