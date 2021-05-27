@@ -1,4 +1,4 @@
-# Demo Convergence Layer Agent
+# Python implementation of basic BPv7-related protocols
 
 The demo TCPCL agent implements the corresponding specification draft.
 A TCPCL agent is symmetric, there is no notion of a single agent being a "server" or a "client".
