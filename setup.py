@@ -29,6 +29,7 @@ and dynamic segment sizing.
     },
     packages=find_packages(where='src'),
     install_requires=[
+        'asn1',
         'cbor2 >=4.1',
         'cose',
         'crcmod >=1.7',

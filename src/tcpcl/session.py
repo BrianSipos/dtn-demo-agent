@@ -9,6 +9,7 @@ import os
 import socket
 import ssl
 import ipaddress
+import asn1
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
 
@@ -21,6 +22,7 @@ from builtins import isinstance
 
 def match_id(ref_id, cert, san_key, logger, log_name):
     ''' Match a certificate identifier.
+    :param san_key: A SAN type to match, or an OID of an OtherName to match.
     :return: The matched ID URI, or False if present but failed, or None if
     no identifier present in the certificate.
     '''
@@ -28,7 +30,18 @@ def match_id(ref_id, cert, san_key, logger, log_name):
     if cert:
         try:
             ext = cert.extensions.get_extension_for_oid(x509.oid.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
-            cert_ids = ext.value.get_values_for_type(san_key)
+            if isinstance(san_key, x509.oid.ObjectIdentifier):
+                other_names = ext.value.get_values_for_type(x509.OtherName)
+                other_values = [obj.value for obj in other_names if obj.type_id == san_key]
+                cert_ids = []
+                for value in other_values:
+                    eid_enc = asn1.Decoder()
+                    eid_enc.start(value)
+                    (_val_type, val_decode) = eid_enc.read()
+                    cert_ids.append(val_decode)
+
+            else:
+                cert_ids = ext.value.get_values_for_type(san_key)
         except x509.ExtensionNotFound:
             pass
 
@@ -323,7 +336,7 @@ class Connection(object):
 
     def _tx_proxy(self, sock):
         ''' Process up to a single CHUNK_SIZE outgoing block.
-        
+
         :return: True if the TX buffer should be pumped more.
         :rtype: bool
         '''

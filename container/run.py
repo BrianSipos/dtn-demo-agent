@@ -5,6 +5,7 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
+import asn1
 import datetime
 import jinja2
 import logging
@@ -135,8 +136,14 @@ class Runner:
                     outfile.write(ca_cert.public_bytes(serialization.Encoding.PEM))
 
                 # Generate node keys
+                eid_enc = asn1.Encoder()
+                eid_enc.start()
+                eid_enc.write('dtn://{}/'.format(node_name).encode('ascii'), asn1.Numbers.IA5String)
                 sans = [
-                    x509.UniformResourceIdentifier('dtn://{}/'.format(node_name)),
+                    x509.OtherName(
+                        x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.8.11'),  # id-on-bundleEID
+                        eid_enc.output()
+                    ),
                 ]
                 ekus = [
                     x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.3.35')  # id-kp-bundleSecurity

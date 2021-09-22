@@ -2,6 +2,7 @@
 '''
 import datetime
 import unittest
+import asn1
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -78,6 +79,15 @@ class TestBpsecCoseSign(unittest.TestCase):
 
     def _dummy_end_cert(self, ca_key, ca_cert, end_key):
         nowtime = datetime.datetime.now(datetime.timezone.utc)
+        eid_enc = asn1.Encoder()
+        eid_enc.start()
+        eid_enc.write(self._app._config.node_id.encode('ascii'), asn1.Numbers.IA5String)
+        sans = [
+            x509.OtherName(
+                x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.8.11'),  # id-on-bundleEID
+                eid_enc.output()
+            )
+        ]
         cert = x509.CertificateBuilder().subject_name(
             x509.Name([
                 x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, 'end-entity'),
@@ -96,9 +106,7 @@ class TestBpsecCoseSign(unittest.TestCase):
             x509.BasicConstraints(ca=False, path_length=None),
             critical=True,
         ).add_extension(
-            x509.SubjectAlternativeName([
-                x509.UniformResourceIdentifier(self._app._config.node_id),
-            ]),
+            x509.SubjectAlternativeName(sans),
             critical=False,
         ).add_extension(
             x509.KeyUsage(

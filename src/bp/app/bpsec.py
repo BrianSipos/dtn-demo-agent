@@ -33,6 +33,8 @@ LOGGER = logging.getLogger(__name__)
 #: Dummy context ID value
 BPSEC_COSE_CONTEXT_ID = 99
 
+#: id-on-bundleEID
+OID_ON_EID = x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.8.11')
 
 def load_pem_list(infile):
     certs = []
@@ -367,10 +369,10 @@ class CoseContext(AbstractContext):
                 LOGGER.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
                 msg_dec[2] = target_blk.getfieldval('btsd')
 
-                msg_obj = msg_cls.from_cose_obj(msg_dec)
+                msg_obj = msg_cls.from_cose_obj(msg_dec, allow_unknown_attributes=False)
                 msg_obj.external_aad = CoseContext.get_bpsec_cose_aad(ctr, target_blk, bib, aad_scope, addl_protected)
                 # use additional headers as defaults
-                for (key, val) in msg_cls._parse_header(addl_headers).items():
+                for (key, val) in msg_cls._parse_header(addl_headers, allow_unknown_attributes=False).items():
                     msg_obj.uhdr.setdefault(key, val)
                 LOGGER.info('full uhdr %s', msg_obj.uhdr)
 
@@ -418,7 +420,7 @@ class CoseContext(AbstractContext):
 
                 peer_nodeid = bib.payload.source
                 end_cert = x509.load_der_x509_certificate(found_chain[0], default_backend())
-                authn_nodeid = tcpcl.session.match_id(peer_nodeid, end_cert, x509.UniformResourceIdentifier, LOGGER, 'NODE-ID')
+                authn_nodeid = tcpcl.session.match_id(peer_nodeid, end_cert, OID_ON_EID, LOGGER, 'NODE-ID')
                 if not authn_nodeid:
                     LOGGER.error('Failed to authenticate peer "%s" on block num %d', peer_nodeid, blk_num)
                     failure = StatusReport.ReasonCode.FAILED_SEC
