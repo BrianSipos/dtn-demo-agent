@@ -36,7 +36,7 @@ nodes:
        bp_tx_routes:
         - eid_pattern: "dtn://node001/.*"
           next_nodeid: "dtn://node001/"
-          cl_type: udpcl
+          cl_type: tcpcl
           address: node001.local
        udpcl_listen: false
        udpcl_polling:

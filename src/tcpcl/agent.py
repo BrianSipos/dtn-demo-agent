@@ -1,15 +1,80 @@
 '''
 Implementation of a symmetric TCPCL agent.
 '''
-import argparse
+from dataclasses import dataclass, astuple, field
 import logging
+from typing import Optional
+import ipaddress
 import socket
-import sys
 import dbus.service
 from gi.repository import GLib as glib
 
 from tcpcl.config import Config, ListenConfig, ConnectConfig
 from tcpcl.session import ContactHandler
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+class AddressObject:
+    ''' Interpret a text address as an `ipaddress` object.
+
+    :param text: The input to convert.
+    '''
+    def __init__(self, text: Optional[str], proto=socket.IPPROTO_TCP):
+        self.family = None
+        self.ipaddr = None
+        if text is None:
+            return
+
+        try:
+            results = socket.getaddrinfo(text, None, proto=proto)
+        except socket.gaierror:
+            LOGGER.error('Failed to resolve address: %s', text)
+            raise RuntimeError('Failed to resolve address: %s' % text)
+        sockaddr = results[0][4]
+        ipaddr = ipaddress.ip_address(sockaddr[0])
+        LOGGER.debug('Resolved %s to IPv%d %s', text, ipaddr.version, ipaddr)
+
+        self.family = socket.AF_INET if ipaddr.version == 4 else socket.AF_INET6
+        self.ipaddr = ipaddr
+
+@dataclass
+class Conversation:
+    ''' Bookkeep parameters of a TCP conversation
+    which is address-and-port for each side.
+    '''
+    #: Address family
+    family: Optional[int] = None
+    #: The remote address
+    peer_address: Optional[ipaddress._BaseAddress] = None
+    #: The remote port
+    peer_port: Optional[int] = None
+    #: The local address
+    local_address: Optional[ipaddress._BaseAddress] = None
+    #: The local port
+    local_port: Optional[int] = None
+
+    @property
+    def key(self):
+        return astuple(self)
+
+    def make_socket(self):
+        ''' Get a socket based on local requirements.
+        :return: A TCP socket object.
+        '''
+        sock = socket.socket(self.family, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+
+        if self.local_address or self.local_port:
+            address = str(self.local_address) if self.local_address else ''
+            port = self.local_port or 0
+            sock.bind((address, port))
+
+        if self.peer_address and self.peer_port:
+            address = str(self.peer_address)
+            sock.connect((address, self.peer_port))
+
+        return sock
 
 
 class Agent(dbus.service.Object):
@@ -168,27 +233,36 @@ class Agent(dbus.service.Object):
         ''' Begin listening for incoming connections and defer handling
         connections to `glib` event loop.
         '''
-        bindspec = (address, port)
-        if bindspec in self._bindsocks:
-            raise dbus.DBusException('Already listening')
+        addrobj = AddressObject(address)
+        conv = Conversation(
+            family=addrobj.family,
+            local_address=addrobj.ipaddr,
+            local_port=port
+        )
+        if conv.key in self._bindsocks:
+            raise dbus.DBusException('Already listening on {}:{}'.format(conv.local_address, conv.local_port))
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(bindspec)
+        sock = conv.make_socket()
 
-        self._logger.info('Listening on %s:%d', address or '*', port)
+        self._logger.info('Listening on %s:%d', conv.local_address, conv.local_port)
         sock.listen(1)
-        self._bindsocks[bindspec] = sock
+        self._bindsocks[conv.key] = sock
         glib.io_add_watch(sock, glib.IO_IN, self._accept)
 
     @dbus.service.method(DBUS_IFACE, in_signature='sq')
     def listen_stop(self, address, port):
         ''' Stop listening for connections on an existing port binding.
         '''
-        bindspec = (address, port)
-        if bindspec not in self._bindsocks:
+        addrobj = AddressObject(address)
+        conv = Conversation(
+            family=addrobj.family,
+            local_address=addrobj.ipaddr,
+            local_port=port
+        )
+        if conv.key not in self._bindsocks:
             raise dbus.DBusException('Not listening')
 
-        sock = self._bindsocks.pop(bindspec)
+        sock = self._bindsocks.pop(conv.key)
         self._logger.info('Un-listening on %s:%d', address or '*', port)
         try:
             sock.shutdown(socket.SHUT_RDWR)
@@ -201,7 +275,7 @@ class Agent(dbus.service.Object):
 
         :return: True to continue listening.
         '''
-        newsock, fromaddr = bindsock.deliver()
+        newsock, fromaddr = bindsock.accept()
         self._logger.info('Connecting')
         hdl = self._bind_handler(
             config=self._config, sock=newsock, fromaddr=fromaddr)
@@ -221,12 +295,20 @@ class Agent(dbus.service.Object):
         :return: The new contact object path.
         :rtype: str
         '''
+        addrobj = AddressObject(address)
+        conv = Conversation(
+            family=addrobj.family,
+            peer_address=addrobj.ipaddr,
+            peer_port=port
+        )
         self._logger.info('Connecting')
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect((address, port))
+        sock = conv.make_socket()
 
         hdl = self._bind_handler(
-            config=self._config, sock=sock, toaddr=(address, port))
+            config=self._config,
+            sock=sock,
+            toaddr=(str(conv.peer_address), conv.peer_port)
+        )
         hdl.start()
 
         return hdl.object_path

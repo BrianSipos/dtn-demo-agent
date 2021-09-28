@@ -18,6 +18,8 @@ import dbus.service
 from gi.repository import GLib as glib
 from udpcl.config import PollConfig
 from bp.encoding.fields import DtnTimeField
+
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -88,12 +90,36 @@ class Transfer(object):
         if other.total_length != self.total_length:
             raise ValueError('Mismatched total length')
 
+class AddressObject:
+    ''' Interpret a text address as an `ipaddress` object.
+
+    :param text: The input to convert.
+    '''
+    def __init__(self, text: Optional[str], proto=socket.IPPROTO_UDP):
+        self.family = None
+        self.ipaddr = None
+        if text is None:
+            return
+
+        try:
+            results = socket.getaddrinfo(text, None, proto=proto)
+        except socket.gaierror:
+            LOGGER.error('Failed to resolve address: %s', text)
+            raise RuntimeError('Failed to resolve address: %s' % text)
+        sockaddr = results[0][4]
+        ipaddr = ipaddress.ip_address(sockaddr[0])
+        LOGGER.debug('Resolved %s to IPv%d %s', text, ipaddr.version, ipaddr)
+
+        self.family = socket.AF_INET if ipaddr.version == 4 else socket.AF_INET6
+        self.ipaddr = ipaddr
 
 @dataclass
 class Conversation:
     ''' Bookkeep parameters of a UDP conversation
     which is address-and-port for each side.
     '''
+    #: Address family
+    family: Optional[int] = None
     #: The remote address
     peer_address: Optional[ipaddress._BaseAddress] = None
     #: The remote port
@@ -102,23 +128,6 @@ class Conversation:
     local_address: Optional[ipaddress._BaseAddress] = None
     #: The local port
     local_port: Optional[int] = None
-
-    @staticmethod
-    def addr_from_str(address: Optional[str]):
-        if address is None:
-            return None
-
-        try:
-            results = socket.getaddrinfo(address, None, proto=socket.IPPROTO_UDP)
-        except socket.gaierror:
-            LOGGER.error('Failed to resolve address: %s', address)
-            raise RuntimeError('Failed to resolve address: %s' % address)
-        sockaddr = results[0][4]
-        LOGGER.debug('Resolved %s to %s', address, sockaddr[0])
-        ipaddr = ipaddress.ip_address(sockaddr[0])
-        if ipaddr.is_unspecified:
-            return None
-        return ipaddr
 
     @staticmethod
     def pat_match(lt, rt):
@@ -150,23 +159,11 @@ class Conversation:
     def key(self):
         return astuple(self)
 
-    @property
-    def is_ipv4(self):
-        return (
-            isinstance(self.peer_address, ipaddress.IPv4Address)
-            or isinstance(self.local_address, ipaddress.IPv4Address)
-        )
-
     def make_local_socket(self):
         ''' Get a socket based on local requirements.
         :return: A UDP socket object.
         '''
-        if self.is_ipv4:
-            family = socket.AF_INET
-        else:
-            family = socket.AF_INET6
-
-        sock = socket.socket(family, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock = socket.socket(self.family, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
         if self.local_address or self.local_port:
@@ -282,8 +279,10 @@ class Agent(dbus.service.Object):
         if opts is None:
             opts = {}
 
+        addrobj = AddressObject(address)
         conv = Conversation(
-            local_address=ipaddress.ip_address(address),
+            family=addrobj.family,
+            local_address=addrobj.ipaddr,
             local_port=port
         )
         if conv.key in self._bindsocks:
@@ -296,7 +295,7 @@ class Agent(dbus.service.Object):
         for item in multicast_member:
             addr = str(item['addr'])
 
-            if conv.is_ipv4:
+            if conv.family == socket.AF_INET:
                 self.__logger.info('Listening for multicast %s', addr)
                 #mreq = struct.pack("=4sl", socket.inet_aton(addr), socket.INADDR_ANY)
                 mreq = (
@@ -322,8 +321,10 @@ class Agent(dbus.service.Object):
     def listen_stop(self, address, port):
         ''' Stop listening for transfers on an existing port binding.
         '''
+        addrobj = AddressObject(address)
         conv = Conversation(
-            local_address=ipaddress.ip_address(address),
+            family=addrobj.family,
+            local_address=addrobj.ipaddr,
             local_port=port
         )
         if conv.key not in self._bindsocks:
@@ -371,10 +372,10 @@ class Agent(dbus.service.Object):
 
     @dbus.service.method(DBUS_IFACE, in_signature='sqi')
     def pmtud_start(self, address, port, stepcount):
-        ipaddr = Conversation.addr_from_str(address)
+        addrobj = AddressObject(address)
 
         base_plpmtu = 1200
-        if isinstance(ipaddr, ipaddress.IPv4Address):
+        if addrobj.family == socket.AF_INET:
             txp_overhead = 20 + 8
             min_plpmtu = 68 - txp_overhead
         else:
@@ -447,10 +448,13 @@ class Agent(dbus.service.Object):
         data, fromaddr = sock.recvfrom(64 * 1024)
         localaddr = sock.getsockname()
 
+        peer_addrobj = AddressObject(fromaddr[0])
+        local_addrobj = AddressObject(localaddr[0])
         conv = Conversation(
-            peer_address=Conversation.addr_from_str(fromaddr[0]),
+            family=peer_addrobj.family,
+            peer_address=peer_addrobj.ipaddr,
             peer_port=fromaddr[1],
-            local_address=Conversation.addr_from_str(localaddr[0]),
+            local_address=local_addrobj.ipaddr,
             local_port=localaddr[1]
         )
         if conv.key in self._dtls_prep or conv.key in self._dtls_sess:
@@ -796,10 +800,13 @@ class Agent(dbus.service.Object):
                 item.total_length
             )
 
+        peer_addrobj = AddressObject(item.address)
+        local_addrobj = AddressObject(item.local_address or self._config.default_tx_address)
         conv = Conversation(
-            peer_address=Conversation.addr_from_str(item.address),
+            family=peer_addrobj.family,
+            peer_address=peer_addrobj.ipaddr,
             peer_port=item.port,
-            local_address=Conversation.addr_from_str(item.local_address or self._config.default_tx_address),
+            local_address=local_addrobj.ipaddr,
             local_port=(item.local_port or self._config.default_tx_port)
         )
         self.__logger.info('Sending %d octets on %s', item.total_length, conv)
@@ -827,13 +834,13 @@ class Agent(dbus.service.Object):
 
             loop = 0
             if loop is not None:
-                if conv.is_ipv4:
+                if conv.family == socket.AF_INET:
                     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loop)
                 else:
                     sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_LOOP, loop)
 
             if multicast.ttl is not None:
-                if conv.is_ipv4:
+                if conv.family == socket.AF_INET:
                     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, multicast.ttl)
                 else:
                     sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, multicast.ttl)

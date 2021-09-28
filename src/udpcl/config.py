@@ -32,9 +32,9 @@ class ListenConfig():
 
 @dataclass
 class PollConfig():
-    #: Local address or DNS name to send to
+    #: Remote address or DNS name to send to
     address: str
-    #: Local port to send to
+    #: Remote port to send to
     port: int = 4556
     #: Optional local address
     local_address: Optional[str] = None

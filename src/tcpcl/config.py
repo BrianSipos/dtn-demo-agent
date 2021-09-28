@@ -13,12 +13,16 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class ListenConfig():
-    address: str = u'localhost'
+    #: Local address to listen on
+    address: str
+    #: Local port to listen on
     port: int = 4556
 
 @dataclass
 class ConnectConfig():
+    #: Remote address to connect to
     address: str
+    #: Remote port to connect to
     port: int = 4556
 
 
@@ -87,13 +91,15 @@ class Config(object):
         for fld in fields(self):
             if fld.name in cldat:
                 if fld.name == 'init_listen':
-                    self.init_listen.append(
-                        ListenConfig(**cldat[fld.name])
-                    )
+                    for item in cldat[fld.name]:
+                        self.init_listen.append(
+                            ListenConfig(**item)
+                        )
                 elif fld.name == 'init_connect':
-                    self.init_connect.append(
-                        ConnectConfig(**cldat[fld.name])
-                    )
+                    for item in cldat[fld.name]:
+                        self.init_connect.append(
+                            ConnectConfig(**item)
+                        )
                 else:
                     setattr(self, fld.name, cldat[fld.name])
 

@@ -242,7 +242,7 @@ class Runner:
 
                 tcpcl_listen = []
                 if extconfig.get('tcpcl_listen', True):
-                    if use_ipv4:
+                    if use_ipv4 and not use_ipv6:
                         tcpcl_listen.append({
                             'address': '0.0.0.0',
                         })
@@ -340,11 +340,10 @@ class Runner:
                 self.run_docker(['container', 'start', node_name])
 
         elif act == 'stop':
-            for node_name in self._config['nodes'].keys():
-                try:
-                    self.run_docker(['container', 'stop', node_name])
-                except subprocess.CalledProcessError:
-                    pass
+            self.run_docker(
+                ['container', 'stop']
+                + [node_name for node_name in self._config['nodes'].keys()]
+            )
 
         elif act == 'delete':
             for node_name in self._config['nodes'].keys():
