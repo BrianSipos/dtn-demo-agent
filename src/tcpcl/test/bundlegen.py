@@ -16,7 +16,6 @@ import cbor2
 import crcmod
 from gi.repository import GLib as glib
 
-
 LOGGER = logging.getLogger(__name__)
 
 CRC_DEFN = {
@@ -42,14 +41,27 @@ class TestBundleGen(unittest.TestCase):
         self.assertEqual(0xe3069283, CRC_DEFN[2]['func'](b'123456789'))
 
 
-def binaryCborTag(value):
+def binaryCborTag(item):
     ''' Encode CBOR as bytestring and tag the item.
 
-    :param value: The CBOR item to encode.
+    :param item: The CBOR item to encode.
     :return: The binary-enveloped item.
     '''
     # Tag 24: Encoded CBOR data item
-    return cbor2.CBORTag(24, cbor2.dumps(value))
+    return cbor2.CBORTag(24, cbor2.dumps(item))
+
+
+def binaryCborseqTag(items):
+    ''' Encode CBOR sequence as bytestring and tag the item.
+
+    :param items: The CBOR items to encode.
+    :return: The binary-enveloped item.
+    '''
+    # Tag 63: Encoded CBOR Sequence
+    data = b''
+    for item in items:
+        data += cbor2.dumps(item)
+    return cbor2.CBORTag(63, data)
 
 
 class Block(object):
@@ -165,12 +177,12 @@ def randcboritem(maxdepth=10):
 class Generator(object):
     ''' A 'bundle' data generator.
     '''
-    
+
     BLOCK_NUM_PRIMARY = 1
     BLOCK_TYPE_PRIMARY = 1
     BLOCK_TYPE_BIB = 11
     BLOCK_TYPE_BCB = 12
-    
+
     @enum.unique
     class BlockType(enum.IntFlag):
         ''' Non-primary block types. '''
@@ -212,25 +224,25 @@ class Generator(object):
                 random.randint(0, 1e1),  # current
             ])
         elif block_type in (self.BLOCK_TYPE_BIB, self.BLOCK_TYPE_BCB):
+
             @enum.unique
             class Flag(enum.IntEnum):
                 HAS_PARAMS = 0x01
-                HAS_SOURCE = 0x02
-            
+
             ctx_id = 1
-            sec_flags = Flag.HAS_PARAMS | Flag.HAS_SOURCE
-            return binaryCborTag([
-                [ # targets
-                    1, # just primary
+            sec_flags = Flag.HAS_PARAMS
+            return binaryCborseqTag([
+                [  # targets
+                    1,  # just primary
                 ],
                 ctx_id,
                 sec_flags,
                 randnodeid(),
-                [ # parameters
+                [  # parameters
                     [1, b'hi'],
                 ],
                 [
-                    [ # result target #1
+                    [  # result target #1
                         [96, b'there'],
                     ],
                 ],
@@ -322,7 +334,7 @@ class Generator(object):
             blocks.append(block)
 
         buf = io.BytesIO()
-        if True:
+        if False:
             # Self-describe CBOR Tag
             buf.write(b'\xd9\xd9\xf7')
         buf.write(b'\x9F')
@@ -334,11 +346,13 @@ class Generator(object):
         return buf
 
 
-def bundle_iterable(genmode, gencount):
+def bundle_iterable(genmode, gencount, indata):
     ''' A generator to yield encoded bundles as file-like objects.
     '''
     gen = Generator()
-    if genmode == 'fullvalid':
+    if genmode == 'stdin':
+        func = lambda: io.BytesIO(indata)
+    elif genmode == 'fullvalid':
         # Some valid bundles
         func = gen.create_valid
     elif genmode == 'randcbor':
@@ -389,12 +403,15 @@ def main():
     parser.add_argument('--enable-test', type=str, default=[],
                         action='append', choices=['private_extensions'],
                         help='Names of test modes enabled')
+    parser.add_argument('--use-tls', type=bool, default=False,
+                        help='Enable TLS operation')
     parser.add_argument('--segment-mru', type=int, default=None,
                         help='Entity maximum segment data size')
     parser.add_argument('genmode',
-                        choices=('fullvalid', 'randcbor', 'randbytes'),
+                        choices=('stdin', 'fullvalid', 'randcbor', 'randbytes'),
                         help='Type of "bundle" to generate.')
-    parser.add_argument('gencount', type=int,
+    parser.add_argument('--gencount', type=int,
+                        default=1,
                         help='Number of bundles to transfer.')
     parser.add_argument('--to-file', type=str, default=None,
                         metavar='NAMEPREFIX',
@@ -404,8 +421,11 @@ def main():
     logging.basicConfig(level=args.log_level.upper())
     logging.debug('command args: %s', args)
 
+    indata = sys.stdin.buffer.read()
+    bit = bundle_iterable(args.genmode, args.gencount, indata)
+
     if args.to_file:
-        for (ix, bundle) in enumerate(bundle_iterable(args.genmode, args.gencount)):
+        for (ix, bundle) in enumerate(bit):
             file_name = '{0}{1}.cbor'.format(args.to_file, ix)
             LOGGER.info('Writing bundle to %s', file_name)
             with open(file_name, 'wb') as outfile:
@@ -421,6 +441,7 @@ def main():
     config_pasv = tcpcl.agent.Config()
     config_pasv.stop_on_close = True
     config_pasv.enable_test = args.enable_test
+    config_pasv.tls_enable = config_pasv.require_tls = args.use_tls
     if args.segment_mru:
         config_pasv.segment_size_mru = args.segment_mru
 
@@ -432,6 +453,7 @@ def main():
     config_actv = tcpcl.agent.Config()
     config_actv.stop_on_close = True
     config_actv.enable_test = args.enable_test
+    config_actv.tls_enable = config_actv.require_tls = args.use_tls
     if args.segment_mru:
         config_actv.segment_size_mru = args.segment_mru
 
@@ -439,7 +461,7 @@ def main():
         agent = tcpcl.agent.Agent(config)
         path = agent.connect(*address)
         contact = agent.handler_for_path(path)
-        contact.set_on_session_start(lambda: agent_send_bundles(agent, contact, bundle_iterable(args.genmode, args.gencount)))
+        contact.set_on_session_start(lambda: agent_send_bundles(agent, contact, bit))
         agent.exec_loop()
 
     worker_pasv = multiprocessing.Process(target=run_pasv, args=[config_pasv])

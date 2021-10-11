@@ -19,6 +19,8 @@ from gi.repository import GLib as glib
 from udpcl.config import PollConfig
 from bp.encoding.fields import DtnTimeField
 
+from udpcl.config import Config, ListenConfig
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -242,6 +244,13 @@ class Agent(dbus.service.Object):
         for item in self._config.polling:
             self.polling_start(item)
 
+    def is_transfer_idle(self):
+        ''' Determine if the agent is idle.
+
+        :return: True if there are no data being processed RX or TX side.
+        '''
+        return len(self._rx_queue) == 0 and len(self._tx_queue) == 0
+
     def set_on_stop(self, func):
         ''' Set a callback to be run when this agent is stopped.
 
@@ -254,7 +263,11 @@ class Agent(dbus.service.Object):
         ''' Immediately stop the agent and disconnect any sessions. '''
         self.__logger.info('Stopping agent')
         for spec in tuple(self._bindsocks.keys()):
-            self.listen_stop(*spec)
+            conv = Conversation(*spec)
+            try:
+                self._listen_stop(conv)
+            except:
+                pass
 
         if self._on_stop:
             self._on_stop()
@@ -289,7 +302,7 @@ class Agent(dbus.service.Object):
             raise dbus.DBusException('Already listening')
 
         sock = conv.make_local_socket()
-        self.__logger.info('Listening on %s:%d', address or '*', port)
+        self.__logger.info('Listening on %s:%d', conv.local_address, conv.local_port)
 
         multicast_member = opts.get('multicast_member', [])
         for item in multicast_member:
@@ -327,17 +340,16 @@ class Agent(dbus.service.Object):
             local_address=addrobj.ipaddr,
             local_port=port
         )
+        self._listen_stop(conv)
+
+    def _listen_stop(self, conv):
         if conv.key not in self._bindsocks:
             raise dbus.DBusException('Not listening')
 
         sock = self._bindsocks.pop(conv.key)
-        self.__logger.info('Un-listening on %s:%d', address or '*', port)
+        self.__logger.info('Un-listening on %s:%d', conv.local_address, conv.local_port)
         if sock in self._listen_plain:
             glib.source_remove(self._listen_plain.pop(sock))
-        try:
-            sock.shutdown(socket.SHUT_RDWR)
-        except socket.error as err:
-            self.__logger.warning('Bind socket shutdown error: %s', err)
         sock.close()
 
     def polling_start(self, item:PollConfig):
@@ -697,6 +709,24 @@ class Agent(dbus.service.Object):
         out_file = open(filepath, 'wb')
         shutil.copyfileobj(item.file, out_file)
 
+    def send_bundle_fileobj(self, file, tx_params):
+        ''' Send bundle from a file-like object.
+
+        :param file: The file to send.
+        :type file: file-like
+        :param tx_params: Additional transfer parameters.
+        :return: The new transfer ID.
+        :rtype: int
+        '''
+        item = BundleItem(
+            address=str(tx_params['address']),
+            port=int(tx_params.get('port', 4556)),
+            local_address=(str(tx_params['local_address']) if 'local_address' in tx_params else None),
+            local_port=(int(tx_params['local_port']) if 'local_port' in tx_params else None),
+            file=file
+        )
+        return str(self._add_tx_item(item))
+
     @dbus.service.method(DBUS_IFACE, in_signature='aya{sv}', out_signature='s')
     def send_bundle_data(self, data, tx_params):
         ''' Send bundle data directly.
@@ -705,15 +735,7 @@ class Agent(dbus.service.Object):
         data = b''.join([bytes([val]) for val in data])
         tx_params = dict(tx_params)
         self.__logger.debug('send_bundle_data data len %d, tx_params %s', len(data), tx_params)
-
-        item = BundleItem(
-            address=str(tx_params['address']),
-            port=int(tx_params.get('port', 4556)),
-            local_address=(str(tx_params['local_address']) if 'local_address' in tx_params else None),
-            local_port=(int(tx_params['local_port']) if 'local_port' in tx_params else None),
-            file=BytesIO(data)
-        )
-        return str(self._add_tx_item(item))
+        return self.send_bundle_fileobj(BytesIO(data), tx_params)
 
     def _add_tx_item(self, item, is_transfer:bool=True):
         if is_transfer and item.transfer_id is None:

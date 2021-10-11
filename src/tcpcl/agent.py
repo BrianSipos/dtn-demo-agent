@@ -203,7 +203,11 @@ class Agent(dbus.service.Object):
         ''' Immediately stop the agent and disconnect any sessions. '''
         self._logger.info('Stopping agent')
         for spec in tuple(self._bindsocks.keys()):
-            self.listen_stop(*spec)
+            conv = Conversation(*spec)
+            try:
+                self._listen_stop(conv)
+            except:
+                pass
 
         for hdl in self._handlers:
             hdl.close()
@@ -259,11 +263,14 @@ class Agent(dbus.service.Object):
             local_address=addrobj.ipaddr,
             local_port=port
         )
+        return self._listen_stop(conv)
+
+    def _listen_stop(self, conv):
         if conv.key not in self._bindsocks:
             raise dbus.DBusException('Not listening')
 
         sock = self._bindsocks.pop(conv.key)
-        self._logger.info('Un-listening on %s:%d', address or '*', port)
+        self._logger.info('Un-listening on %s:%d', conv.local_address, conv.local_port)
         try:
             sock.shutdown(socket.SHUT_RDWR)
         except socket.error as err:
