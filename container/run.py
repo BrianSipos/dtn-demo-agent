@@ -74,6 +74,7 @@ class Runner:
                         cmd += ['--subnet', net_opts['subnet4']]
                     if 'subnet6' in net_opts:
                         cmd += ['--ipv6', '--subnet', net_opts['subnet6']]
+                    cmd += ['-o', f'com.docker.network.bridge.name=br-{net_name}']
                     self.run_docker(cmd)
 
             nowtime = datetime.datetime.now(datetime.timezone.utc)
@@ -128,11 +129,15 @@ class Runner:
             for (node_name, node_opts) in self._config['nodes'].items():
                 fqdn = node_name + '.local'
 
-                configPath = os.path.join('container', 'workdir', node_name, 'xdg', 'dtn')
-                if not os.path.isdir(configPath):
-                    os.makedirs(configPath)
+                config_path = os.path.join('container', 'workdir', node_name, 'xdg', 'dtn')
+                if not os.path.isdir(config_path):
+                    os.makedirs(config_path)
 
-                with open(os.path.join(configPath, 'ca.crt'), 'wb') as outfile:
+                log_path = os.path.join('container', 'workdir', node_name, 'log')
+                if not os.path.isdir(log_path):
+                    os.makedirs(log_path)
+
+                with open(os.path.join(config_path, 'ca.crt'), 'wb') as outfile:
                     outfile.write(ca_cert.public_bytes(serialization.Encoding.PEM))
 
                 # Generate node keys
@@ -151,7 +156,7 @@ class Runner:
                 for key_name in ('transport', 'sign'):
                     key_opts = node_opts.get('keys', {}).get(key_name, {})
                     node_key = generate_key(key_opts)
-                    with open(os.path.join(configPath, f'{key_name}.key'), 'wb') as outfile:
+                    with open(os.path.join(config_path, f'{key_name}.key'), 'wb') as outfile:
                         outfile.write(node_key.private_bytes(
                             encoding=serialization.Encoding.PEM,
                             format=serialization.PrivateFormat.TraditionalOpenSSL,
@@ -210,7 +215,7 @@ class Runner:
                         x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
                         critical=False,
                     ).sign(ca_key, hashes.SHA256(), backend=default_backend())
-                    with open(os.path.join(configPath, f'{key_name}.crt'), 'wb') as outfile:
+                    with open(os.path.join(config_path, f'{key_name}.crt'), 'wb') as outfile:
                         outfile.write(node_cert.public_bytes(serialization.Encoding.PEM))
 
                 extconfig = node_opts.get('config', {})
@@ -285,7 +290,7 @@ class Runner:
                         'bus_service': 'org.ietf.dtn.node.tcpcl',
                         'node_id': nodeid,
 
-                        'tls_enable': False,
+                        'tls_enable': extconfig.get('tls_enable', False),
                         'tls_ca_file': '/etc/xdg/dtn/ca.crt',
                         'tls_cert_file': '/etc/xdg/dtn/transport.crt',
                         'tls_key_file': '/etc/xdg/dtn/transport.key',
@@ -307,13 +312,15 @@ class Runner:
                         'apps': extconfig.get('apps', {})
                     },
                 }
-                with open(os.path.join(configPath, 'node.yaml'), 'w') as outfile:
+                with open(os.path.join(config_path, 'node.yaml'), 'w') as outfile:
                     outfile.write(yaml.dump(nodeconf))
 
                 cmd = [
                     'container', 'create',
                     '--privileged', '-e', 'container=docker',
                     '--mount', f'type=bind,src={SELFDIR}/workdir/{node_name}/xdg/dtn,dst=/etc/xdg/dtn',
+                    '--mount', f'type=bind,src={SELFDIR}/workdir/{node_name}/log,dst=/var/log/dtn',
+                    '-e', 'SSLKEYLOGFILE=/var/log/dtn/tlskeylog',
                     '--hostname', fqdn,
                     '--name', node_name,
                 ]

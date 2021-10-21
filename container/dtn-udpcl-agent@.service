@@ -5,6 +5,7 @@ After=network-online.target
 [Service]
 Slice=dtn.slice
 Type=dbus
+PassEnvironment=SSLKEYLOGFILE
 ExecStart=udpcl-agent --config-file /etc/xdg/dtn/%i.yaml
 BusName=org.ietf.dtn.%i.udpcl
 

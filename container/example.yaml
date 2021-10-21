@@ -15,6 +15,7 @@ nodes:
        apps:
           nmp:
              enable: true
+       tls_enable: true
 
   node001:
     nets: [dtnA, dtnB]
@@ -22,6 +23,7 @@ nodes:
        apps:
           nmp:
              enable: true
+       tls_enable: true
 
   node002:
     nets: [dtnB]
@@ -29,10 +31,12 @@ nodes:
        apps:
           nmp:
              enable: true
+       tls_enable: true
 
   node003:
     nets: [dtnB]
     config:
+       tls_enable: true
        bp_tx_routes:
         - eid_pattern: "dtn://node001/.*"
           next_nodeid: "dtn://node001/"
