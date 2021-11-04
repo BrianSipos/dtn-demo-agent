@@ -45,28 +45,37 @@ def bundle_iterable(genmode, gencount, indata):
         yield func()
 
 
-def agent_send_bundles(agent, tx_params, iterable):
+def agent_xfer_bundles(agent, tx_params={}, tx_queue=[], rx_count=0):
     ''' A glib callback to send a sequence of bundles and then shutdown the agent.
 
     :type agent: :py:class:`udpcl.agent.Agent`
-    :param iterable: An iterable object which produces file-like bundles.
+    :param tx_params: Parameters to provide with each TX item.
+    :param tx_queue: An iterable object which produces file-like bundles.
+    :param rx_count: The number of bundles to recieve before stopping.
     '''
-    for bundle in iterable:
+    for bundle in tx_queue:
         agent.send_bundle_fileobj(bundle, tx_params)
+
+    # capture the value as a persistant object
+    rx_count = [rx_count]
 
     def check_done():
         ''' Periodic callback to exit the event loop once the session is idle.
         '''
-        LOGGER.debug('Checking idle status...')
-        if agent.is_transfer_idle():
+        for bid in agent.recv_bundle_get_queue():
+            LOGGER.debug('Ignoring received transfer ID: %s', bid)
+            agent.recv_bundle_pop_data(bid)
+            rx_count[0] -= 1
+
+        idle = agent.is_transfer_idle()
+        LOGGER.debug('Checking idle status: %s %s', rx_count[0], idle)
+        if idle and rx_count[0] == 0:
             agent.stop()
             return False
         # keep checking
         return True
 
     glib.timeout_add(100, check_done)
-
-    return False
 
 
 def main():
@@ -124,7 +133,7 @@ def main():
     def run_pasv(config):
         agent = udpcl.agent.Agent(config)
         agent.listen(*address)
-        agent_send_bundles(agent, {}, [])
+        agent_xfer_bundles(agent, rx_count=args.gencount)
         agent.exec_loop()
 
     config_actv = udpcl.agent.Config()
@@ -137,7 +146,7 @@ def main():
         tx_params = dict(
             address='localhost',
         )
-        agent_send_bundles(agent, tx_params, bit)
+        agent_xfer_bundles(agent, tx_params, bit)
         agent.exec_loop()
 
     worker_pasv = multiprocessing.Process(target=run_pasv, args=[config_pasv])
