@@ -388,8 +388,6 @@ def agent_send_bundles(agent, contact, iterable):
 
     glib.timeout_add(100, check_done)
 
-    return False
-
 
 def main():
     import multiprocessing
@@ -421,7 +419,7 @@ def main():
     logging.basicConfig(level=args.log_level.upper())
     logging.debug('command args: %s', args)
 
-    indata = sys.stdin.buffer.read()
+    indata = sys.stdin.buffer.read() if args.genmode == 'stdin' else None
     bit = bundle_iterable(args.genmode, args.gencount, indata)
 
     if args.to_file:

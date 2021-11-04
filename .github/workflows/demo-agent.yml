@@ -35,3 +35,7 @@ jobs:
       run: |
         pip3 install nose
         dbus-run-session -- nosetests -v src
+    - name: Run transfers
+      run: |
+        python3 -m udpcl.test.bundlegen --log=debug fullvalid
+        python3 -m tcpcl.test.bundlegen --log=debug fullvalid
