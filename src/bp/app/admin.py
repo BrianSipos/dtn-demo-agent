@@ -29,7 +29,7 @@ class RecordType(enum.IntEnum):
 
 @enum.unique
 class AcmeKey(enum.IntEnum):
-    TOKEN_CHAL = 1
+    ID_CHAL = 1
     TOKEN_BUNDLE = 2
     KEY_AUTH_HASH = 3
 
@@ -39,10 +39,10 @@ class AcmeChallenge(object):
     ''' Authorized ACME challenge data.
     '''
 
-    #: The peer Node ID
-    nodeid: str
     #: base64url encoded token
-    token_chal_enc: str
+    id_chal_enc: str
+    #: base64url encoded token
+    token_chal_enc: str = None
     #: base64url encoded token
     token_bundle_enc: str = None
     #: base64url encoded thumbprint
@@ -50,7 +50,7 @@ class AcmeChallenge(object):
 
     @property
     def key(self):
-        return (self.nodeid, self.token_chal_enc)
+        return (self.id_chal_enc)
 
     def key_auth_hash(self) -> bytes:
         ''' Compute the response digest.
@@ -133,11 +133,11 @@ class Administrative(AbstractApplication):
     def _recv_acme(self, ctr, msg):
         source = ctr.bundle.primary.source
         is_request = ctr.bundle.primary.bundle_flags & PrimaryBlock.Flag.USER_APP_ACK
-        
+        LOGGER.info('ACME message from %s with id-chal %s', source, msg.get(AcmeKey.ID_CHAL))
+
         # partial challenge
         chal = AcmeChallenge(
-            nodeid=source,
-            token_chal_enc=AcmeChallenge.b64encode(msg[AcmeKey.TOKEN_CHAL]),
+            id_chal_enc=AcmeChallenge.b64encode(msg[AcmeKey.ID_CHAL]),
         )
         if is_request:
             try:
@@ -149,7 +149,7 @@ class Administrative(AbstractApplication):
             chal.token_bundle_enc = AcmeChallenge.b64encode(msg[AcmeKey.TOKEN_BUNDLE])
 
             msg = {
-                AcmeKey.TOKEN_CHAL: AcmeChallenge.b64decode(chal.token_chal_enc),
+                AcmeKey.ID_CHAL: AcmeChallenge.b64decode(chal.id_chal_enc),
                 AcmeKey.TOKEN_BUNDLE: AcmeChallenge.b64decode(chal.token_bundle_enc),
                 AcmeKey.KEY_AUTH_HASH: chal.key_auth_hash(),
             }
@@ -165,7 +165,7 @@ class Administrative(AbstractApplication):
             expect_auth_hash = chal.key_auth_hash()
             is_valid = msg[AcmeKey.KEY_AUTH_HASH] == expect_auth_hash
 
-            self.got_acme_response(source, chal.token_chal_enc, is_valid)
+            self.got_acme_response(source, chal.id_chal_enc, is_valid)
 
     def send_acme(self, nodeid, msg, is_request):
         rec = [
@@ -200,26 +200,25 @@ class Administrative(AbstractApplication):
     DBUS_IFACE = 'org.ietf.dtn.bp.admin'
 
     @dbus.service.method(DBUS_IFACE, in_signature='sss', out_signature='')
-    def start_expect_acme_request(self, source, token_chal_enc, key_tp_enc):
+    def start_expect_acme_request(self, id_chal_enc, token_chal_enc, key_tp_enc):
         chal = AcmeChallenge(
-            nodeid=source,
+            id_chal_enc=id_chal_enc,
             token_chal_enc=token_chal_enc,
             key_tp_enc=key_tp_enc,
         )
         self._acme_resp[chal.key] = chal
 
-    @dbus.service.method(DBUS_IFACE, in_signature='ss', out_signature='')
-    def stop_expect_acme_request(self, source, token_chal_enc):
+    @dbus.service.method(DBUS_IFACE, in_signature='s', out_signature='')
+    def stop_expect_acme_request(self, id_chal_enc):
         chal = AcmeChallenge(
-            nodeid=source,
-            token_chal_enc=token_chal_enc,
+            id_chal_enc=id_chal_enc,
         )
         del self._acme_resp[chal.key]
 
-    @dbus.service.method(DBUS_IFACE, in_signature='ssss', out_signature='')
-    def send_acme_request(self, nodeid, token_chal_enc, token_bundle_enc, key_tp_enc):
+    @dbus.service.method(DBUS_IFACE, in_signature='sssss', out_signature='')
+    def send_acme_request(self, nodeid, id_chal_enc, token_chal_enc, token_bundle_enc, key_tp_enc):
         chal = AcmeChallenge(
-            nodeid=nodeid,
+            id_chal_enc=id_chal_enc,
             token_chal_enc=token_chal_enc,
             token_bundle_enc=token_bundle_enc,
             key_tp_enc=key_tp_enc,
@@ -227,12 +226,12 @@ class Administrative(AbstractApplication):
         self._acme_chal[chal.key] = chal
 
         msg = {
-            AcmeKey.TOKEN_CHAL: AcmeChallenge.b64decode(token_chal_enc),
+            AcmeKey.ID_CHAL: AcmeChallenge.b64decode(id_chal_enc),
             AcmeKey.TOKEN_BUNDLE: AcmeChallenge.b64decode(token_bundle_enc),
         }
         self.send_acme(nodeid, msg, True)
 
     @dbus.service.signal(DBUS_IFACE, signature='ssb')
-    def got_acme_response(self, nodeid, token_chal_enc, is_valid):
+    def got_acme_response(self, nodeid, id_chal_enc, is_valid):
         '''
         '''
