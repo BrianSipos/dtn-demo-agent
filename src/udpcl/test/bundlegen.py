@@ -121,6 +121,7 @@ def main():
 
     # (address,port) combo to use UDPCL on
     address = ('localhost', 4556)
+    listening = multiprocessing.Semaphore(value=0)
 
     # Must run before connection or real main loop is constructed
     DBusGMainLoop(set_as_default=True)
@@ -133,6 +134,7 @@ def main():
     def run_pasv(config):
         agent = udpcl.agent.Agent(config)
         agent.listen(*address)
+        listening.release()
         agent_xfer_bundles(agent, rx_count=args.gencount)
         agent.exec_loop()
 
@@ -143,6 +145,7 @@ def main():
 
     def run_actv(config):
         agent = udpcl.agent.Agent(config)
+        listening.acquire()
         tx_params = dict(
             address='localhost',
         )

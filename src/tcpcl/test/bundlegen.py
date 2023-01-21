@@ -432,6 +432,7 @@ def main():
 
     # (address,port) combo to use TCPCL on
     address = ('localhost', 4556)
+    listening = multiprocessing.Semaphore(value=0)
 
     # Must run before connection or real main loop is constructed
     DBusGMainLoop(set_as_default=True)
@@ -446,6 +447,7 @@ def main():
     def run_pasv(config):
         agent = tcpcl.agent.Agent(config)
         agent.listen(*address)
+        listening.release()
         agent.exec_loop()
 
     config_actv = tcpcl.agent.Config()
@@ -457,6 +459,7 @@ def main():
 
     def run_actv(config):
         agent = tcpcl.agent.Agent(config)
+        listening.acquire()
         path = agent.connect(*address)
         contact = agent.handler_for_path(path)
         contact.set_on_session_start(lambda: agent_send_bundles(agent, contact, bit))
