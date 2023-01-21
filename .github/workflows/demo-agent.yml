@@ -34,7 +34,7 @@ jobs:
     - name: Test with pytest
       run: |
         pip3 install -e '.[test]'
-        dbus-run-session -- python3 -m pytest -v src
+        dbus-run-session -- python3 -m pytest -v --cov=scapy_cbor --cov=bp --cov=udpcl --cov=tcppcl src
     - name: Run transfers
       run: |
         dbus-run-session -- python3 -m udpcl.test.bundlegen --log=debug fullvalid
