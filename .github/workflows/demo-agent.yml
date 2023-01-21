@@ -5,11 +5,11 @@ on: [push]
 jobs:
   build:
 
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     strategy:
       max-parallel: 4
       matrix:
-        python-version: [3.7]
+        python-version: [3.8, 3.10]
 
     steps:
     - uses: actions/checkout@v1
@@ -22,7 +22,7 @@ jobs:
         sudo apt-get update && sudo apt-get install build-essential dbus libdbus-glib-1-dev libgirepository1.0-dev python3-pip python3-wheel
         python -m pip install --upgrade pip
         # custom cose repo
-        pip3 install git+https://github.com/TimothyClaeys/pycose.git@master
+        pip3 install git+https://github.com/TimothyClaeys/pycose.git@v1.0.1
         pip3 install -e .
     - name: Lint with flake8
       run: |

@@ -8,15 +8,11 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
-from cose.messages import CoseMessage, Sign1Message
-from cose import algorithms, headers
-from cose.keys import curves, keyparam, EC2Key
-try:
-    from cose.keys import RSAKey
-except ImportError:
-    pass
-from cose.exceptions import CoseUnsupportedCurve
-from cose.extensions.x509 import X5T, X5Chain
+from pycose.messages import CoseMessage, Sign1Message
+from pycose import algorithms, headers
+from pycose.keys import curves, keyparam, EC2Key, RSAKey
+from pycose.exceptions import CoseUnsupportedCurve
+from pycose.extensions.x509 import X5T, X5Chain
 
 from scapy_cbor.util import encode_diagnostic
 import tcpcl.session

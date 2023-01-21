@@ -31,7 +31,7 @@ and dynamic segment sizing.
     install_requires=[
         'asn1',
         'cbor2 >=4.1',
-        'cose',
+        'pycose >=1.0.1',
         'crcmod >=1.7',
         'cryptography >=0.9',
         'certvalidator',

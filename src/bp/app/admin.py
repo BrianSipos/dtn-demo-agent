@@ -2,8 +2,8 @@
 '''
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 import cbor2
-from cryptography.hazmat.primitives import hashes
 from dataclasses import dataclass, field, fields
+from pycose import algorithms
 import dbus
 import enum
 from gi.repository import GLib as glib
@@ -32,12 +32,18 @@ class AcmeKey(enum.IntEnum):
     ID_CHAL = 1
     TOKEN_BUNDLE = 2
     KEY_AUTH_HASH = 3
+    HASH_ALGS = 4
 
 
 @dataclass
 class AcmeChallenge(object):
     ''' Authorized ACME challenge data.
     '''
+
+    #: Priority list
+    HASH_ALG_LIST = [
+        algorithms.Sha256
+    ]
 
     #: base64url encoded token
     id_chal_enc: str
@@ -52,14 +58,13 @@ class AcmeChallenge(object):
     def key(self):
         return (self.id_chal_enc)
 
-    def key_auth_hash(self) -> bytes:
+    def key_auth_hash(self, alg: algorithms._HashAlg) -> bytes:
         ''' Compute the response digest.
         '''
         key_auth = (self.token_bundle_enc + self.token_chal_enc + '.' + self.key_tp_enc)
         LOGGER.info('Key authorization string: %s', key_auth)
-        digest = hashes.Hash(hashes.SHA256())
-        digest.update(key_auth.encode('utf8'))
-        return digest.finalize()
+        digest = alg.compute_hash(key_auth.encode('utf8'))
+        return digest
 
     @staticmethod
     def b64encode(data: bytes) -> str:
@@ -148,10 +153,25 @@ class Administrative(AbstractApplication):
                 return
             chal.token_bundle_enc = AcmeChallenge.b64encode(msg[AcmeKey.TOKEN_BUNDLE])
 
+            server_alg_ids = list(msg[AcmeKey.HASH_ALGS])
+            client_alg_ids = {
+                alg.identifier: alg
+                for alg in AcmeChallenge.HASH_ALG_LIST
+            }
+            both_alg_ids = [aid for aid in server_alg_ids if aid in client_alg_ids]
+            if not both_alg_ids:
+                LOGGER.warning('No mutual acceptable hash algorithms in %s', server_alg_ids)
+                ctr.record_action('delete')
+                return
+            alg = client_alg_ids[both_alg_ids[0]]
+
             msg = {
                 AcmeKey.ID_CHAL: AcmeChallenge.b64decode(chal.id_chal_enc),
                 AcmeKey.TOKEN_BUNDLE: AcmeChallenge.b64decode(chal.token_bundle_enc),
-                AcmeKey.KEY_AUTH_HASH: chal.key_auth_hash(),
+                AcmeKey.KEY_AUTH_HASH: [
+                    alg.identifier,
+                    chal.key_auth_hash(alg),
+                ],
             }
             self.send_acme(ctr.bundle.primary.source, msg, False)
 
@@ -228,6 +248,7 @@ class Administrative(AbstractApplication):
         msg = {
             AcmeKey.ID_CHAL: AcmeChallenge.b64decode(id_chal_enc),
             AcmeKey.TOKEN_BUNDLE: AcmeChallenge.b64decode(token_bundle_enc),
+            AcmeKey.HASH_ALGS: [alg.identifier for alg in AcmeChallenge.HASH_ALG_LIST],
         }
         self.send_acme(nodeid, msg, True)
 
