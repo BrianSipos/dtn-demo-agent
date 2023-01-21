@@ -44,7 +44,12 @@ and dynamic segment sizing.
         'scapy >=2.4,<2.4.5',
         'six',
     ],
-    extras_require={},
+    extras_require={
+        'test': [
+            'pytest',
+            'pytest-cov',
+        ],
+    },
 
     # Data files
     package_data={},
