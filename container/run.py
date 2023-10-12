@@ -79,6 +79,8 @@ class Runner:
 
             nowtime = datetime.datetime.now(datetime.timezone.utc)
 
+            os.makedirs(os.path.join('container', 'workdir'), exist_ok=True)
+
             # Private CA
             ca_key = generate_key({})
             with open(os.path.join('container', 'workdir', 'ca.key'), 'wb') as outfile:
@@ -230,7 +232,7 @@ class Runner:
                             'address': '0.0.0.0',
                             'multicast_member': [
                                 {
-                                    'addr': '224.0.0.1',
+                                    'addr': '224.0.1.186',
                                 },
                             ],
                         })
@@ -239,7 +241,7 @@ class Runner:
                             'address': '::',
                             'multicast_member': [
                                 {
-                                    'addr': 'FF02:0:0:0:0:0:0:1',
+                                    'addr': 'FF05::1:5',
                                     'iface': 'eth0',
                                 },
                             ],
@@ -349,7 +351,7 @@ class Runner:
         elif act == 'stop':
             self.run_docker(
                 ['container', 'stop']
-                + [node_name for node_name in self._config['nodes'].keys()]
+                +[node_name for node_name in self._config['nodes'].keys()]
             )
 
         elif act == 'delete':

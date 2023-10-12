@@ -18,7 +18,7 @@ class BundleContainer(object):
     ''' A high-level representation of a bundle.
     This includes logical constraints not present in :py:cls:`encoding.Bundle`
     data handling class.
-    
+
     :ivar bundle: The decoded bundle itself.
     :ivar actions: Processing recorded on this bundle.
     :ivar status_reason: The last status reason.
@@ -130,12 +130,18 @@ class BundleContainer(object):
         blk_type = blk.getfieldval('type_code')
         pyld_cls = type(blk.payload)
 
-        for (ix, curblk) in self.bundle.blocks:
-            if curblk.block_num == blk_num:
-                self.bundle.blocks.pop(ix)
-                self._block_num.pop(blk_num)
-                self._block_type[blk_type].pop(curblk)
-                self._block_type[pyld_cls].pop(curblk)
+        found = [
+            (ix, curblk)
+            for (ix, curblk) in enumerate(self.bundle.blocks)
+            if curblk.block_num == blk_num
+        ]
+
+        if found:
+            (ix, curblk) = found[0]
+            self.bundle.blocks.pop(ix)
+            self._block_num.pop(blk_num)
+            self._block_type[blk_type].remove(curblk)
+            self._block_type[pyld_cls].remove(curblk)
 
     def reload(self):
         ''' Reload derived info from the bundle.
@@ -269,11 +275,11 @@ class BundleContainer(object):
 @dataclass
 @functools.total_ordering
 class ChainStep():
-    #: Absolute ordering of steps
+    # : Absolute ordering of steps
     order: float = 0
-    #: Human name of the step
+    # : Human name of the step
     name: str = 'unknown'
-    #: Action to perform on the bundle at this step.
+    # : Action to perform on the bundle at this step.
     # Returns True if the processing chain is interrupted by this step.
     action: Callable[[BundleContainer], bool] = None
 

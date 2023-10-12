@@ -2,6 +2,7 @@
 '''
 import datetime
 import logging
+import traceback
 import dbus.service
 from gi.repository import GLib as glib
 import cbor2
@@ -59,7 +60,7 @@ class Agent(dbus.service.Object):
     :type bus_kwargs: dict or None
     '''
 
-    #: Interface name
+    # : Interface name
     DBUS_IFACE = 'org.ietf.dtn.bp.Agent'
 
     def __init__(self, config, bus_kwargs=None):
@@ -73,7 +74,7 @@ class Agent(dbus.service.Object):
         self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self._config = config
         self._on_stop = None
-        #: Set when shutdown() is called and waiting on sessions
+        # : Set when shutdown() is called and waiting on sessions
         self._in_shutdown = False
 
         self.timestamp = Timestamper()
@@ -301,6 +302,7 @@ class Agent(dbus.service.Object):
                     break
             except Exception as err:
                 self._logger.error('Step %5.1f failed with exception: %s', step.order, err)
+                self._logger.debug('%s', traceback.format_exc())
                 break
 
         if 'delete' in ctr.actions:
@@ -397,11 +399,15 @@ class Agent(dbus.service.Object):
                     break
             except Exception as err:
                 self._logger.error('Step %5.1f failed with exception: %s', step.order, err)
+                self._logger.debug('%s', traceback.format_exc())
                 break
 
         if ctr.route and not ctr.sender:
             # Assume the route is a TxRouteItem
-            ctr.sender = self._cl_agent[ctr.route.cl_type].send_bundle_func(ctr.route.raw_config)
+            cl_obj = self._cl_agent.get(ctr.route.cl_type)
+            if cl_obj:
+                self._logger.info('send_bundle raw_config %s', ctr.route.raw_config)
+                ctr.sender = cl_obj.send_bundle_func(ctr.route.raw_config)
 
         if ctr.sender is None:
             raise RuntimeError('TX chain completed with no sender for %s', ctr.log_name())
@@ -410,10 +416,10 @@ class Agent(dbus.service.Object):
         ctr.bundle.fill_fields()
         ctr.bundle.update_all_crc()
 
-        self._logger.debug('Sending bundle\n%s', ctr.bundle.show(dump=True))
+        # self._logger.debug('Sending bundle\n%s', ctr.bundle.show(dump=True))
         data = bytes(ctr.bundle)
         self._logger.info('send_bundle size %d', len(data))
-        self._logger.debug('send_bundle data %s', encode_diagnostic(cbor2.loads(data)))
+        # self._logger.debug('send_bundle data %s', encode_diagnostic(cbor2.loads(data)))
         ctr.sender(data)
 
     @dbus.service.method(DBUS_IFACE, in_signature='ss', out_signature='')

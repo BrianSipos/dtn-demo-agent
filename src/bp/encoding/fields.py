@@ -40,16 +40,24 @@ class EidField(CborField):
         except KeyError:
             raise ValueError('No type code for scheme "{}"'.format(parts[0]))
 
-        authority = parts[1]
-        path = parts[2]
-        ssp = ''
-        if authority:
-            ssp += '//' + authority
-            if not path.startswith('/'):
-                path = '/' + path
-        ssp += path
+        if scheme_type == EidField.TypeCode.dtn:
+            authority = parts[1]
+            path = parts[2]
+            ssp = ''
+            if authority:
+                ssp += '//' + authority
+                if not path.startswith('/'):
+                    path = '/' + path
+            ssp += path
+    
+            return [scheme_type, ssp]
 
-        return [scheme_type, ssp]
+        elif scheme_type == EidField.TypeCode.ipn:
+            segs = list(map(int, parts.path.split('.')))
+            return [scheme_type, segs]
+
+        else:
+            raise RuntimeError('Unhandled scheme type')
 
     def m2i(self, pkt, x):
         if x is None:
@@ -58,14 +66,24 @@ class EidField(CborField):
             return x
 
         scheme_type = x[0]
-        ssp = x[1]
-        if isinstance(ssp, int):
-            ssp = EidField.WellKnownSsp(ssp).name
+        if scheme_type == EidField.TypeCode.dtn:
+            ssp = x[1]
+            if isinstance(ssp, int):
+                ssp = EidField.WellKnownSsp(ssp).name
+    
+            return '{0}:{1}'.format(
+                EidField.TypeCode(scheme_type).name,
+                ssp
+            )
 
-        return '{0}:{1}'.format(
-            EidField.TypeCode(scheme_type).name,
-            ssp
-        )
+        elif scheme_type == EidField.TypeCode.ipn:
+            return '{0}:{1}'.format(
+                EidField.TypeCode(scheme_type).name,
+                '.'.join(map(str, x[1])),
+            )
+
+        else:
+            raise RuntimeError('Unhandled scheme type')
 
     def randval(self):
         nodename = volatile.RandString(50)
@@ -79,7 +97,7 @@ class DtnTimeField(UintField):
     :py:cls:`datetime.datetime` object and text.
     '''
 
-    #: Epoch reference for DTN Time
+    # : Epoch reference for DTN Time
     DTN_EPOCH = datetime.datetime(2000, 1, 1, 0, 0, 0, 0, datetime.timezone.utc)
 
     @staticmethod
