@@ -97,7 +97,7 @@ class DtnTimeField(UintField):
     :py:cls:`datetime.datetime` object and text.
     '''
 
-    # : Epoch reference for DTN Time
+    # Epoch reference for DTN Time
     DTN_EPOCH = datetime.datetime(2000, 1, 1, 0, 0, 0, 0, datetime.timezone.utc)
 
     @staticmethod

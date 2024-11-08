@@ -127,23 +127,23 @@ class PrimaryBlock(AbstractBlock):
         ''' Bundle flags.
         '''
         NONE = 0
-        #: bundle deletion status reports are requested.
+        # bundle deletion status reports are requested.
         REQ_DELETION_REPORT = 0x040000
-        #: bundle delivery status reports are requested.
+        # bundle delivery status reports are requested.
         REQ_DELIVERY_REPORT = 0x020000
-        #: bundle forwarding status reports are requested.
+        # bundle forwarding status reports are requested.
         REQ_FORWARDING_REPORT = 0x010000
-        #: bundle reception status reports are requested.
+        # bundle reception status reports are requested.
         REQ_RECEPTION_REPORT = 0x004000
-        #: status time is requested in all status reports.
+        # status time is requested in all status reports.
         REQ_STATUS_TIME = 0x000040
-        #: user application acknowledgement is requested.
+        # user application acknowledgement is requested.
         USER_APP_ACK = 0x000020
-        #: bundle must not be fragmented.
+        # bundle must not be fragmented.
         NO_FRAGMENT = 0x000004
-        #: payload is an administrative record.
+        # payload is an administrative record.
         PAYLOAD_ADMIN = 0x000002
-        #: bundle is a fragment.
+        # bundle is a fragment.
         IS_FRAGMENT = 0x000001
 
     fields_desc = (
@@ -183,13 +183,13 @@ class CanonicalBlock(AbstractBlock):
         Flags must be in LSbit-first order.
         '''
         NONE = 0
-        #: block must be removed from bundle if it can't be processed.
+        # block must be removed from bundle if it can't be processed.
         REMOVE_IF_NO_PROCESS = 0x10
-        #: bundle must be deleted if block can't be processed.
+        # bundle must be deleted if block can't be processed.
         DELETE_IF_NO_PROCESS = 0x04
-        #: transmission of a status report is requested if block can't be processed.
+        # transmission of a status report is requested if block can't be processed.
         STATUS_IF_NO_PROCESS = 0x02
-        #: block must be replicated in every fragment.
+        # block must be replicated in every fragment.
         REPLICATE_IN_FRAGMENT = 0x01
 
     fields_desc = (

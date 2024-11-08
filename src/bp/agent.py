@@ -60,7 +60,7 @@ class Agent(dbus.service.Object):
     :type bus_kwargs: dict or None
     '''
 
-    # : Interface name
+    # Interface name
     DBUS_IFACE = 'org.ietf.dtn.bp.Agent'
 
     def __init__(self, config, bus_kwargs=None):
@@ -74,7 +74,7 @@ class Agent(dbus.service.Object):
         self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self._config = config
         self._on_stop = None
-        # : Set when shutdown() is called and waiting on sessions
+        # Set when shutdown() is called and waiting on sessions
         self._in_shutdown = False
 
         self.timestamp = Timestamper()

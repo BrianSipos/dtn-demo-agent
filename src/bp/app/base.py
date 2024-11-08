@@ -6,7 +6,7 @@ from bp.encoding import (
 )
 from bp.config import Config
 
-#: Dictionary of BP applications
+# Dictionary of BP applications
 APPLICATIONS = {}
 
 

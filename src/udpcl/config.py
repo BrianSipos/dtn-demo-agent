@@ -18,11 +18,11 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class ListenConfig():
-    # : Local address to listen on
+    # Local address to listen on
     address: str
-    # : Local port to listen on
+    # Local port to listen on
     port: int = 4556
-    # : Multicast address membership
+    # Multicast address membership
     multicast_member: List[Dict] = field(default_factory=list)
 
     @property
@@ -36,21 +36,21 @@ class ListenConfig():
 
 @dataclass
 class PollConfig():
-    # : Remote address or DNS name to send to
+    # Remote address or DNS name to send to
     address: str
-    # : Remote port to send to
+    # Remote port to send to
     port: int = 4556
-    # : Optional local address
+    # Optional local address
     local_address: Optional[str] = None
-    # : Optional local port
+    # Optional local port
     local_port: Optional[int] = None
-    # : Interval time in milliseconds
+    # Interval time in milliseconds
     interval_ms: int = 60000
 
 
 @dataclass
 class MulticastConfig():
-    # : Multicast TTL value
+    # Multicast TTL value
     ttl: Optional[int] = None
 
 
@@ -59,43 +59,43 @@ class Config(object):
     ''' Agent configuration.
     '''
 
-    # : Default log level when command option not provided
+    # Default log level when command option not provided
     log_level: Optional[str] = None
-    # : A set of test-mode behaviors to enable.
+    # A set of test-mode behaviors to enable.
     enable_test: Set[str] = field(default_factory=set)
-    # : The D-Bus address to register handlers on.
+    # The D-Bus address to register handlers on.
     bus_addr: Optional[str] = None
-    # : DBus service name to register as
+    # DBus service name to register as
     bus_service: Optional[str] = None
 
-    # : Allow use of TLS for sending
+    # Allow use of TLS for sending
     dtls_enable_tx: bool = True
-    # : Specific version to allow
+    # Specific version to allow
     dtls_version: Optional[str] = None
     # OpenSSL cipher filter
     dtls_ciphers: Optional[str] = None
-    # : Trusted root CA PEM file
+    # Trusted root CA PEM file
     dtls_ca_file: Optional[str] = None
-    # : Local certificate (chain) PEM file
+    # Local certificate (chain) PEM file
     dtls_cert_file: Optional[str] = None
-    # : Local private key PEM file
+    # Local private key PEM file
     dtls_key_file: Optional[str] = None
 
-    # : If True, plaintext RX bundles are rejected
+    # If True, plaintext RX bundles are rejected
     require_tls: bool = False
-    # : If truthy, the peer must have its host name authenticated (by TLS).
+    # If truthy, the peer must have its host name authenticated (by TLS).
 #    require_host_authn: bool = False
-    # : If truthy, the peer must have its Node ID authenticated (by TLS).
+    # If truthy, the peer must have its Node ID authenticated (by TLS).
 #    require_node_authn: bool = False
 
-    # : The Node ID of this entity, which is a URI.
+    # The Node ID of this entity, which is a URI.
     node_id: str = u''
 
-    # : Default source IP to send on
+    # Default source IP to send on
     default_tx_address: Optional[str] = None
-    # : Default UDP port to send on
+    # Default UDP port to send on
     default_tx_port: Optional[int] = None
-    # : Default MTU when not discoverable
+    # Default MTU when not discoverable
     mtu_default: Optional[int] = None
 
     ecn_init: bool = True
@@ -104,12 +104,12 @@ class Config(object):
     ''' True if incoming ECN-marked packets are responded to with feedback. '''
     ecn_feedback_delay:timedelta = timedelta(milliseconds=1000)
 
-    # : Multicast options with defaults
+    # Multicast options with defaults
     multicast: MulticastConfig = field(default_factory=MulticastConfig)
 
-    # : If provided, will listen on the specified address/port
+    # If provided, will listen on the specified address/port
     init_listen: List[ListenConfig] = field(default_factory=list)
-    # : If provided, will poll a peer
+    # If provided, will poll a peer
     polling: List[PollConfig] = field(default_factory=list)
 
     def from_file(self, fileobj):

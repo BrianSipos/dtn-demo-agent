@@ -275,11 +275,11 @@ class BundleContainer(object):
 @dataclass
 @functools.total_ordering
 class ChainStep():
-    # : Absolute ordering of steps
+    # Absolute ordering of steps
     order: float = 0
-    # : Human name of the step
+    # Human name of the step
     name: str = 'unknown'
-    # : Action to perform on the bundle at this step.
+    # Action to perform on the bundle at this step.
     # Returns True if the processing chain is interrupted by this step.
     action: Callable[[BundleContainer], bool] = None
 

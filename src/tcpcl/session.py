@@ -85,19 +85,19 @@ class Connection(object):
         self._as_passive = as_passive
         self._peer_name = peer_name
 
-        #: Transmit buffer
+        # Transmit buffer
         self.__tx_buf = b''
 
-        #: The raw socket
+        # The raw socket
         self.__s_notls = None
-        #: Optionally secured socket
+        # Optionally secured socket
         self.__s_tls = None
 
-        #: listener for __s_notls socket
+        # listener for __s_notls socket
         self.__avail_rx_notls_id = None
         self.__avail_tx_notls_id = None
         self.__avail_tx_notls_pend = None
-        #: optional listener for __s_tls socket
+        # optional listener for __s_tls socket
         self.__avail_rx_tls_id = None
         self.__avail_tx_tls_id = None
         self.__avail_tx_tls_pend = None
@@ -259,9 +259,9 @@ class Connection(object):
         ''' A name for the connection type. '''
         return 'secure' if self.is_secure() else 'plain'
 
-    #: Size of data stream chunks
+    # Size of data stream chunks
     CHUNK_SIZE = 10240
-    #: True to log actual hex-encoded data
+    # True to log actual hex-encoded data
     DO_DEBUG_DATA = False
 
     def _avail_rx_notls(self, *args, **kwargs):
@@ -472,15 +472,15 @@ class Messenger(Connection):
         # Negotiation inputs and states
         self._conhead_peer = None
         self._conhead_this = None
-        #: Set after contact negotiation
+        # Set after contact negotiation
         self._in_conn = False
         self._sessinit_peer = None
         self._sessinit_this = None
-        #: Set after SESS_INIT negotiation
+        # Set after SESS_INIT negotiation
         self._sess_parameters = {}
         self._in_sess = False
         self._in_sess_func = None
-        #: Set after SESS_TERM sent
+        # Set after SESS_TERM sent
         self._in_term = False
         self._in_term_func = None
 
@@ -490,9 +490,9 @@ class Messenger(Connection):
 
         self._from = fromaddr
         self._to = toaddr
-        #: Receive pre-message data buffer
+        # Receive pre-message data buffer
         self.__rx_buf = b''
-        #: Transmit post-message data buffer
+        # Transmit post-message data buffer
         self.__tx_buf = b''
 
         # now set up connection
@@ -1158,7 +1158,7 @@ class ContactHandler(Messenger, dbus.service.Object):
     :type bus_kwargs: dict
     '''
 
-    #: D-Bus interface name
+    # D-Bus interface name
     DBUS_IFACE = 'org.ietf.dtn.tcpcl.Contact'
 
     def __init__(self, hdl_kwargs, bus_kwargs):
@@ -1167,26 +1167,26 @@ class ContactHandler(Messenger, dbus.service.Object):
         dbus.service.Object.__init__(self, **bus_kwargs)
         self.object_path = bus_kwargs['object_path']
         # Transmit state
-        #: Next sequential bundle ID
+        # Next sequential bundle ID
         self._tx_next_id = 1
-        #: TX bundles pending start (as BundleItem) in queue order
+        # TX bundles pending start (as BundleItem) in queue order
         self._tx_pend_start = []
-        #: TX bundles pending full ACK (as BundleItem)
+        # TX bundles pending full ACK (as BundleItem)
         self._tx_pend_ack = set()
-        #: Names of pending TX bundles in _tx_pend_start and _tx_pend_ack
+        # Names of pending TX bundles in _tx_pend_start and _tx_pend_ack
         self._tx_map = {}
-        #: Active TX bundle
+        # Active TX bundle
         self._tx_tmp = None
-        #: Accumulated TX length
+        # Accumulated TX length
         self._tx_length = None
         self._process_queue_pend = None
 
         # Receive state
-        #: Active RX bundle
+        # Active RX bundle
         self._rx_tmp = None
-        #: Full RX bundles pending delivery (as BundleItem)
+        # Full RX bundles pending delivery (as BundleItem)
         self._rx_bundles = []
-        #: Names of pending RX bundles
+        # Names of pending RX bundles
         self._rx_map = {}
 
         # Bind to parent class

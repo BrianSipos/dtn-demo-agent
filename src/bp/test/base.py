@@ -6,7 +6,7 @@ from bp.encoding.fields import (EidField)
 
 conf.debug_dissector = True
 
-#: Encoded "dtn:none" URI
+# Encoded "dtn:none" URI
 DTN_NONE = [int(EidField.TypeCode.dtn), 0]
 
 

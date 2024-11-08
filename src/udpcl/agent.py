@@ -61,22 +61,22 @@ class BundleItem(object):
     ''' State for RX and TX full bundles.
     '''
 
-    # : The remote address
+    # The remote address
     address: str
-    # : The remote port
+    # The remote port
     port: int
-    # : Binary file to store in
+    # Binary file to store in
     file: BinaryIO
 
     local_if: Optional[int] = None
     ''' Optional local interface index '''
-    # : Optional source address
+    # Optional source address
     local_address: Optional[str] = None
-    # : Optional source port
+    # Optional source port
     local_port: Optional[int] = None
-    # : The unique transfer ID number.
+    # The unique transfer ID number.
     transfer_id: Optional[int] = None
-    # : Size of the bundle data
+    # Size of the bundle data
     total_length: Optional[int] = None
 
     ip_tos: int = 0
@@ -90,19 +90,19 @@ class Transfer(object):
     ''' State for fragmented transfers.
     '''
 
-    # : The remote address
+    # The remote address
     address: str
-    # : The remote port
+    # The remote port
     port: int
-    # : Transfer ID
+    # Transfer ID
     xfer_id: int
-    # : Total transfer size
+    # Total transfer size
     total_length: int
     # Range of full data expected
     total_valid: Optional[portion.Interval] = None
-    # : Range of real data present
+    # Range of real data present
     valid: Optional[portion.Interval] = None
-    # : Accumulated byte string
+    # Accumulated byte string
     data: Optional[bytearray] = None
 
     @property
@@ -146,17 +146,17 @@ class Conversation:
     ''' Bookkeep parameters of a UDP conversation
     which is address-and-port for each side.
     '''
-    # : Address family
+    # Address family
     family: Optional[int] = None
-    # : The remote address
+    # The remote address
     peer_address: Optional[ipaddress._BaseAddress] = None
-    # : The remote port
+    # The remote port
     peer_port: Optional[int] = None
     local_if: Optional[int] = None
     ''' Local interface index '''
-    # : The local address
+    # The local address
     local_address: Optional[ipaddress._BaseAddress] = None
-    # : The local port
+    # The local port
     local_port: Optional[int] = None
 
     @staticmethod
@@ -289,7 +289,7 @@ class Agent(dbus.service.Object):
         self._on_stop = None
 
         self._bindsocks = {}
-        # : Map from socket to glib io-watch ID
+        # Map from socket to glib io-watch ID
         self._listen_plain = {}
         # Existing sockets, map from `Conversation.key` to `socket.socket`
         self._plain_sock = {}
@@ -300,7 +300,7 @@ class Agent(dbus.service.Object):
 
         self._tx_id = 0
         self._tx_queue = []
-        # : map from transfer ID to :py:cls:`Transfer`
+        # map from transfer ID to :py:cls:`Transfer`
         self._rx_fragments = {}
         self._rx_id = 0
         self._rx_queue = {}

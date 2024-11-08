@@ -44,15 +44,15 @@ class Conversation:
     ''' Bookkeep parameters of a TCP conversation
     which is address-and-port for each side.
     '''
-    #: Address family
+    # Address family
     family: Optional[int] = None
-    #: The remote address
+    # The remote address
     peer_address: Optional[ipaddress._BaseAddress] = None
-    #: The remote port
+    # The remote port
     peer_port: Optional[int] = None
-    #: The local address
+    # The local address
     local_address: Optional[ipaddress._BaseAddress] = None
-    #: The local port
+    # The local port
     local_port: Optional[int] = None
 
     @property
@@ -93,7 +93,7 @@ class Agent(dbus.service.Object):
         self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self._config = config
         self._on_stop = None
-        #: Set when shutdown() is called and waiting on sessions
+        # Set when shutdown() is called and waiting on sessions
         self._in_shutdown = False
 
         self._bindsocks = {}

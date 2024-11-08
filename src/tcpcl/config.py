@@ -13,16 +13,16 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class ListenConfig():
-    #: Local address to listen on
+    # Local address to listen on
     address: str
-    #: Local port to listen on
+    # Local port to listen on
     port: int = 4556
 
 @dataclass
 class ConnectConfig():
-    #: Remote address to connect to
+    # Remote address to connect to
     address: str
-    #: Remote port to connect to
+    # Remote port to connect to
     port: int = 4556
 
 
@@ -31,51 +31,51 @@ class Config(object):
     ''' Agent configuration.
     '''
 
-    #: Default log level when command option not provided
+    # Default log level when command option not provided
     log_level: Optional[str] = None
-    #: A set of test-mode behaviors to enable.
+    # A set of test-mode behaviors to enable.
     enable_test: Set[str] = field(default_factory=set)
-    #: The D-Bus address to register handlers on.
+    # The D-Bus address to register handlers on.
     bus_addr: Optional[str] = None
-    #: DBus service name to register as
+    # DBus service name to register as
     bus_service: Optional[str] = None
 
-    #: If provided, will listen on the specified address/port
+    # If provided, will listen on the specified address/port
     init_listen: List[ListenConfig] = field(default_factory=list)
-    #: If provided, will connect to the specified address/port
+    # If provided, will connect to the specified address/port
     init_connect: List[ConnectConfig] = field(default_factory=list)
-    #: If True, the agent will stop when all of its contacts are closed.
+    # If True, the agent will stop when all of its contacts are closed.
     stop_on_close: bool = False
 
-    #: Allow use of TLS during contact negotiation
+    # Allow use of TLS during contact negotiation
     tls_enable: bool = True
     tls_version: Optional[str] = None
     tls_ciphers: Optional[Set[str]] = None
-    #: Trusted root CA PEM file
+    # Trusted root CA PEM file
     tls_ca_file: Optional[str] = None
-    #: Local certificate (chain) PEM file
+    # Local certificate (chain) PEM file
     tls_cert_file: Optional[str] = None
-    #: Local private key PEM file
+    # Local private key PEM file
     tls_key_file: Optional[str] = None
     tls_dhparam: Optional[str] = None
-    #: If not None, the required negotiated use-TLS state.
+    # If not None, the required negotiated use-TLS state.
     require_tls: Optional[bool] = None
 
-    #: If truthy, the peer must have its host name authenticated (by TLS).
+    # If truthy, the peer must have its host name authenticated (by TLS).
     require_host_authn: bool = False
-    #: If truthy, the peer must have its Node ID authenticated (by TLS).
+    # If truthy, the peer must have its Node ID authenticated (by TLS).
     require_node_authn: bool = False
 
-    #: The Node ID of this entity, which is a URI.
+    # The Node ID of this entity, which is a URI.
     node_id: str = u''
 
     keepalive_time: int = 0
     idle_time: int = 0
-    #: Maximum size of RX segments in octets
+    # Maximum size of RX segments in octets
     segment_size_mru: int = int(10 * (1024 ** 2))
-    #: Initial TX segment size
+    # Initial TX segment size
     segment_size_tx_initial: int = int(0.1 * (1024 ** 2))
-    #: Target time for dynamic TX segment size
+    # Target time for dynamic TX segment size
     modulate_target_ack_time: Optional[int] = None
 
     def from_file(self, fileobj):

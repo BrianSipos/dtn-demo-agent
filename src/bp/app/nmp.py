@@ -89,13 +89,13 @@ class OneHopNeighbor(object):
     ''' Discovered neighbor
     '''
 
-    # : The reassembled bundle ident
+    # The reassembled bundle ident
     node_id: str = ''
-    # : Time at which this data becomes invalid
+    # Time at which this data becomes invalid
     valid_until = None
-    # : Latest inferred status
+    # Latest inferred status
     link_status: LinkStatus = None
-    # : List of TX routes reported for this node
+    # List of TX routes reported for this node
     tx_routes: List[TxRouteItem] = field(default_factory=list)
 
 
@@ -104,7 +104,7 @@ class Nmp(AbstractApplication):
     ''' Neighbor messaging protocol.
     '''
 
-    # : Interface name
+    # Interface name
     DBUS_IFACE = 'org.ietf.dtn.bp.nmp'
 
     def __init__(self, *args, **kwargs):
