@@ -10,7 +10,7 @@ nodes:
     nets: [dtnA]
     keys:
        sign:
-          keytype: RSA
+          keytype: SECP256R1
     config:
        apps:
           nmp:

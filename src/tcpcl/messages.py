@@ -70,7 +70,7 @@ class SessionExtendHeader(TlvHead):
 class SessionInit(formats.NoPayloadPacket):
     ''' An SESS_INIT with no payload. '''
 
-    #: Largest 64-bit size value
+    # Largest 64-bit size value
     SIZE_MAX = 2 ** 64 - 1
 
     fields_desc = [

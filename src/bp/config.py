@@ -14,12 +14,12 @@ LOGGER = logging.getLogger(__name__)
 class RxRouteItem(object):
     ''' Each item in the receive routing table.
     '''
-    #: The regex pattern to match on the Destination EID
+    # The regex pattern to match on the Destination EID
     eid_pattern: re.Pattern
-    #: The local action to perform.
+    # The local action to perform.
     # One of: delete, deliver, forward
     action: str
-    #: The raw config object with additional parameters
+    # The raw config object with additional parameters
     raw_config: object = field(default_factory=object)
 
 
@@ -27,15 +27,15 @@ class RxRouteItem(object):
 class TxRouteItem(object):
     ''' Each item in the transmit routing table.
     '''
-    #: The regex pattern to match on the Destination EID
+    # The regex pattern to match on the Destination EID
     eid_pattern: re.Pattern
-    #: The next-hop Node ID
+    # The next-hop Node ID
     next_nodeid: str
-    #: Convergence layer name
+    # Convergence layer name
     cl_type: str
-    #: Maximum total bundle size for this CL
+    # Maximum total bundle size for this CL
     mtu: Optional[int] = None
-    #: The raw config object with additional parameters
+    # The raw config object with additional parameters
     raw_config: object = field(default_factory=object)
 
 
@@ -44,37 +44,41 @@ class Config(object):
     ''' Agent configuration.
     '''
 
-    #: Default log level when command option not provided
+    # Default log level when command option not provided
     log_level: Optional[str] = None
-    #: A set of test-mode behaviors to enable.
+    # A set of test-mode behaviors to enable.
     enable_test: Set[str] = field(default_factory=set)
-    #: The D-Bus address to register handlers on.
+    # The D-Bus address to register handlers on.
     bus_addr: Optional[str] = None
-    #: DBus service name to register as
+    # DBus service name to register as
     bus_service: Optional[str] = None
 
-    #: The Node ID of this agent, which is a URI.
+    # The Node ID of this agent, which is a URI.
     node_id: str = u''
-    #: Receive routing
+    # Receive routing
     rx_route_table: List[RxRouteItem] = field(default_factory=list)
-    #: Transmit routing
+    # Transmit routing
     tx_route_table: List[TxRouteItem] = field(default_factory=list)
 
-    #: Trusted root CA PEM file
+    # Trusted root CA PEM file
     verify_ca_file: Optional[str] = None
-    #: Local certificate (chain) PEM file
+    # Local certificate (chain) PEM file
     sign_cert_file: Optional[str] = None
-    #: Local private key PEM file
+    # Local private key PEM file
     sign_key_file: Optional[str] = None
-    #: Sign outgoing blocks of this type
+    # Local certificate (chain) PEM file
+    encr_cert_file: Optional[str] = None
+    # Local private key PEM file
+    encr_key_file: Optional[str] = None
+    # Sign outgoing blocks of this type
     integrity_for_blocks: Set[int] = field(default_factory=lambda: {1})
-    #: Include certificate chain in integrity parameters
+    # Include certificate chain in integrity parameters
     integrity_include_chain: bool = True
 
-    #: The bus service names of CLs to attach to
+    # The bus service names of CLs to attach to
     cl_attach: Dict[str, str] = field(default_factory=dict)
 
-    #: Application-specific configurations
+    # Application-specific configurations
     apps: Dict[str, dict] = field(default_factory=dict)
 
     def from_file(self, fileobj):

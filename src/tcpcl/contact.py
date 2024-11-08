@@ -7,7 +7,7 @@ from scapy import fields, packet
 from . import formats
 
 
-#: Header magic prefix-data
+# Header magic prefix-data
 MAGIC_HEAD = b'dtn!'
 
 
@@ -22,7 +22,7 @@ class Head(packet.Packet):
 class ContactV3(formats.NoPayloadPacket):
     ''' TCPCLv3 contact header pseudo-message. '''
 
-    #: Flags must be in LSbit-first order
+    # Flags must be in LSbit-first order
     @enum.unique
     class Flag(enum.IntEnum):
         ENA_ACK = 0x01
@@ -52,10 +52,10 @@ packet.bind_layers(Head, ContactV3, version=3)
 class ContactV4(formats.NoPayloadPacket):
     ''' TCPCLv4 Contact header pseudo-message. '''
 
-    #: Largest 64-bit size value
+    # Largest 64-bit size value
     SIZE_MAX = 2 ** 64 - 1
 
-    #: Flags must be in LSbit-first order
+    # Flags must be in LSbit-first order
     @enum.unique
     class Flag(enum.IntEnum):
         CAN_TLS = 0x01

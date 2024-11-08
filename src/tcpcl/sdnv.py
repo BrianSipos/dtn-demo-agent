@@ -5,12 +5,12 @@ import logging
 import math
 
 
-#: module-level logger
+# module-level logger
 logger = logging.getLogger(__name__)
 
-#: Bitmask for value portion of each octet
+# Bitmask for value portion of each octet
 VAL_MASK = 0x7F
-#: Bitmask for continuation bit of each octet
+# Bitmask for continuation bit of each octet
 CNT_MASK = 0x80
 
 

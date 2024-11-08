@@ -40,18 +40,18 @@ class AcmeChallenge(object):
     ''' Authorized ACME challenge data.
     '''
 
-    #: Priority list
+    # Priority list
     HASH_ALG_LIST = [
         algorithms.Sha256
     ]
 
-    #: base64url encoded token
+    # base64url encoded token
     id_chal_enc: str
-    #: base64url encoded token
+    # base64url encoded token
     token_chal_enc: str = None
-    #: base64url encoded token
+    # base64url encoded token
     token_bundle_enc: str = None
-    #: base64url encoded thumbprint
+    # base64url encoded thumbprint
     key_tp_enc: str = None
 
     @property
@@ -216,7 +216,7 @@ class Administrative(AbstractApplication):
         ]
         self._agent.send_bundle(ctr)
 
-    #: Interface name
+    # Interface name
     DBUS_IFACE = 'org.ietf.dtn.bp.admin'
 
     @dbus.service.method(DBUS_IFACE, in_signature='sss', out_signature='')

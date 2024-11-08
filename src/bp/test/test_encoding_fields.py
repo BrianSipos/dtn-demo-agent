@@ -19,6 +19,15 @@ class TestEidField(unittest.TestCase):
             item
         )
 
+        item = [
+            EidField.TypeCode.ipn,
+            [1, 2],
+        ]
+        self.assertEqual(
+            fld.i2m(None, 'ipn:1.2'),
+            item
+        )
+
     def testDecodeEndpoint(self):
         fld = EidField('field')
 
@@ -31,6 +40,15 @@ class TestEidField(unittest.TestCase):
             'dtn://node/serv'
         )
 
+        item = [
+            EidField.TypeCode.ipn,
+            [1, 2]
+        ]
+        self.assertEqual(
+            fld.m2i(None, item),
+            'ipn:1.2'
+        )
+
     def testEncodeNodeid(self):
         fld = EidField('field')
 
@@ -39,7 +57,7 @@ class TestEidField(unittest.TestCase):
             '//node/',
         ]
         self.assertEqual(
-            fld.i2m(None, 'dtn://node'), # normalized
+            fld.i2m(None, 'dtn://node'),  # normalized
             item
         )
 

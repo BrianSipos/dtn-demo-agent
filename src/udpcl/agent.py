@@ -3,13 +3,14 @@ Implementation of a symmetric UDPCL agent.
 '''
 import copy
 from dataclasses import dataclass, astuple, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import enum
 from typing import Optional, BinaryIO, List, Tuple
 import ipaddress
 import logging
 import os
 from io import BytesIO, BufferedReader
+import secrets
 import socket
 import struct
 import cbor2
@@ -21,8 +22,25 @@ from bp.encoding.fields import DtnTimeField
 
 from udpcl.config import Config, ListenConfig
 
-
 LOGGER = logging.getLogger(__name__)
+
+# Patch socket module
+try:
+    IP_PKTINFO = socket.IP_PKTINFO
+except AttributeError:
+    IP_PKTINFO = 8
+
+IP_MTU_DISCOVER = 10
+IP_PMTUDISC_DONT = 0
+IP_PMTUDISC_WANT = 1
+IP_PMTUDISC_DO = 2  # Always DF
+IP_PMTUDISC_PROBE = 3  # DF and ignore MTU
+
+''' Delay in milliseconds '''
+ECN_NOECT = 0x00
+ECN_ECT1 = 0x01
+ECN_ECT0 = 0x02
+ECN_CE = 0x03
 
 
 @enum.unique
@@ -33,9 +51,9 @@ class ExtensionKey(enum.IntFlag):
     SENDER_LISTEN = 0x03
     SENDER_NODEID = 0x04
     STARTTLS = 0x05
-
-    PMTUD_PROBE = -1
-    PMTUD_ACK = -2
+    PEER_PROBE = 0x06
+    PEER_CONFIRM = 0x07
+    ECN_COUNTS = 0x08
 
 
 @dataclass
@@ -43,23 +61,28 @@ class BundleItem(object):
     ''' State for RX and TX full bundles.
     '''
 
-    #: The remote address
+    # The remote address
     address: str
-    #: The remote port
+    # The remote port
     port: int
-    #: Binary file to store in
+    # Binary file to store in
     file: BinaryIO
-    #: Optional source address
+
+    local_if: Optional[int] = None
+    ''' Optional local interface index '''
+    # Optional source address
     local_address: Optional[str] = None
-    #: Optional source port
+    # Optional source port
     local_port: Optional[int] = None
-    #: The unique transfer ID number.
+    # The unique transfer ID number.
     transfer_id: Optional[int] = None
-    #: Size of the bundle data
+    # Size of the bundle data
     total_length: Optional[int] = None
 
-    #: Additional three-tuple of :py:meth:`socket.setsockopt` parameters
+    ip_tos: int = 0
+    ''' The whole TOS (DSCP + ECN bits) '''
     sock_opts: List[Tuple] = field(default_factory=list)
+    ''' Additional three-tuple of :py:meth:`socket.setsockopt` parameters '''
 
 
 @dataclass
@@ -67,19 +90,19 @@ class Transfer(object):
     ''' State for fragmented transfers.
     '''
 
-    #: The remote address
+    # The remote address
     address: str
-    #: The remote port
+    # The remote port
     port: int
-    #: Transfer ID
+    # Transfer ID
     xfer_id: int
-    #: Total transfer size
+    # Total transfer size
     total_length: int
     # Range of full data expected
     total_valid: Optional[portion.Interval] = None
-    #: Range of real data present
+    # Range of real data present
     valid: Optional[portion.Interval] = None
-    #: Accumulated byte string
+    # Accumulated byte string
     data: Optional[bytearray] = None
 
     @property
@@ -92,11 +115,13 @@ class Transfer(object):
         if other.total_length != self.total_length:
             raise ValueError('Mismatched total length')
 
+
 class AddressObject:
     ''' Interpret a text address as an `ipaddress` object.
 
     :param text: The input to convert.
     '''
+
     def __init__(self, text: Optional[str], proto=socket.IPPROTO_UDP):
         self.family = None
         self.ipaddr = None
@@ -115,20 +140,23 @@ class AddressObject:
         self.family = socket.AF_INET if ipaddr.version == 4 else socket.AF_INET6
         self.ipaddr = ipaddr
 
+
 @dataclass
 class Conversation:
     ''' Bookkeep parameters of a UDP conversation
     which is address-and-port for each side.
     '''
-    #: Address family
+    # Address family
     family: Optional[int] = None
-    #: The remote address
+    # The remote address
     peer_address: Optional[ipaddress._BaseAddress] = None
-    #: The remote port
+    # The remote port
     peer_port: Optional[int] = None
-    #: The local address
+    local_if: Optional[int] = None
+    ''' Local interface index '''
+    # The local address
     local_address: Optional[ipaddress._BaseAddress] = None
-    #: The local port
+    # The local port
     local_port: Optional[int] = None
 
     @staticmethod
@@ -169,9 +197,27 @@ class Conversation:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
         if self.local_address or self.local_port:
-            address = str(self.local_address) if self.local_address else ''
-            port = self.local_port or 0
-            sock.bind((address, port))
+            if self.family == socket.AF_INET:
+                sockaddr = (
+                    str(self.local_address) if self.local_address else '0.0.0.0',
+                    self.local_port or 0,
+                )
+            elif self.family == socket.AF_INET6:
+                sockaddr = (
+                    str(self.local_address) if self.local_address else '::',
+                    self.local_port or 0,
+                    0,
+                    self.local_if or 0,
+                )
+            LOGGER.debug('make_local_socket bind to %s', sockaddr)
+            sock.bind(sockaddr)
+
+        if self.family == socket.AF_INET:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_RECVTOS, 1)
+            sock.setsockopt(socket.IPPROTO_IP, IP_PKTINFO, 1)
+        elif self.family == socket.AF_INET6:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_RECVTCLASS, 1)
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_RECVPKTINFO, 1)
 
         return sock
 
@@ -185,6 +231,44 @@ class Conversation:
             return (str(self.peer_address), self.peer_port, 0, 0)
         else:
             raise RuntimeError('get_peer_addr without valid peer_address')
+
+
+@dataclass
+class EcnCounts:
+    ''' Count of ECN codepoints from a peer address. '''
+    ect0: int = 0
+    ect1: int = 0
+    ce: int = 0
+
+
+def range_encode(intvls:portion.Interval) -> List[int]:
+    pairs = []
+    seen_last = 0
+    for intvl in intvls:
+        pairs += [intvl.lower - seen_last, intvl.upper - intvl.lower]
+        seen_last = intvl.upper
+    return pairs
+
+
+def range_decode(pairs:List[int]) -> portion.Interval:
+    intvls = portion.empty()
+
+    int_iter = iter(pairs)
+    seen_last = 0
+    while True:
+        try:
+            offset = next(int_iter)
+            length = next(int_iter)
+        except StopIteration:
+            break
+
+        low = seen_last + offset
+        high = low + length
+
+        seen_last = high
+        intvls |= portion.closedopen(low, high)
+
+    return intvls
 
 
 class Agent(dbus.service.Object):
@@ -205,7 +289,7 @@ class Agent(dbus.service.Object):
         self._on_stop = None
 
         self._bindsocks = {}
-        #: Map from socket to glib io-watch ID
+        # Map from socket to glib io-watch ID
         self._listen_plain = {}
         # Existing sockets, map from `Conversation.key` to `socket.socket`
         self._plain_sock = {}
@@ -216,13 +300,16 @@ class Agent(dbus.service.Object):
 
         self._tx_id = 0
         self._tx_queue = []
-        #: map from transfer ID to :py:cls:`Transfer`
+        # map from transfer ID to :py:cls:`Transfer`
         self._rx_fragments = {}
         self._rx_id = 0
         self._rx_queue = {}
 
         self._pmtud_recv = {}
         self._pmtud_send = {}
+
+        # Map from sending peer address to EcnCounts
+        self._ecn_state = {}
 
         if bus_kwargs is None:
             bus_kwargs = dict(
@@ -310,7 +397,7 @@ class Agent(dbus.service.Object):
 
             if conv.family == socket.AF_INET:
                 self.__logger.info('Listening for multicast %s', addr)
-                #mreq = struct.pack("=4sl", socket.inet_aton(addr), socket.INADDR_ANY)
+                # mreq = struct.pack("=4sl", socket.inet_aton(addr), socket.INADDR_ANY)
                 mreq = (
                     socket.inet_pton(socket.AF_INET, addr)
                     +socket.inet_pton(socket.AF_INET, '0.0.0.0')
@@ -318,8 +405,8 @@ class Agent(dbus.service.Object):
                 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
             else:
-                iface = item['iface']
-                iface_ix = socket.if_nametoindex(iface)
+                iface = item.get('iface')
+                iface_ix = socket.if_nametoindex(iface) if iface else 0
                 self.__logger.info('Listening for multicast %s on %s (%s)', addr, iface, iface_ix)
                 mreq = (
                     socket.inet_pton(socket.AF_INET6, addr)
@@ -382,6 +469,13 @@ class Agent(dbus.service.Object):
         self._add_tx_item(item, is_transfer=False)
         return repeat
 
+    def _get_tos(self, is_data:bool) -> int:
+        ''' Get the TOS byte for IP headers '''
+        if self._config.ecn_init:
+            return ECN_ECT0
+        else:
+            return ECN_NOECT
+
     @dbus.service.method(DBUS_IFACE, in_signature='sqi')
     def pmtud_start(self, address, port, stepcount):
         addrobj = AddressObject(address)
@@ -396,50 +490,70 @@ class Agent(dbus.service.Object):
         max_plpmtu = min(2 * base_plpmtu, 2 ** 16 - 1) - txp_overhead
 
         pkt_step = max(1, (max_plpmtu - min_plpmtu) // stepcount)
-        self.__logger.debug('Sending PMTUD probes to %s', address)
-        for pkt_size in range(base_plpmtu, max_plpmtu, pkt_step):
+        nonce = secrets.randbits(32)
+        confirm_delay = timedelta(milliseconds=1000)
+        self.__logger.debug('Sending PMTUD probes to %s for %s:%s', address, nonce, stepcount)
+
+        size_map = {
+            seq_no: pkt_size for seq_no, pkt_size
+            in enumerate(range(base_plpmtu, max_plpmtu, pkt_step))
+        }
+
+        state = {
+            'seq_nos': size_map,
+        }
+        self._pmtud_send[nonce] = state
+
+        for seq_no, pkt_size in size_map.items():
             msg = cbor2.dumps({
-                ExtensionKey.PMTUD_PROBE: [0, pkt_size, 1000],
+                ExtensionKey.PEER_PROBE: [
+                    nonce,
+                    seq_no,
+                    confirm_delay // timedelta(milliseconds=1)
+                ],
             })
             # Pad out the packet
             data = msg + b'\0' * (pkt_size - len(msg))
 
-            IP_MTU_DISCOVER = 10
-            IP_PMTUDISC_DO = 2  # Always DF
             item = BundleItem(
                 address=address,
                 port=port,
+                ip_tos=self._get_tos(is_data=True),
                 file=BytesIO(data),
-                sock_opts=[(socket.SOL_IP, IP_MTU_DISCOVER, IP_PMTUDISC_DO)],
+                sock_opts=[(socket.IPPROTO_IP, IP_MTU_DISCOVER, IP_PMTUDISC_PROBE)],
             )
             self._add_tx_item(item, is_transfer=False)
 
     def _pmtud_recv_probe(self, conv:Conversation, ext):
+        (nonce, seq_no, confirm_delay) = ext
+        self.__logger.debug('Received PMTUD probe %s:%s from %s', nonce, seq_no, conv.peer_address)
+
         state = self._pmtud_recv.get(conv.key)
         if state is None:
             state = {
                 'timer': None,
-                'pids': list(),
+                'seq_nos': portion.empty(),
             }
             self._pmtud_recv[conv.key] = state
-
-        (_seq, pid, timeout) = ext
-        self.__logger.debug('Received PMTUD probe %s from %s', pid, conv.peer_address)
 
         # Cancel any earlier timer and queue the next timeout
         if state['timer'] is not None:
             glib.source_remove(state['timer'])
 
-        state['pids'].append(pid)
-        state['timer'] = glib.timeout_add(timeout, self._pmtud_send_ack, conv)
+        state['nonce'] = nonce
+        state['seq_nos'] |= portion.closedopen(seq_no, seq_no + 1)
+        state['timer'] = glib.timeout_add(confirm_delay, self._pmtud_send_confirm, conv)
 
-    def _pmtud_send_ack(self, conv:Conversation):
-        pids = self._pmtud_recv[conv.key]['pids']
+    def _pmtud_send_confirm(self, conv:Conversation):
+        state = self._pmtud_recv[conv.key]
         del self._pmtud_recv[conv.key]
+        nonce = state['nonce']
+        seq_nos = state['seq_nos']
 
-        self.__logger.debug('Sending PMTUD ack %s to %s', pids, conv.peer_address)
+        self.__logger.debug('Sending PMTUD ack %s:%s to %s', nonce, seq_nos, conv.peer_address)
+        seen_offsets = range_encode(seq_nos)
         msg = cbor2.dumps({
-            ExtensionKey.PMTUD_ACK: [0, pids],
+            ExtensionKey.PEER_CONFIRM: [nonce, seen_offsets],
         })
 
         item = BundleItem(
@@ -449,16 +563,114 @@ class Agent(dbus.service.Object):
         )
         self._add_tx_item(item, is_transfer=False)
 
-    def _pmtud_recv_ack(self, conv:Conversation, ext):
-        pass
+    def _pmtud_recv_confirm(self, conv:Conversation, ext):
+        (nonce, seen_offsets) = ext
+
+        state = self._pmtud_send.get(nonce)
+        if state is None:
+            return
+        del self._pmtud_send[nonce]
+
+        seq_nos = range_decode(seen_offsets)
+        seen_sizes = [
+            state['seq_nos'][seq_no]
+            for seq_no in portion.iterate(seq_nos, step=1)
+        ]
+        self.__logger.debug('Received PMTUD ack %s:%s to %s for sizes %s',
+                            nonce, seq_nos, conv.peer_address, seen_sizes)
+
+    def _ecn_recvfrom(self, conv:Conversation, ip_ecn:int):
+        # aggregate of all packets from the same peer, regardless of destination
+        ecn_key = (conv.peer_address, conv.peer_port)
+
+        if ecn_key not in self._ecn_state:
+            self.__logger.debug('Received ECN marking 0x%02x in new conversation %s', ip_ecn, conv)
+            counts = EcnCounts()
+            state = {
+                'counts': counts,
+                'timer': None,
+                'last': None,
+            }
+            self._ecn_state[ecn_key] = state
+        else:
+            state = self._ecn_state[ecn_key]
+            counts = state['counts']
+
+        if ip_ecn == ECN_ECT0:
+            counts.ect0 += 1
+        elif ip_ecn == ECN_ECT1:
+            counts.ect1 += 1
+        elif ip_ecn == ECN_CE:
+            counts.ce += 1
+
+        if state['timer'] is not None:
+            glib.source_remove(state['timer'])
+        delay = self._config.ecn_feedback_delay // timedelta(milliseconds=1)
+        state['timer'] = glib.timeout_add(delay, self._ecn_sendto, ecn_key)
+
+        if state['last'] is not None:
+            diff = state['last'] - datetime.now(timezone.utc)
+            if diff > self._config.ecn_feedback_delay:
+                self._ecn_sendto(ecn_key)
+
+    def _ecn_sendto(self, ecn_key:Tuple):
+        state = self._ecn_state[ecn_key]
+        counts = state['counts']
+
+        msg = cbor2.dumps({
+            ExtensionKey.ECN_COUNTS: [counts.ect0, counts.ect1, counts.ce],
+        })
+
+        item = BundleItem(
+            address=str(ecn_key[0]),
+            port=ecn_key[1],
+            file=BytesIO(msg),
+        )
+        self._add_tx_item(item, is_transfer=False)
 
     def _sock_recvfrom(self, sock, *_args, **_kwargs):
         ''' Callback to handle incoming datagrams.
 
         :return: True to continue listening.
         '''
-        data, fromaddr = sock.recvfrom(64 * 1024)
+        datalen = 64 * 1024
+        anclen = 0
+        if sock.family == socket.AF_INET:
+            anclen += (
+                # space for TOS `int`
+                socket.CMSG_SPACE(struct.calcsize('@I'))
+                # space for PKTINFO `in_pktinfo`
+                +socket.CMSG_SPACE(struct.calcsize('@I') + 4 + 4)
+            )
+        elif sock.family == socket.AF_INET6:
+            anclen += (
+                # space for TCLASS `int`
+                socket.CMSG_SPACE(struct.calcsize('@I'))
+                # space for PKTINFO `struct in6_pktinfo`
+                +socket.CMSG_SPACE(16 + struct.calcsize('@I'))
+            )
+        data, ancdata, _msg_flags, fromaddr = sock.recvmsg(datalen, anclen)
         localaddr = sock.getsockname()
+
+        self.__logger.debug('With ancdata %s', ancdata)
+        dst_addr = None
+        ip_tos = 0
+        for (cmsg_level, cmsg_type, cmsg_data) in ancdata:
+            key = (cmsg_level, cmsg_type)
+            if key == (socket.IPPROTO_IP, socket.IP_TOS):
+                ip_tos = cmsg_data[0]
+                self.__logger.debug('ancdata TOS 0x%02x', ip_tos)
+            elif key == (socket.IPPROTO_IP, IP_PKTINFO):
+                (iface_ix, _, dst_addr) = struct.unpack('@I4s4s', cmsg_data)
+                dst_addr = ipaddress.IPv4Address(dst_addr)
+                self.__logger.debug('ancdata in_pktinfo %s %s', dst_addr, iface_ix)
+            elif key == (socket.IPPROTO_IPV6, socket.IPV6_TCLASS):
+                (ip_tos,) = struct.unpack('@I', cmsg_data)
+                self.__logger.debug('ancdata TCLASS 0x%02x', ip_tos)
+            elif key == (socket.IPPROTO_IPV6, socket.IPV6_PKTINFO):
+                (dst_addr, iface_ix) = struct.unpack('@16sI', cmsg_data)
+                dst_addr = ipaddress.IPv6Address(dst_addr)
+                self.__logger.debug('ancdata in6_pktinfo %s %s', dst_addr, iface_ix)
 
         peer_addrobj = AddressObject(fromaddr[0])
         local_addrobj = AddressObject(localaddr[0])
@@ -466,7 +678,7 @@ class Agent(dbus.service.Object):
             family=peer_addrobj.family,
             peer_address=peer_addrobj.ipaddr,
             peer_port=fromaddr[1],
-            local_address=local_addrobj.ipaddr,
+            local_address=(dst_addr or local_addrobj.ipaddr),
             local_port=localaddr[1]
         )
         if conv.key in self._dtls_prep or conv.key in self._dtls_sess:
@@ -474,10 +686,14 @@ class Agent(dbus.service.Object):
                                 len(data))
             return True
 
+        ip_ecn = ip_tos & 0x03
+        if ip_ecn and self._config.ecn_feedback:
+            self._ecn_recvfrom(conv, ip_ecn)
+
         self.__logger.info('Received %d octets via plain on %s',
                            len(data), conv)
         self._plain_sock[conv.key] = sock
-        self._recv_datagram(sock, data, conv)
+        self._recv_datagram(sock, data, conv, ip_tos)
         return True
 
     def _starttls(self, sock, conv:Conversation, server_side:bool):
@@ -520,7 +736,7 @@ class Agent(dbus.service.Object):
         self._recv_datagram(None, data, conv)
         return True
 
-    def _recv_datagram(self, sock, data:bytes, conv:Conversation):
+    def _recv_datagram(self, sock, data:bytes, conv:Conversation, ip_tos:int=0):
         DTLS_FIRST_OCTETS = (
             20,  # change_cipher_spec
             21,  # alert
@@ -576,6 +792,7 @@ class Agent(dbus.service.Object):
                     BundleItem(
                         address=str(conv.peer_address),
                         port=conv.peer_port,
+                        ip_tos=ip_tos,
                         total_length=len(msg_data),
                         file=BytesIO(msg_data)
                     )
@@ -659,10 +876,10 @@ class Agent(dbus.service.Object):
                     )
                 )
 
-        if ExtensionKey.PMTUD_PROBE in extmap:
-            self._pmtud_recv_probe(conv, extmap[ExtensionKey.PMTUD_PROBE])
-        if ExtensionKey.PMTUD_ACK in extmap:
-            self._pmtud_recv_ack(conv, extmap[ExtensionKey.PMTUD_ACK])
+        if ExtensionKey.PEER_PROBE in extmap:
+            self._pmtud_recv_probe(conv, extmap[ExtensionKey.PEER_PROBE])
+        if ExtensionKey.PEER_CONFIRM in extmap:
+            self._pmtud_recv_confirm(conv, extmap[ExtensionKey.PEER_CONFIRM])
 
     def _add_rx_item(self, item:BundleItem):
         ''' Add a recevied bundle.
@@ -721,8 +938,10 @@ class Agent(dbus.service.Object):
         item = BundleItem(
             address=str(tx_params['address']),
             port=int(tx_params.get('port', 4556)),
+            local_if=(int(tx_params['local_if']) if 'local_if' in tx_params else None),
             local_address=(str(tx_params['local_address']) if 'local_address' in tx_params else None),
             local_port=(int(tx_params['local_port']) if 'local_port' in tx_params else None),
+            ip_tos=self._get_tos(is_data=True),
             file=file
         )
         return str(self._add_tx_item(item))
@@ -828,6 +1047,7 @@ class Agent(dbus.service.Object):
             family=peer_addrobj.family,
             peer_address=peer_addrobj.ipaddr,
             peer_port=item.port,
+            local_if=item.local_if,
             local_address=local_addrobj.ipaddr,
             local_port=(item.local_port or self._config.default_tx_port)
         )
@@ -843,13 +1063,23 @@ class Agent(dbus.service.Object):
         if sock not in self._listen_plain:
             self._listen_plain[sock] = glib.io_add_watch(sock, glib.IO_IN, self._sock_recvfrom)
 
+        ancdata = []
+
+        # Direct socket options
         for opt in item.sock_opts:
             sock.setsockopt(*opt)
+
+        if conv.family == socket.AF_INET:
+            ancdata.append((socket.IPPROTO_IP, socket.IP_TOS, struct.pack('@I', item.ip_tos)))
+        elif conv.family == socket.AF_INET6:
+            ancdata.append((socket.IPPROTO_IPV6, socket.IPV6_TCLASS, struct.pack('@I', item.ip_tos)))
 
         def simplesender(data):
             ''' Send to a single destination
             '''
-            sock.sendto(data, conv.get_peer_addr())
+            sockaddr = conv.get_peer_addr()
+            self.__logger.debug('With ancdata %s', ancdata)
+            sock.sendmsg([data], ancdata, 0, sockaddr)
 
         if conv.peer_address.is_multicast:
             multicast = self._config.multicast

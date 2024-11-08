@@ -21,17 +21,17 @@ class Reassembly(object):
     ''' State for fragmented bundles.
     '''
 
-    #: The reassembled bundle ident
+    # The reassembled bundle ident
     ident: Tuple
-    #: Total transfer size
+    # Total transfer size
     total_length: int
-    #: The full first-fragment bundle
+    # The full first-fragment bundle
     first_frag: Optional[Bundle] = None
     # Range of full data expected
     total_valid: Optional[portion.Interval] = None
-    #: Range of real data present
+    # Range of real data present
     valid: Optional[portion.Interval] = None
-    #: Accumulated byte string
+    # Accumulated byte string
     data: Optional[bytearray] = None
 
 

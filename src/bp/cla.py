@@ -6,7 +6,7 @@ import dbus
 from gi.repository import GLib as glib
 from binascii import unhexlify
 
-#: Dictionary of CL types
+# Dictionary of CL types
 CL_TYPES = {}
 
 
@@ -83,7 +83,7 @@ class UdpclAdaptor(AbstractAdaptor):
     ''' UDP Convergence layer.
     '''
 
-    #: Interface name
+    # Interface name
     DBUS_IFACE = 'org.ietf.dtn.udpcl.Agent'
 
     TAG_ENC = unhexlify('d9d9f7')
@@ -135,7 +135,7 @@ class TcpclAdaptor(AbstractAdaptor):
     ''' TCP Convergence layer.
     '''
 
-    #: Interface name
+    # Interface name
     DBUS_IFACE = 'org.ietf.dtn.tcpcl.Agent'
 
     def __init__(self):
@@ -250,7 +250,7 @@ class TcpclConnection(object):
     :ivar conn_obj: The bus proxy object when it is valid.
     '''
 
-    #: Interface name
+    # Interface name
     DBUS_IFACE = 'org.ietf.dtn.tcpcl.Contact'
 
     def __init__(self):
