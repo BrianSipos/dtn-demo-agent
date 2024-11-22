@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from pycose.messages import CoseMessage, Sign1Message
 from pycose import algorithms, headers
-from pycose.keys import curves, keyparam, EC2Key, RSAKey
+from pycose.keys import curves, keyparam, EC2Key, RSAKey, CoseKey
 from pycose.exceptions import CoseUnsupportedCurve
 from pycose.extensions.x509 import X5T, X5Chain
 from pycose.algorithms import CoseAlgorithm
@@ -31,8 +31,8 @@ from bp.app.base import app, AbstractApplication
 
 LOGGER = logging.getLogger(__name__)
 
-# Dummy context ID value
-BPSEC_COSE_CONTEXT_ID = 99
+# IANA allocated context ID
+BPSEC_COSE_CONTEXT_ID = 3
 
 # id-on-bundleEID
 OID_ON_EID = x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.8.11')
@@ -705,7 +705,8 @@ class Bpsec(AbstractApplication):
 
         if failure:
             LOGGER.warning('Deleting bundle with BIB failure codes %s', failure)
-            del ctr.actions['deliver']
+            if 'deliver' in ctr.actions:
+                del ctr.actions['deliver']
             ctr.record_action('delete', max(failure))
             return True
 

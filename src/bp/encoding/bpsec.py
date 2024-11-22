@@ -30,7 +30,7 @@ class TargetResultList(CborArray):
 
 
 class AbstractSecurityBlock(CborSequence):
-    ''' Block data from 'draft-ietf-dtn-bpsec-22' Section 3.6.
+    ''' Block data from Section 3.6 of RFC 9172.
     '''
 
     @enum.unique
@@ -62,11 +62,11 @@ class AbstractSecurityBlock(CborSequence):
 
 @CanonicalBlock.bind_type(11)
 class BlockIntegrityBlock(AbstractSecurityBlock):
-    ''' Block data from 'draft-ietf-dtn-bpsec-22'
+    ''' Block data from RFC 9172
     '''
 
 
 @CanonicalBlock.bind_type(12)
 class BlockConfidentalityBlock(AbstractSecurityBlock):
-    ''' Block data from 'draft-ietf-dtn-bpsec-22'
+    ''' Block data from RFC 9172
     '''

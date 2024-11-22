@@ -59,6 +59,10 @@ docs = [
   "sphinx_rtd_theme",
   "sphinx-argparse",
 ]
+container = [
+  "asn1",
+  "cryptography >=0.9",
+]
 
 [tool.pylint.MAIN]
 load-plugins="pylint_junit"

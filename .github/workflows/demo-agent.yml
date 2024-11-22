@@ -4,7 +4,6 @@ on: [push]
 
 jobs:
   build:
-
     runs-on: ubuntu-22.04
     strategy:
       max-parallel: 4
@@ -12,30 +11,52 @@ jobs:
         python-version: ["3.8", "3.10"]
 
     steps:
-    - uses: actions/checkout@v3
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install
-      run: |
-        sudo apt-get update && sudo apt-get install build-essential dbus libdbus-glib-1-dev libgirepository1.0-dev python3-pip python3-wheel
-        python -m pip install --upgrade pip
-        # custom cose repo
-        pip3 install git+https://github.com/TimothyClaeys/pycose.git@v1.0.1
-        pip3 install -e .
-    - name: Lint with flake8
-      run: |
-        pip3 install flake8
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    - name: Test with pytest
-      run: |
-        pip3 install -e '.[test]'
-        dbus-run-session -- python3 -m pytest -v --cov=scapy_cbor --cov=bp --cov=udpcl --cov=tcpcl src
-    - name: Transfer udpcl
-      run: dbus-run-session -- python3 -m udpcl.test.bundlegen --log=debug fullvalid
-    - name: Transfer tcpcl
-      run: dbus-run-session -- python3 -m tcpcl.test.bundlegen --log=debug fullvalid
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            build-essential dbus libdbus-glib-1-dev libgirepository1.0-dev \
+            python3-pip python3-wheel
+          python -m pip install --upgrade pip
+          # custom cose repo
+          pip3 install git+https://github.com/TimothyClaeys/pycose.git@v1.0.1
+      - name: Install
+        run: pip3 install -e .
+      - name: Lint with flake8
+        run: |
+          pip3 install flake8
+          # stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      - name: Test with pytest
+        run: |
+          pip3 install -e '.[test]'
+          dbus-run-session -- python3 -m pytest -v --cov=scapy_cbor --cov=bp --cov=udpcl --cov=tcpcl src
+      - name: Transfer udpcl
+        run: dbus-run-session -- python3 -m udpcl.test.bundlegen --log=debug fullvalid
+      - name: Transfer tcpcl
+        run: dbus-run-session -- python3 -m tcpcl.test.bundlegen --log=debug fullvalid
+
+  integration-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            python3-pip python3-wheel
+          python -m pip install --upgrade pip
+          pip3 install '.[container]'
+      - name: Prep
+        run: ./container/run.py --config container/example.yaml prep
+      - name: Start
+        run: ./container/run.py --config container/example.yaml start
+      - name: Check
+        run: ./container/run.py --config container/example.yaml check
+      - name: Check
+        run: ./container/run.py --config container/example.yaml stop

@@ -7,13 +7,13 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 import asn1
 import datetime
-import jinja2
 import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 import yaml
 
 LOGGER = logging.getLogger()
@@ -34,7 +34,7 @@ def generate_key(key_opts):
 
 
 class Runner:
-    ACTIONS = ['prep', 'start', 'stop', 'delete']
+    ACTIONS = ['prep', 'start', 'check', 'stop', 'delete']
 
     def __init__(self, args):
         self.args = args
@@ -45,13 +45,15 @@ class Runner:
 
     def runcmd(self, parts, **kwargs):
         LOGGER.info('Running command %s', ' '.join(f'"{part}"' for part in parts))
-        subprocess.check_call(parts, **kwargs)
+        kwargs['check'] = True
+        return subprocess.run(parts, **kwargs)
 
-    def run_docker(self, args):
+    def run_docker(self, args, **kwargs):
         env = {
             'DOCKER_BUILDKIT': '1',
         }
-        self.runcmd(self._docker + args, env=env)
+        kwargs['env'] = env
+        return self.runcmd(self._docker + args, **kwargs)
 
     def action(self, act):
         if act == 'prep':
@@ -347,6 +349,19 @@ class Runner:
         elif act == 'start':
             for node_name in self._config['nodes'].keys():
                 self.run_docker(['container', 'start', node_name])
+
+        elif act == 'check':
+            while True:
+                least = None
+                for node_name in self._config['nodes'].keys():
+                    comp = self.run_docker(['exec', node_name, 'journalctl', '--unit=dtn-bp-agent@node'], capture_output=True, text=True)
+                    got = comp.stdout.count('Verified BIB target block num 1')
+                    if least is None or got < least:
+                        least = got
+                LOGGER.info('Least number of verified BIBs: %s', least)
+                if least >= 4:
+                    break
+                time.sleep(3)
 
         elif act == 'stop':
             self.run_docker(
