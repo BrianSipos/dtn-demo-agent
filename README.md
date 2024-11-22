@@ -103,6 +103,11 @@ To observe the log of one of the nodes:
 docker container exec -it node003 journalctl -f
 ```
 
+To capture traffic across container networks, run similar to:
+```
+wireshark -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -Y 'bpv7' -k
+```
+
 To call DBus methods in one of the nodes:
 ```
 docker container exec -it node003 dbus-send --system --print-reply --dest=org.ietf.dtn.node.udpcl /org/ietf/dtn/udpcl/Agent org.ietf.dtn.udpcl.Agent.pmtud_start string:node002. uint16:4556
