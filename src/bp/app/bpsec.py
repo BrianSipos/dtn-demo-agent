@@ -31,8 +31,8 @@ from bp.app.base import app, AbstractApplication
 
 LOGGER = logging.getLogger(__name__)
 
-# Dummy context ID value
-BPSEC_COSE_CONTEXT_ID = 99
+# IANA allocated context ID
+BPSEC_COSE_CONTEXT_ID = 3
 
 # id-on-bundleEID
 OID_ON_EID = x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.8.11')
