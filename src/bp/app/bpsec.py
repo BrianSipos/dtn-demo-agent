@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from pycose.messages import CoseMessage, Sign1Message
 from pycose import algorithms, headers
-from pycose.keys import curves, keyparam, EC2Key, RSAKey
+from pycose.keys import curves, keyparam, EC2Key, RSAKey, CoseKey
 from pycose.exceptions import CoseUnsupportedCurve
 from pycose.extensions.x509 import X5T, X5Chain
 from pycose.algorithms import CoseAlgorithm
@@ -705,7 +705,8 @@ class Bpsec(AbstractApplication):
 
         if failure:
             LOGGER.warning('Deleting bundle with BIB failure codes %s', failure)
-            del ctr.actions['deliver']
+            if 'deliver' in ctr.actions:
+                del ctr.actions['deliver']
             ctr.record_action('delete', max(failure))
             return True
 

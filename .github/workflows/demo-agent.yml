@@ -4,7 +4,6 @@ on: [push]
 
 jobs:
   build:
-
     runs-on: ubuntu-22.04
     strategy:
       max-parallel: 4
@@ -12,7 +11,7 @@ jobs:
         python-version: ["3.8", "3.10"]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
@@ -39,3 +38,23 @@ jobs:
       run: dbus-run-session -- python3 -m udpcl.test.bundlegen --log=debug fullvalid
     - name: Transfer tcpcl
       run: dbus-run-session -- python3 -m tcpcl.test.bundlegen --log=debug fullvalid
+
+  integration-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prep
+        run: ./container/run.py --config container/example.yaml prep
+      - name: Start
+        run: ./container/run.py --config container/example.yaml start
+      - name: Record traffic
+        run: tshark -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -w build/capture.pcap &
+      - name: Check
+        run: ./container/run.py --config container/example.yaml check
+      - name: Check
+        run: ./container/run.py --config container/example.yaml stop
+      - name: Archive coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-capture
+          path: build/capture.pcap

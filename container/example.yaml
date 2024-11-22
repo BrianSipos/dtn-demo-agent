@@ -32,19 +32,3 @@ nodes:
           nmp:
              enable: true
        tls_enable: true
-
-  node003:
-    nets: [dtnB]
-    config:
-       tls_enable: true
-       bp_tx_routes:
-        - eid_pattern: "dtn://node001/.*"
-          next_nodeid: "dtn://node001/"
-          cl_type: tcpcl
-          address: node001.local
-       udpcl_listen: false
-       udpcl_polling:
-        - address: node001.local
-          interval_ms: 10000
-#        - address: node002.
-#          interval_ms: 10000
