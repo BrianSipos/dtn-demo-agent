@@ -7,7 +7,6 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 import asn1
 import datetime
-import jinja2
 import logging
 import os
 import re
