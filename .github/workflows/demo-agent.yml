@@ -19,8 +19,8 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y \
-	    build-essential dbus libdbus-glib-1-dev libgirepository1.0-dev \
-	    python3-pip python3-wheel
+            build-essential dbus libdbus-glib-1-dev libgirepository1.0-dev \
+            python3-pip python3-wheel
           python -m pip install --upgrade pip
           # custom cose repo
           pip3 install git+https://github.com/TimothyClaeys/pycose.git@v1.0.1
