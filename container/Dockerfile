@@ -32,6 +32,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --upgrade pip && \
     pip3 install pip-tools maturin
 
+# Work-around python3-dtls requiring openssl-1.1 but not available on 22.04
+RUN --mount=type=cache,target=/var/cache/apt apt-get update && \
+    apt-get install -yq curl && \
+    curl -svLO http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.23_amd64.deb && \
+    dpkg -i libssl1.1_*_amd64.deb && \
+    apt-get -fy install && \
+    rm libssl1.1_*_amd64.deb
+
 COPY pyproject.toml /root/agent/
 #RUN --mount=type=cache,target=/root/.cache/pip \
 #    cd /root/agent && \

@@ -391,6 +391,9 @@ class Agent(dbus.service.Object):
         sock = conv.make_local_socket()
         self.__logger.info('Listening on %s:%d', conv.local_address, conv.local_port)
 
+        if conv.family == socket.AF_INET:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_RECVTOS, 1)
+
         multicast_member = opts.get('multicast_member', [])
         for item in multicast_member:
             addr = str(item['addr'])
@@ -692,6 +695,9 @@ class Agent(dbus.service.Object):
 
         self.__logger.info('Received %d octets via plain on %s',
                            len(data), conv)
+        for cmsg_level, cmsg_type, cmsg_data in ancdata:
+            if (cmsg_level, cmsg_type) == (socket.IPPROTO_IP, socket.IP_TOS):
+                self.__logger.info('With TOS field %02x', cmsg_data[0])
         self._plain_sock[conv.key] = sock
         self._recv_datagram(sock, data, conv, ip_tos)
         return True
