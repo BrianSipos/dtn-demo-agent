@@ -263,11 +263,11 @@ class Runner:
                 bp_rx_routes = extconfig.get('bp_rx_routes', [])
                 bp_rx_routes += [
                     {
-                        'eid_pattern': r'dtn://{{node_name}}/.*',
+                        'eid_pattern': f'dtn://{node_name}/.*',
                         'action': 'deliver',
                     },
                     {
-                        'eid_pattern': '".*"',
+                        'eid_pattern': '.*',
                         'action': 'forward',
                     },
                 ]

@@ -8,7 +8,7 @@ version = "0.0.0"
 authors = [
   { name="Brian Sipos", email="brian.sipos+ietf@gmail.com" },
 ]
-description = "A demonstration agent for the DTN BPv7/TCPCLv4/UDPCL"
+description = "A demonstration agent for the DTN BPv7/TCPCLv4/UDPCLv2"
 readme = "README.md"
 license = { text="LGPL-3" }
 requires-python = ">=3.7"
@@ -29,7 +29,6 @@ dependencies = [
   "cryptography >=0.9",
   "certvalidator",
   "dbus-python",
-  "lakers-python",
   "portion >=2.1",
   "psutil",
   "PyGObject >=3.34", # glib integration
@@ -37,6 +36,7 @@ dependencies = [
   "python3-dtls",
   "scapy >=2.4,<2.4.5",
   "six",
+  "zeroconf",
 ]
 
 [project.optional-dependencies]

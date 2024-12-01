@@ -1,4 +1,4 @@
-''' Application layer adaptors.
+''' Prototype of Secure Advertisement and Neighborhood Discovery (SAND).
 '''
 import cbor2
 from dataclasses import dataclass, field, fields

@@ -173,6 +173,12 @@ class Agent(dbus.service.Object):
                 # wait for graceful shutdown
                 eloop.run()
 
+    def add_tx_route(self, item:TxRouteItem):
+        self._config.tx_route_table.append(item)
+
+    def get_cla(self, name:str) -> bp.cla.AbstractAdaptor:
+        return self._cl_agent[name]
+
     def _bus_name_changed(self, servname, old_owner, new_owner):
         for cl_agent in self._cl_agent.values():
             if cl_agent.serv_name == servname:
@@ -350,6 +356,7 @@ class Agent(dbus.service.Object):
             ctr.record_action('forward')
         except Exception as err:
             self._logger.error('Failed to forward bundle %s: %s', ctr.log_name(), err)
+            self._logger.debug('%s', traceback.format_exc())
             ctr.record_action('delete', StatusReport.ReasonCode.NO_ROUTE)
 
         self._finish_bundle(ctr)
@@ -435,7 +442,7 @@ class Agent(dbus.service.Object):
         except KeyError:
             raise ValueError('Invalid cltype: {}'.format(cltype))
 
-        agent = cls()
+        agent = cls(agent=self)
         agent.serv_name = servname
         agent.peer_node_seen = self._cl_peer_node_seen(cltype)
         agent.recv_bundle_finish = self._cl_recv_bundle_finish(cltype)

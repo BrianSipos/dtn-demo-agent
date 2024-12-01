@@ -5,6 +5,8 @@ import logging
 import dbus
 from gi.repository import GLib as glib
 from binascii import unhexlify
+import re
+from bp.config import TxRouteItem
 
 # Dictionary of CL types
 CL_TYPES = {}
@@ -27,8 +29,9 @@ class AbstractAdaptor(ABC):
     :ivar agent_obj: The bus proxy object when it is valid.
     '''
 
-    def __init__(self):
+    def __init__(self, agent):
         self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
+        self._agent = agent
 
         self.serv_name = None
         self.obj_path = None
@@ -88,8 +91,8 @@ class UdpclAdaptor(AbstractAdaptor):
 
     TAG_ENC = unhexlify('d9d9f7')
 
-    def __init__(self):
-        AbstractAdaptor.__init__(self)
+    def __init__(self, **kwargs):
+        AbstractAdaptor.__init__(self, **kwargs)
         self.obj_path = '/org/ietf/dtn/udpcl/Agent'
 
     def _handle_polling_received(self, dtntime, interval_ms, node_id, address, port):
@@ -138,8 +141,8 @@ class TcpclAdaptor(AbstractAdaptor):
     # Interface name
     DBUS_IFACE = 'org.ietf.dtn.tcpcl.Agent'
 
-    def __init__(self):
-        AbstractAdaptor.__init__(self)
+    def __init__(self, **kwargs):
+        AbstractAdaptor.__init__(self, **kwargs)
         self.obj_path = '/org/ietf/dtn/tcpcl/Agent'
 
         self.conns = set()
@@ -177,7 +180,7 @@ class TcpclAdaptor(AbstractAdaptor):
             data = conn_iface.recv_bundle_pop_data(bid)
             data = dbus.ByteArray(data)
             try:
-                self.recv_bundle_finish(data)
+                self.recv_bundle_finish(data, {})
             except NotImplementedError:
                 pass
 
@@ -192,7 +195,9 @@ class TcpclAdaptor(AbstractAdaptor):
                 cl_conn.sess_params = params
                 self._logger.debug('Session established with %s', cl_conn.nodeid)
                 self._cl_conn_nodeid[cl_conn.nodeid] = cl_conn
-                self._conn_ready(cl_conn)
+                self._conn_ready(cl_conn, cl_conn.nodeid)
+                self._conn_ready(cl_conn, None)
+                self._reverse_route(cl_conn)
 
         conn_iface.connect_to_signal('session_state_changed', handle_state_change)
         state = conn_iface.get_session_state()
@@ -207,37 +212,61 @@ class TcpclAdaptor(AbstractAdaptor):
         if cl_conn.nodeid:
             del self._cl_conn_nodeid[cl_conn.nodeid]
 
-    def _conn_ready(self, cl_conn):
-        ''' Handle a new connection being established.
+    def _conn_ready(self, cl_conn:'TcpclConnection', next_hop:str):
+        ''' Handle a new connection being established and
+        send any pending data for a next-hop.
 
         :param cl_conn: The connection object.
-        :type cl_conn: :py:cls:`TcpclConnection`
+        :param next_hop: The desired next-hop or None
         '''
-        pend_data = self._sess_wait.get(cl_conn.nodeid)
-        if not pend_data:
-            return
-        cl_conn = self._cl_conn_nodeid[cl_conn.nodeid]
+        pend_data = self._sess_wait.get(next_hop, [])
         for data in pend_data:
             cl_conn.send_bundle_data(data)
 
+    def _reverse_route(self, cl_conn):
+        ''' Add reverse route to node on other side of connection.
+        '''
+        route = TxRouteItem(
+            eid_pattern=re.compile(re.escape(cl_conn.nodeid) + r'.*'),
+            next_nodeid=cl_conn.nodeid,  # FIXME needed?
+            cl_type='tcpcl',
+            raw_config=dict(
+                next_nodeid=cl_conn.nodeid,  # allow session lookup
+            ),
+        )
+        self._logger.info('Route item %s', route)
+        self._agent.add_tx_route(route)
+
+    def connect(self, address:str, port:int):
+        ''' Initiate a connection preemptively.
+        '''
+        self._logger.info('Connecting to %s:%d', address, port)
+        self.agent_obj.connect(address, port)
+
     def send_bundle_func(self, tx_params:dict):
-        # Get an active session or create one if needed.
-        next_nodeid = tx_params['next_nodeid']
-        address = tx_params['address']
-        port = tx_params.get('port', 4556)
+        ''' Get an active session or create one if needed.
+        '''
+        next_nodeid = tx_params.get('next_nodeid')
 
         def sender(data):
-            # Either send immeidately or put in TX queue
-            if next_nodeid in self._cl_conn_nodeid:
+            # Either send immediately or put in TX queue
+            if next_nodeid is None and len(self._cl_conn_nodeid) == 1:
+                nodeid, cl_conn = next(iter(self._cl_conn_nodeid.items()))
+                self._logger.info('Existing default session with %s', nodeid)
+                cl_conn.send_bundle_data(data)
+            elif next_nodeid in self._cl_conn_nodeid:
                 self._logger.info('Existing session with %s', next_nodeid)
                 cl_conn = self._cl_conn_nodeid[next_nodeid]
                 cl_conn.send_bundle_data(data)
             else:
+                self._logger.info('Need session with %s', next_nodeid)
                 if next_nodeid not in self._sess_wait:
                     self._sess_wait[next_nodeid] = []
                 self._sess_wait[next_nodeid].append(data)
 
                 if next_nodeid not in self._cl_conn_nodeid:
+                    address = tx_params['address']
+                    port = tx_params.get('port', 4556)
                     self._logger.info('Connecting to %s:%d', address, port)
                     self.agent_obj.connect(address, port)
 
