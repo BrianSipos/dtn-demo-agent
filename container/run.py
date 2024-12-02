@@ -421,7 +421,7 @@ class Runner:
                         'address': '0.0.0.0',
                         'multicast_member': [
                             {
-                                'addr': '224.0.1.186',
+                                'addr': '224.0.1.20',
                             },
                         ],
                     })
@@ -430,9 +430,10 @@ class Runner:
                         'address': '::',
                         'multicast_member': [
                             {
-                                'addr': 'FF05::1:5',
-                                'iface': 'eth0',
-                            },
+                                'addr': 'FF05::114',
+                                'iface': f'{net_name}0',
+                            }
+                            for net_name in node_opts['nets']
                         ],
                     })
 
@@ -522,7 +523,7 @@ class Runner:
         for name, node in self._config['nodes'].items():
             serv_name = 'dtn-bp-agent@node'
 
-            args = [name, 'systemctl', 'is-active', '-q', serv_name]
+            args = ['-T', name, 'systemctl', 'is-active', '-q', serv_name]
             while True:
                 time.sleep(1)
                 try:
@@ -535,12 +536,12 @@ class Runner:
         while True:
             least = None
             for node_name in self._config['nodes'].keys():
-                comp = self._docker.run_exec([node_name, 'journalctl', '--unit=dtn-bp-agent@node'], capture_output=True, text=True)
+                comp = self._docker.run_exec(['-T', node_name, 'journalctl', '--unit=dtn-bp-agent@node'], capture_output=True, text=True)
                 got = comp.stdout.count('Verified BIB target block num 1')
                 if least is None or got < least:
                     least = got
             LOGGER.info('Least number of verified BIBs: %s', least)
-            if least >= 4:
+            if least >= 3:
                 break
             time.sleep(3)
 
