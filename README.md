@@ -100,7 +100,7 @@ pip3 install '.[container]'
 
 To initialize and start a set of containers:
 ```
-python3 container/run.py --config container/example.yaml delete prep start
+./container/run.py --config container/example.yaml act delete pkigen build start ready
 ```
 
 To observe the log of one of the nodes:

@@ -223,269 +223,350 @@ class PkiCa:
                 outfile.write(self._ca_cert.public_bytes(serialization.Encoding.PEM))
 
 
+def _runcmd(parts, **kwargs):
+    LOGGER.info('Running command %s', ' '.join(f'"{part}"' for part in parts))
+    return subprocess.run(parts, **kwargs)
+
+
+class Docker:
+
+    def __init__(self, stage_dir):
+        self._docker = re.split(r'\s+', os.environ.get('DOCKER', 'docker').strip())
+        self.composefile = os.path.join(stage_dir, 'docker-compose.yml')
+
+    def run_docker(self, args, **kwargs):
+        env = os.environ
+        env.update({
+            'DOCKER_BUILDKIT': '1',
+        })
+        kwargs.setdefault('env', env)
+        kwargs.setdefault('check', True)
+        return _runcmd(self._docker + args, **kwargs)
+
+    def run_docker_compose(self, args, **kwargs):
+        env = os.environ
+        env.update({
+            'DOCKER_BUILDKIT': '1',
+        })
+        kwargs.setdefault('env', env)
+        kwargs.setdefault('check', True)
+        filepart = ['compose', '-f', self.composefile, '-p', 'demo']
+        return _runcmd(self._docker + filepart + args, **kwargs)
+
+    def run_exec(self, args, **kwargs):
+        kwargs.setdefault('check', False)
+        return self.run_docker_compose(['exec'] + args, **kwargs)
+
+
 class Runner:
-    ACTIONS = ['prep', 'start', 'check', 'stop', 'delete']
+    # Available actions correspond to public functions
+    ACTIONS = ['pkigen', 'build', 'start', 'ready', 'check', 'stop', 'delete']
 
     def __init__(self, args):
         self.args = args
-        self._docker = re.split(r'\s+', os.environ.get('DOCKER', 'docker').strip())
+
+        self._stagedir = args.stage_dir
+        if not os.path.exists(self._stagedir):
+            os.makedirs(self._stagedir)
+
+        self._docker = Docker(stage_dir=self._stagedir)
 
         with open(args.config, 'rb') as conffile:
             self._config = yaml.safe_load(conffile)
 
-    def runcmd(self, parts, **kwargs):
-        LOGGER.info('Running command %s', ' '.join(f'"{part}"' for part in parts))
-        kwargs['check'] = True
-        return subprocess.run(parts, **kwargs)
+    # Action methods follow
 
-    def run_docker(self, args, **kwargs):
-        env = {
-            'DOCKER_BUILDKIT': '1',
-        }
-        kwargs['env'] = env
-        return self.runcmd(self._docker + args, **kwargs)
+    def pkigen(self):
+        pca = PkiCa()
 
-    def action(self, act):
-        if act == 'prep':
-            img_name_tag = 'dtn-demo'
+        cadir = os.path.join(self._stagedir, 'ca')
+        os.makedirs(cadir, exist_ok=True)
+        pca.generate_root_ca(
+            certfile=os.path.join(cadir, 'cert.pem'),
+            keyfile=os.path.join(self._stagedir, 'ca', 'key.pem')
+        )
 
-            LOGGER.info('Building image...')
-            cmd = ['build', '-t', img_name_tag, '.', '-f', os.path.join(SELFDIR, 'Dockerfile')]
-            if self.args.image_no_cache:
-                cmd += ['--no-cache']
-            self.run_docker(cmd)
+        for (node_name, node_opts) in self._config['nodes'].items():
+            ipn_node = node_opts.get('ipn_node')
+            nodeid = f'ipn:{ipn_node}.0' if ipn_node else 'dtn://{}/'.format(node_name)
 
-            LOGGER.info("Ensuring networks...")
-            for (net_name, net_opts) in self._config['nets'].items():
-                try:
-                    self.run_docker(['network', 'inspect', net_name])
-                except subprocess.CalledProcessError:
-                    LOGGER.info("Creating network %s", net_name)
-                    cmd = ['network', 'create', net_name]
-                    if 'subnet4' in net_opts:
-                        cmd += ['--subnet', net_opts['subnet4']]
-                    if 'subnet6' in net_opts:
-                        cmd += ['--ipv6', '--subnet', net_opts['subnet6']]
-                    cmd += ['-o', f'com.docker.network.bridge.name=br-{net_name}']
-                    self.run_docker(cmd)
+            # Ubuntu common path mounted to /etc/ssl/
+            nodedir = os.path.join(self._stagedir, 'nodes', node_name, 'ssl')
 
-            pki = PkiCa()
-
-            os.makedirs(DEFAULT_STAGEDIR, exist_ok=True)
-
-            # Private CA
-            ca_key = pki.generate_key({})
-            pki.generate_root_ca(
-                certfile=os.path.join(DEFAULT_STAGEDIR, 'ca', 'ca.crt'),
-                keyfile=os.path.join(DEFAULT_STAGEDIR, 'ca', 'ca.key'),
+            pca.generate_end_entity(
+                cafile=os.path.join(nodedir, 'certs', 'ca.crt'),
+                certfile=os.path.join(nodedir, 'certs', 'node-sign.crt'),
+                keyfile=os.path.join(nodedir, 'private', 'node-sign.pem'),
+                mode='signing',
+                nodeid=nodeid
+            )
+            pca.generate_end_entity(
+                cafile=None,
+                certfile=os.path.join(nodedir, 'certs', 'node-encrypt.crt'),
+                keyfile=os.path.join(nodedir, 'private', 'node-encrypt.pem'),
+                mode='encryption',
+                nodeid=nodeid
             )
 
-            for (node_name, node_opts) in self._config['nodes'].items():
+            extconfig = node_opts.get('config', {})
+            tls_enable = extconfig.get('tls_enable', False)
+            dtls_enable = extconfig.get('dtls_enable_tx', False)
+            if tls_enable or dtls_enable:
                 fqdn = node_name + '.local'
-
-                config_path = os.path.join(DEFAULT_STAGEDIR, node_name, 'xdg', 'dtn')
-                os.makedirs(config_path, exist_ok=True)
-
-                log_path = os.path.join(DEFAULT_STAGEDIR, node_name, 'log')
-                os.makedirs(log_path, exist_ok=True)
-
-                extconfig = node_opts.get('config', {})
-                use_ipv4 = node_opts.get('use_ipv4', True)
-                use_ipv6 = node_opts.get('use_ipv6', True)
-                nodeid = 'dtn://{}/'.format(node_name)
-
-                tls_enable = extconfig.get('tls_enable', False)
-                dtls_enable = extconfig.get('dtls_enable_tx', False)
-                if tls_enable or dtls_enable:
-                    pki.generate_end_entity(
-                        cafile=os.path.join(config_path, 'ca.crt'),
-                        certfile=os.path.join(config_path, 'transport.crt'),
-                        keyfile=os.path.join(config_path, 'transport.key'),
-                        mode='transport',
-                        nodeid=nodeid,
-                        fqdn=fqdn,
-                    )
-
-                pki.generate_end_entity(
-                    cafile=os.path.join(config_path, 'ca.crt'),
-                    certfile=os.path.join(config_path, 'sign.crt'),
-                    keyfile=os.path.join(config_path, 'sign.key'),
-                    mode='sign',
+                pca.generate_end_entity(
+                    cafile=None,
+                    certfile=os.path.join(nodedir, 'certs', 'node-transport.crt'),
+                    keyfile=os.path.join(nodedir, 'private', 'node-transport.pem'),
+                    mode='transport',
                     nodeid=nodeid,
+                    fqdn=fqdn,
                 )
 
-                udpcl_listen = []
-                if extconfig.get('udpcl_listen', True):
-                    if use_ipv4:
-                        udpcl_listen.append({
-                            'address': '0.0.0.0',
-                            'multicast_member': [
-                                {
-                                    'addr': '224.0.1.186',
-                                },
-                            ],
-                        })
-                    if use_ipv6:
-                        udpcl_listen.append({
-                            'address': '::',
-                            'multicast_member': [
-                                {
-                                    'addr': 'FF05::1:5',
-                                    'iface': 'eth0',
-                                },
-                            ],
-                        })
+    def build(self):
+        img_name_tag = 'dtn-demo'
 
-                tcpcl_listen = []
-                if extconfig.get('tcpcl_listen', True):
-                    if use_ipv4 and not use_ipv6:
-                        tcpcl_listen.append({
-                            'address': '0.0.0.0',
-                        })
-                    if use_ipv6:
-                        tcpcl_listen.append({
-                            'address': '::',
-                        })
+        LOGGER.info('Building image...')
+        cmd = ['build', '-t', img_name_tag, '.', '-f', os.path.join(SELFDIR, 'Dockerfile')]
+        if self.args.image_no_cache:
+            cmd += ['--no-cache']
+        self._docker.run_docker(cmd)
 
-                bp_rx_routes = extconfig.get('bp_rx_routes', [])
-                bp_rx_routes += [
-                    {
-                        'eid_pattern': f'dtn://{node_name}/.*',
-                        'action': 'deliver',
-                    },
-                    {
-                        'eid_pattern': '.*',
-                        'action': 'forward',
-                    },
-                ]
-                bp_tx_routes = extconfig.get('bp_tx_routes', [])
+        LOGGER.info("Ensuring networks...")
+        for (net_name, net_opts) in self._config['nets'].items():
+            try:
+                self._docker.run_docker(['network', 'inspect', net_name])
+            except subprocess.CalledProcessError:
+                LOGGER.info("Creating network %s", net_name)
+                cmd = ['network', 'create', net_name]
+                if 'subnet4' in net_opts:
+                    cmd += ['--subnet', net_opts['subnet4']]
+                if 'subnet6' in net_opts:
+                    cmd += ['--ipv6', '--subnet', net_opts['subnet6']]
+                cmd += ['-o', f'com.docker.network.bridge.name=br-{net_name}']
+                self._docker.run_docker(cmd)
 
-                nodeconf = {
-                    'udpcl': {
-                        'log_level': 'debug',
-                        'bus_addr': 'system',
-                        'bus_service': 'org.ietf.dtn.node.udpcl',
-                        'node_id': nodeid,
+        for (node_name, node_opts) in self._config['nodes'].items():
+            fqdn = node_name + '.local'
 
-                        'dtls_enable_tx': dtls_enable,
-                        'dtls_ca_file': '/etc/xdg/dtn/ca.crt',
-                        'dtls_cert_file': '/etc/xdg/dtn/transport.crt',
-                        'dtls_key_file': '/etc/xdg/dtn/transport.key',
+            config_path = os.path.join(self._stagedir, 'nodes', node_name, 'xdg', 'dtn')
+            os.makedirs(config_path, exist_ok=True)
 
-                        'polling': extconfig.get('udpcl_polling', []),
-                        'init_listen': udpcl_listen,
-                    },
-                    'tcpcl': {
-                        'log_level': 'debug',
-                        'bus_addr': 'system',
-                        'bus_service': 'org.ietf.dtn.node.tcpcl',
-                        'node_id': nodeid,
+            log_path = os.path.join(self._stagedir, 'nodes', node_name, 'log')
+            os.makedirs(log_path, exist_ok=True)
 
-                        'tls_enable': tls_enable,
-                        'tls_ca_file': '/etc/xdg/dtn/ca.crt',
-                        'tls_cert_file': '/etc/xdg/dtn/transport.crt',
-                        'tls_key_file': '/etc/xdg/dtn/transport.key',
+            extconfig = node_opts.get('config', {})
+            use_ipv4 = node_opts.get('use_ipv4', True)
+            use_ipv6 = node_opts.get('use_ipv6', True)
+            nodeid = 'dtn://{}/'.format(node_name)
 
-                        'init_listen': tcpcl_listen,
-                    },
-                    'bp': {
-                        'log_level': 'debug',
-                        'bus_addr': 'system',
-                        'bus_service': 'org.ietf.dtn.node.bp',
-                        'node_id': nodeid,
+            udpcl_listen = []
+            if extconfig.get('udpcl_listen', True):
+                if use_ipv4:
+                    udpcl_listen.append({
+                        'address': '0.0.0.0',
+                        'multicast_member': [
+                            {
+                                'addr': '224.0.1.186',
+                            },
+                        ],
+                    })
+                if use_ipv6:
+                    udpcl_listen.append({
+                        'address': '::',
+                        'multicast_member': [
+                            {
+                                'addr': 'FF05::1:5',
+                                'iface': 'eth0',
+                            },
+                        ],
+                    })
 
-                        'verify_ca_file': '/etc/xdg/dtn/ca.crt',
-                        'sign_cert_file': '/etc/xdg/dtn/sign.crt',
-                        'sign_key_file': '/etc/xdg/dtn/sign.key',
+            tcpcl_listen = []
+            if extconfig.get('tcpcl_listen', True):
+                if use_ipv4 and not use_ipv6:
+                    tcpcl_listen.append({
+                        'address': '0.0.0.0',
+                    })
+                if use_ipv6:
+                    tcpcl_listen.append({
+                        'address': '::',
+                    })
 
-                        'rx_route_table': bp_rx_routes,
-                        'tx_route_table': bp_tx_routes,
-                        'apps': extconfig.get('apps', {})
-                    },
-                }
-                with open(os.path.join(config_path, 'node.yaml'), 'w') as outfile:
-                    outfile.write(yaml.dump(nodeconf))
+            bp_rx_routes = extconfig.get('bp_rx_routes', [])
+            bp_rx_routes += [
+                {
+                    'eid_pattern': f'dtn://{node_name}/.*',
+                    'action': 'deliver',
+                },
+                {
+                    'eid_pattern': '.*',
+                    'action': 'forward',
+                },
+            ]
+            bp_tx_routes = extconfig.get('bp_tx_routes', [])
 
+            nodeconf = {
+                'udpcl': {
+                    'log_level': 'debug',
+                    'bus_addr': 'system',
+                    'bus_service': 'org.ietf.dtn.node.udpcl',
+                    'node_id': nodeid,
+
+                    'dtls_enable_tx': extconfig.get('dtls_enable_tx', False),
+                    'dtls_ca_file': '/etc/ssl/certs/ca.crt',
+                    'dtls_cert_file': '/etc/ssl/certs/node-transport.crt',
+                    'dtls_key_file': '/etc/ssl/private/node-transport.pem',
+
+                    'polling': extconfig.get('udpcl_polling', []),
+                    'init_listen': udpcl_listen,
+                },
+                'tcpcl': {
+                    'log_level': 'debug',
+                    'bus_addr': 'system',
+                    'bus_service': 'org.ietf.dtn.node.tcpcl',
+                    'node_id': nodeid,
+
+                    'tls_enable': extconfig.get('tls_enable', False),
+                    'tls_ca_file': '/etc/ssl/certs/ca.crt',
+                    'tls_cert_file': '/etc/ssl/certs/node-transport.crt',
+                    'tls_key_file': '/etc/ssl/private/node-transport.pem',
+
+                    'init_listen': tcpcl_listen,
+                },
+                'bp': {
+                    'log_level': 'debug',
+                    'bus_addr': 'system',
+                    'bus_service': 'org.ietf.dtn.node.bp',
+                    'node_id': nodeid,
+
+                    'verify_ca_file': '/etc/ssl/certs/ca.crt',
+                    'sign_cert_file': '/etc/ssl/certs/node-sign.crt',
+                    'sign_key_file': '/etc/ssl/private/node-sign.pem',
+
+                    'rx_route_table': bp_rx_routes,
+                    'tx_route_table': bp_tx_routes,
+                    'apps': extconfig.get('apps', {})
+                },
+            }
+            with open(os.path.join(config_path, 'node.yaml'), 'w') as outfile:
+                outfile.write(yaml.dump(nodeconf))
+
+            cmd = [
+                'container', 'create',
+                '--privileged', '-e', 'container=docker',
+                '--mount', f'type=bind,src={SELFDIR}/workdir/nodes/{node_name}/ssl,dst=/etc/ssl',
+                '--mount', f'type=bind,src={SELFDIR}/workdir/nodes/{node_name}/xdg/dtn,dst=/etc/xdg/dtn',
+                '--mount', f'type=bind,src={SELFDIR}/workdir/nodes/{node_name}/log,dst=/var/log/dtn',
+                '-e', 'SSLKEYLOGFILE=/var/log/dtn/tlskeylog',
+                '--hostname', fqdn,
+                '--name', node_name,
+            ]
+            cmd += [img_name_tag]
+            self._docker.run_docker(cmd)
+
+            cmd = [
+                'network', 'disconnect',
+                'bridge',
+                node_name
+            ]
+            self._docker.run_docker(cmd)
+
+            for net_name in node_opts['nets']:
                 cmd = [
-                    'container', 'create',
-                    '--privileged', '-e', 'container=docker',
-                    '--mount', f'type=bind,src={SELFDIR}/workdir/{node_name}/xdg/dtn,dst=/etc/xdg/dtn',
-                    '--mount', f'type=bind,src={SELFDIR}/workdir/{node_name}/log,dst=/var/log/dtn',
-                    '-e', 'SSLKEYLOGFILE=/var/log/dtn/tlskeylog',
-                    '--hostname', fqdn,
-                    '--name', node_name,
-                ]
-                cmd += [img_name_tag]
-                self.run_docker(cmd)
-
-                cmd = [
-                    'network', 'disconnect',
-                    'bridge',
+                    'network', 'connect',
+                    net_name,
                     node_name
                 ]
-                self.run_docker(cmd)
+                self._docker.run_docker(cmd)
 
-                for net_name in node_opts['nets']:
-                    cmd = [
-                        'network', 'connect',
-                        net_name,
-                        node_name
-                    ]
-                    self.run_docker(cmd)
+    def start(self):
+        for node_name in self._config['nodes'].keys():
+            self._docker.run_docker(['container', 'start', node_name])
 
-        elif act == 'start':
-            for node_name in self._config['nodes'].keys():
-                self.run_docker(['container', 'start', node_name])
+    def ready(self):
+        ''' Wait for services to be ready '''
+        for name, node in self._config['nodes'].items():
+            serv_name = 'dtn-bp-agent@node'
 
-        elif act == 'check':
+            args = ['container', 'exec', name, 'systemctl', 'is-active', '-q', serv_name]
             while True:
-                least = None
-                for node_name in self._config['nodes'].keys():
-                    comp = self.run_docker(['exec', node_name, 'journalctl', '--unit=dtn-bp-agent@node'], capture_output=True, text=True)
-                    got = comp.stdout.count('Verified BIB target block num 1')
-                    if least is None or got < least:
-                        least = got
-                LOGGER.info('Least number of verified BIBs: %s', least)
-                if least >= 4:
+                time.sleep(1)
+                try:
+                    self._docker.run_docker(args, check=True)
                     break
-                time.sleep(3)
+                except Exception as err:
+                    continue
 
-        elif act == 'stop':
-            self.run_docker(
-                ['container', 'stop']
-                +[node_name for node_name in self._config['nodes'].keys()]
-            )
-
-        elif act == 'delete':
+    def check(self):
+        while True:
+            least = None
             for node_name in self._config['nodes'].keys():
-                try:
-                    self.run_docker(['container', 'rm', '-f', node_name])
-                except subprocess.CalledProcessError:
-                    pass
-            for net_name in self._config['nets'].keys():
-                try:
-                    self.run_docker(['network', 'rm', net_name])
-                except subprocess.CalledProcessError:
-                    pass
+                comp = self._docker.run_docker(['exec', node_name, 'journalctl', '--unit=dtn-bp-agent@node'], capture_output=True, text=True)
+                got = comp.stdout.count('Verified BIB target block num 1')
+                if least is None or got < least:
+                    least = got
+            LOGGER.info('Least number of verified BIBs: %s', least)
+            if least >= 4:
+                break
+            time.sleep(3)
+
+    def stop(self):
+        self._docker.run_docker(
+            ['container', 'stop']
+            +[node_name for node_name in self._config['nodes'].keys()]
+        )
+
+    def delete(self):
+        for node_name in self._config['nodes'].keys():
+            try:
+                self._docker.run_docker(['container', 'rm', '-f', node_name])
+            except subprocess.CalledProcessError:
+                pass
+        for net_name in self._config['nets'].keys():
+            try:
+                self._docker.run_docker(['network', 'rm', net_name])
+            except subprocess.CalledProcessError:
+                pass
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, required=True)
+    parser.add_argument('--log-level', dest='log_level',
+                        metavar='LEVEL',
+                        default='INFO',
+                        help='Console logging lowest severity.')
+    parser.add_argument('--config', type=str, required=True,
+        help='The scenario YAML file to load',
+    )
     parser.add_argument('--image-no-cache', default=False, action='store_true')
-    parser.add_argument('actions', choices=Runner.ACTIONS, nargs='+')
+    parser.add_argument('--stage-dir', default=DEFAULT_STAGEDIR,
+        help='The staging file path'
+    )
+    subparsers = parser.add_subparsers(
+        dest='top_action',
+        help='The top action to perform',
+    )
+    sub_exec = subparsers.add_parser('exec',
+                                     help='Execute within a container')
+    sub_exec.add_argument('args', nargs='+')
+    sub_act = subparsers.add_parser('act', help='Perform one or more action')
+    sub_act.add_argument('actions', choices=Runner.ACTIONS, nargs='+')
     args = parser.parse_args()
-    LOGGER.debug('args %s', args)
 
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=args.log_level.upper())
+    LOGGER.debug('args %s', args)
 
     # do work in parent directory
     os.chdir(os.path.join(SELFDIR, '..'))
 
     runner = Runner(args)
-    for act in args.actions:
-        runner.action(act)
+    if args.top_action == 'act':
+        for act in args.actions:
+            getattr(runner, act)()
+    elif args.top_action == 'exec':
+        runner.exec()
 
 
 if __name__ == '__main__':
     sys.exit(main())
+
