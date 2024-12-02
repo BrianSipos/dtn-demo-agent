@@ -3,7 +3,7 @@ nets:
     subnet4: "192.168.100.0/24"
   dtnB:
     subnet4: "192.168.110.0/24"
-#    subnet6: "fda1:1cec:f450:c055::/64"
+    subnet6: "fda1:1cec:f450:c055::/64"
 
 nodes:
   node000:
