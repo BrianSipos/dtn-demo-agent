@@ -240,7 +240,7 @@ class TcpclAdaptor(AbstractAdaptor):
     def connect(self, address:str, port:int):
         ''' Initiate a connection preemptively.
         '''
-        self._logger.info('Connecting to %s:%d', address, port)
+        self._logger.info('Connecting to [%s]:%d', address, port)
         self.agent_obj.connect(address, port)
 
     def send_bundle_func(self, tx_params:dict):
@@ -267,7 +267,7 @@ class TcpclAdaptor(AbstractAdaptor):
                 if next_nodeid not in self._cl_conn_nodeid:
                     address = tx_params['address']
                     port = tx_params.get('port', 4556)
-                    self._logger.info('Connecting to %s:%d', address, port)
+                    self._logger.info('Connecting to [%s]:%d', address, port)
                     self.agent_obj.connect(address, port)
 
         return sender

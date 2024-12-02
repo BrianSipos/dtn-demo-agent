@@ -3,7 +3,7 @@ Implementation of a symmetric TCPCL agent.
 '''
 from dataclasses import dataclass, astuple, field
 import logging
-from typing import Optional
+from typing import List, Optional
 import ipaddress
 import socket
 import dbus.service
@@ -295,12 +295,13 @@ class Agent(dbus.service.Object):
         return True
 
     @dbus.service.method(DBUS_IFACE, in_signature='sq', out_signature='o')
-    def connect(self, address, port):
+    def connect(self, address:str, port:int) -> str:
         ''' Initiate an outgoing connection and defer handling state to
         `glib` event loop.
 
+        :param address: The address to connect to.
+        :param port: The port number to connect to.
         :return: The new contact object path.
-        :rtype: str
         '''
         addrobj = AddressObject(address)
         conv = Conversation(

@@ -1,5 +1,6 @@
 ''' Prototype of Zero-Configuration BP router discovery.
 '''
+import asyncio
 from gi.repository import GLib as glib
 import ipaddress
 import logging
@@ -24,6 +25,43 @@ SVCLOCAL = '_dtn-bundle._tcp.local.'
 ''' Global service name to register under '''
 
 
+async def happy_eyeballs(addresses:List, port:int) -> ipaddress._IPAddressBase:
+    ''' A simplified form of RFC 8305 for a list of potential addresses.
+    '''
+    tasks = []
+    for ipaddr in addresses:
+        if ipaddr.is_reserved or ipaddr.is_link_local:
+            continue
+        addr = (str(ipaddr), port)
+        LOGGER.info('Happy Eyeballs attempting to %s', addr)
+        try:
+            coro = asyncio.open_connection(*addr, proto=socket.IPPROTO_TCP)
+            tasks.append(asyncio.ensure_future(coro))
+        except Exception as err:
+            LOGGER.warning('Happy Eyeballs failed to %s: %s', addr, err)
+
+    # wait for a real, non-exceptional result
+    finished = None
+    pending = tasks
+    while pending and not finished:
+        LOGGER.info('Happy Eyeballs waiting on %d pending', len(pending))
+        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            try:
+                finished = task.result()
+                break
+            except Exception as err:
+                LOGGER.warning('Happy Eyeballs failed to %s: %s', done, err)
+
+    for task in pending:
+        task.cancel()
+
+    _reader, writer = finished
+    peername = writer.get_extra_info('peername')
+    LOGGER.info('Happy Eyeballs connected to %s', peername)
+    return peername[0]
+
+
 @app('zeroconf')
 class App(AbstractApplication):
     
@@ -44,9 +82,9 @@ class App(AbstractApplication):
         self._zco = Zeroconf()
 
         if self._config.get('offer', False):
-            glib.timeout_add(1e3 * random.randint(5, 8), self._offer)
+            glib.timeout_add(random.randint(5e3, 8e3), self._offer)
         if self._config.get('enumerate', False):
-            glib.timeout_add(1e3 * random.randint(5, 8), self._enumerate)
+            glib.timeout_add(random.randint(5e3, 8e3), self._enumerate)
 
     def _iface_addrs(self) -> List[ipaddress._IPAddressBase]:
         all_addrs = []
@@ -54,12 +92,11 @@ class App(AbstractApplication):
             for ipobj in adapter.ips:
                 if isinstance(ipobj.ip, tuple):
                     # ipv6
-                    addr = ipobj.ip[0]
+                    addrobj = ipaddress.IPv6Address(f'{ipobj.ip[0]}%{ipobj.ip[2]}')
                 else:
                     # ipv4
-                    addr = ipobj.ip
+                    addrobj = ipaddress.IPv4Address(ipobj.ip)
 
-                addrobj = ipaddress.ip_address(addr)
                 if addrobj.is_loopback or addrobj.is_reserved:
                     continue
 
@@ -133,25 +170,18 @@ class App(AbstractApplication):
         return False
 
     def _serv_state_change(self, zeroconf, service_type, name, state_change):
-        all_nets = self._iface_nets()
-        LOGGER.info('Iface nets: %s', all_nets)
-
         if state_change == ServiceStateChange.Added:
             info = zeroconf.get_service_info(service_type, name)
             LOGGER.info('Service added: %s', info)
 
-            addr_objs = list(map(ipaddress.ip_address, info.addresses))
+            addr_objs = list(map(ipaddress.ip_address, info.parsed_scoped_addresses()))
             LOGGER.info('Possible addresses: %s', addr_objs)
-            usable_addrs = [
-                addr
-                for addr in addr_objs
-                if [net for net in all_nets if addr in net]
-            ]
-            LOGGER.info('Usable addresses: %s', usable_addrs)
-            if not usable_addrs:
+            if not addr_objs:
                 return
-            best_addr = str(usable_addrs[0])
+
+            # Probe using Happy Eyeballs
             best_port = int(info.port)
+            best_addr = asyncio.run(happy_eyeballs(addr_objs, best_port))
 
             route = TxRouteItem(
                 eid_pattern=re.compile(r'.*'),
