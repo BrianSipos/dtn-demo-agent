@@ -323,30 +323,85 @@ class Runner:
                 )
 
     def build(self):
-        img_name_tag = 'dtn-demo'
+        compose = {
+            'networks': {},
+            'services': {},
+        }
 
-        LOGGER.info('Building image...')
-        cmd = ['build', '-t', img_name_tag, '.', '-f', os.path.join(SELFDIR, 'Dockerfile')]
-        if self.args.image_no_cache:
-            cmd += ['--no-cache']
-        self._docker.run_docker(cmd)
-
-        LOGGER.info("Ensuring networks...")
         for (net_name, net_opts) in self._config['nets'].items():
-            try:
-                self._docker.run_docker(['network', 'inspect', net_name])
-            except subprocess.CalledProcessError:
-                LOGGER.info("Creating network %s", net_name)
-                cmd = ['network', 'create', net_name]
-                if 'subnet4' in net_opts:
-                    cmd += ['--subnet', net_opts['subnet4']]
-                if 'subnet6' in net_opts:
-                    cmd += ['--ipv6', '--subnet', net_opts['subnet6']]
-                cmd += ['-o', f'com.docker.network.bridge.name=br-{net_name}']
-                self._docker.run_docker(cmd)
+            ipam_config = []
+            if 'subnet4' in net_opts:
+                ipam_config.append({
+                    'subnet': net_opts['subnet4'],
+                })
+            if 'subnet6' in net_opts:
+                ipam_config.append({
+                    'subnet': net_opts['subnet6'],
+                })
+
+            compose['networks'][net_name] = {
+                'driver': 'bridge',
+                'driver_opts': {
+                    'com.docker.network.bridge.name': f'br-{net_name}',
+                    'com.docker.network.container_iface_prefix': net_name,
+                    'com.docker.network.driver.mtu': net_opts.get('mtu', 1500),
+                },
+                'enable_ipv6': ('subnet6' in net_opts),
+                'ipam': {
+                    'config': ipam_config,
+                },
+            }
 
         for (node_name, node_opts) in self._config['nodes'].items():
             fqdn = node_name + '.local'
+
+            node_serv = {
+                'container_name': node_name,
+                'hostname': node_name,
+                'privileged': True,
+                'cap_add': [
+                    'NET_ADMIN',
+                    'NET_RAW',
+                    'SYS_NICE',
+                ],
+                'environment': [
+                    'container=docker',
+                    'SSLKEYLOGFILE=/var/log/dtn/tlskeylog',
+                ],
+                'deploy': {
+                    'resources': {
+                        'limits': {
+                            'memory': '256M',
+                        },
+                    },
+                },
+                'volumes': [
+                    {
+                        'type': 'bind',
+                        'source': os.path.join(self._stagedir, 'nodes', node_name, 'ssl'),
+                        'target': '/etc/ssl',
+                        'read_only': True,
+                    },
+                    {
+                        'type': 'bind',
+                        'source': os.path.join(self._stagedir, 'nodes', node_name, 'xdg', 'dtn'),
+                        'target': '/etc/xdg/dtn',
+                        'read_only': True,
+                    },
+                    {
+                        'type': 'bind',
+                        'source': os.path.join(self._stagedir, 'nodes', node_name, 'log'),
+                        'target': '/var/log/dtn',
+                    },
+                ],
+                'networks': [net_name for net_name in node_opts['nets']],
+            }
+
+            node_serv['build'] = {
+                'context': os.path.dirname(SELFDIR),  # parent
+                'dockerfile': os.path.join(SELFDIR, 'Dockerfile'),
+                # 'target': 'dtn-demo-agent',
+            }
 
             config_path = os.path.join(self._stagedir, 'nodes', node_name, 'xdg', 'dtn')
             os.makedirs(config_path, exist_ok=True)
@@ -451,48 +506,27 @@ class Runner:
             with open(os.path.join(config_path, 'node.yaml'), 'w') as outfile:
                 outfile.write(yaml.dump(nodeconf))
 
-            cmd = [
-                'container', 'create',
-                '--privileged', '-e', 'container=docker',
-                '--mount', f'type=bind,src={SELFDIR}/workdir/nodes/{node_name}/ssl,dst=/etc/ssl',
-                '--mount', f'type=bind,src={SELFDIR}/workdir/nodes/{node_name}/xdg/dtn,dst=/etc/xdg/dtn',
-                '--mount', f'type=bind,src={SELFDIR}/workdir/nodes/{node_name}/log,dst=/var/log/dtn',
-                '-e', 'SSLKEYLOGFILE=/var/log/dtn/tlskeylog',
-                '--hostname', fqdn,
-                '--name', node_name,
-            ]
-            cmd += [img_name_tag]
-            self._docker.run_docker(cmd)
+            # All done with this node
+            compose['services'][node_name] = node_serv
 
-            cmd = [
-                'network', 'disconnect',
-                'bridge',
-                node_name
-            ]
-            self._docker.run_docker(cmd)
+        with open(self._docker.composefile, 'w') as outfile:
+            yaml.dump(compose, outfile, sort_keys=False)
 
-            for net_name in node_opts['nets']:
-                cmd = [
-                    'network', 'connect',
-                    net_name,
-                    node_name
-                ]
-                self._docker.run_docker(cmd)
+        self._docker.run_docker_compose(['build'])
 
     def start(self):
-        for node_name in self._config['nodes'].keys():
-            self._docker.run_docker(['container', 'start', node_name])
+        self._docker.run_docker_compose(['up', '-d', '--force-recreate', '--remove-orphans'])
 
     def ready(self):
         ''' Wait for services to be ready '''
         for name, node in self._config['nodes'].items():
             serv_name = 'dtn-bp-agent@node'
 
-            args = ['container', 'exec', name, 'systemctl', 'is-active', '-q', serv_name]
+            args = [name, 'systemctl', 'is-active', '-q', serv_name]
             while True:
                 time.sleep(1)
                 try:
-                    self._docker.run_docker(args, check=True)
+                    self._docker.run_exec(args, check=True)
                     break
                 except Exception as err:
                     continue
@@ -501,7 +535,7 @@ class Runner:
         while True:
             least = None
             for node_name in self._config['nodes'].keys():
-                comp = self._docker.run_docker(['exec', node_name, 'journalctl', '--unit=dtn-bp-agent@node'], capture_output=True, text=True)
+                comp = self._docker.run_exec([node_name, 'journalctl', '--unit=dtn-bp-agent@node'], capture_output=True, text=True)
                 got = comp.stdout.count('Verified BIB target block num 1')
                 if least is None or got < least:
                     least = got
@@ -511,22 +545,13 @@ class Runner:
             time.sleep(3)
 
     def stop(self):
-        self._docker.run_docker(
-            ['container', 'stop']
-            +[node_name for node_name in self._config['nodes'].keys()]
-        )
+        self._docker.run_docker_compose(['down'])
 
     def delete(self):
-        for node_name in self._config['nodes'].keys():
-            try:
-                self._docker.run_docker(['container', 'rm', '-f', node_name])
-            except subprocess.CalledProcessError:
-                pass
-        for net_name in self._config['nets'].keys():
-            try:
-                self._docker.run_docker(['network', 'rm', net_name])
-            except subprocess.CalledProcessError:
-                pass
+        self._docker.run_docker_compose(['rm', '-sf'])
+
+    def exec(self):
+        self._docker.run_exec(self.args.args)
 
 
 def main():

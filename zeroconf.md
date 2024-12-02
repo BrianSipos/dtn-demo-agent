@@ -1,6 +1,6 @@
 Start the containers with:
 ```
-./container/run.py --config container/example-zeroconf.yaml act delete pkigen build start ready
+./container/run.py --config container/example-zeroconf.yaml act pkigen build start ready
 ```
 which will cause the mDNS offer and enumeration after a few (under 10) seconds.
 
