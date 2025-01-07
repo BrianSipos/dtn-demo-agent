@@ -1,4 +1,4 @@
-''' Application layer adaptors.
+''' Prototype of Secure Advertisement and Neighborhood Discovery (SAND).
 '''
 import cbor2
 from dataclasses import dataclass, field, fields
@@ -437,12 +437,12 @@ class Nmp(AbstractApplication):
 
             ctr = self._gen_bundle(adu.getvalue(), NEIGHBOR_EID)
             if local_ipv4:
-                self._send_msg(ctr, '224.0.1.186', local_ipv4, local_if)
+                self._send_msg(ctr, '224.0.1.20', local_ipv4, local_if)
             if local_ipv6:
                 ctr.sender = None
                 for blk in ctr.block_type(BlockIntegrityBlock):
                     ctr.remove_block(blk)
 
-                self._send_msg(ctr, 'FF05::1:5', local_ipv6, local_if)
+                self._send_msg(ctr, 'FF05::114', local_ipv6, local_if)
 
         self._last_hello = self._now()

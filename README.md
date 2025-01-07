@@ -93,14 +93,19 @@ where `gentype` of "fullvalid" generates valid BPv7 test bundles, and `gencount`
 The `run.py` commands use the environment `DOCKER` to control the container tool.
 For example in fedora use the environment `DOCKER="sudo podman"`.
 
+To install prerequisites for python run:
+```
+pip3 install '.[container]'
+```
+
 To initialize and start a set of containers:
 ```
-python3 container/run.py --config container/example.yaml delete prep start
+./container/run.py --config container/example.yaml act pkigen build start ready
 ```
 
 To observe the log of one of the nodes:
 ```
-docker container exec -it node003 journalctl -f
+docker container exec -it node000 journalctl -f
 ```
 
 To capture traffic across container networks, run similar to:
@@ -110,7 +115,7 @@ wireshark -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -Y 'bpv7' -k
 
 To call DBus methods in one of the nodes:
 ```
-docker container exec -it node003 dbus-send --system --print-reply --dest=org.ietf.dtn.node.udpcl /org/ietf/dtn/udpcl/Agent org.ietf.dtn.udpcl.Agent.pmtud_start string:node002. uint16:4556
+docker container exec -it node000 dbus-send --system --print-reply --dest=org.ietf.dtn.node.udpcl /org/ietf/dtn/udpcl/Agent org.ietf.dtn.udpcl.Agent.pmtud_start string:node002. uint16:4556
 ```
 
 To perform an ACME validation exchange between two nodes run the script:

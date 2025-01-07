@@ -53,10 +53,10 @@ jobs:
           python -m pip install --upgrade pip
           pip3 install '.[container]'
       - name: Prep
-        run: ./container/run.py --config container/example.yaml prep
+        run: ./container/run.py --config container/example.yaml act pkigen build
       - name: Start
-        run: ./container/run.py --config container/example.yaml start
+        run: ./container/run.py --config container/example.yaml act start ready
       - name: Check
-        run: ./container/run.py --config container/example.yaml check
-      - name: Check
-        run: ./container/run.py --config container/example.yaml stop
+        run: ./container/run.py --config container/example.yaml act check
+      - name: Stop
+        run: ./container/run.py --config container/example.yaml act stop delete

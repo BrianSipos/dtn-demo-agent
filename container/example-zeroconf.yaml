@@ -13,26 +13,22 @@ nodes:
         keytype: SECP256R1
     config:
       apps:
-        nmp:
-          enable: true
         zeroconf:
           enumerate: true
-      tls_enable: true
+      tls_enable: false
 
   node001:
     nets: [dtnA, dtnB]
     config:
       apps:
-        nmp:
-          enable: true
         zeroconf:
           offer: true
-      tls_enable: true
+      tls_enable: false
 
   node002:
     nets: [dtnB]
     config:
       apps:
-        nmp:
-          enable: true
-      tls_enable: true
+        zeroconf:
+          enumerate: true
+      tls_enable: false
