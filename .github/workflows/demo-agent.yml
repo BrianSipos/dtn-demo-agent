@@ -36,14 +36,14 @@ jobs:
         run: dbus-run-session -- python3 -m tcpcl.test.bundlegen --log=debug fullvalid
 
   format:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y \
             python3-pip python3-wheel
-          python -m pip install --upgrade pip
+          pip3 install --upgrade pip
           pip3 install '.[flake8]'
       - name: Lint with flake8
         run: |
