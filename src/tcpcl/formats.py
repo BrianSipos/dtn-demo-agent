@@ -139,7 +139,7 @@ class SdnvFieldLenField(SdnvField):
             raise ValueError('One of length_of or count_of is required')
 
         if adjust is None:
-            adjust = lambda pkt, x: x
+            def adjust(pkt, x): return x
         self.adjust = adjust
 
     def i2h(self, pkt, x):

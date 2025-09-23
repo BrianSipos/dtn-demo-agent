@@ -121,7 +121,7 @@ class Nmp(AbstractApplication):
         self._one_hop = {}
         self._ka_resp = {}
 
-    def load_config(self, config:Config):
+    def load_config(self, config: Config):
         super().load_config(config)
         self._config = config
 
@@ -175,7 +175,7 @@ class Nmp(AbstractApplication):
         if eid in (self._nmp_eid, NEIGHBOR_EID):
             ctr.record_action('deliver')
 
-    def _recv_bundle(self, ctr:BundleContainer) -> bool:
+    def _recv_bundle(self, ctr: BundleContainer) -> bool:
         if self._recv_for(ctr, NEIGHBOR_EID):
             return self._recv_group(ctr)
         elif self._recv_for(ctr, self._nmp_eid):
@@ -183,7 +183,7 @@ class Nmp(AbstractApplication):
         else:
             return False
 
-    def _recv_group(self, ctr:BundleContainer) -> bool:
+    def _recv_group(self, ctr: BundleContainer) -> bool:
         adu = io.BytesIO(ctr.block_num(1).getfieldval('btsd'))
         dec = cbor2.CBORDecoder(adu)
 
@@ -271,7 +271,7 @@ class Nmp(AbstractApplication):
 
         return True
 
-    def _recv_own(self, ctr:BundleContainer) -> bool:
+    def _recv_own(self, ctr: BundleContainer) -> bool:
         return self._recv_group(ctr)
 
     def _tx_route(self, ctr):
@@ -282,7 +282,7 @@ class Nmp(AbstractApplication):
             ctr.route = self._one_hop[eid].tx_routes[0]
             LOGGER.debug('Setting one-hop neighbor route to %s as %s', eid, ctr.route)
 
-    def _gen_bundle(self, adu:bytes, dest):
+    def _gen_bundle(self, adu: bytes, dest):
         LOGGER.info('Message TX: %s', encode_diagnostic(adu))
 
         ctr = BundleContainer()

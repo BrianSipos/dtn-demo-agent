@@ -241,7 +241,7 @@ class EcnCounts:
     ce: int = 0
 
 
-def range_encode(intvls:portion.Interval) -> List[int]:
+def range_encode(intvls: portion.Interval) -> List[int]:
     pairs = []
     seen_last = 0
     for intvl in intvls:
@@ -250,7 +250,7 @@ def range_encode(intvls:portion.Interval) -> List[int]:
     return pairs
 
 
-def range_decode(pairs:List[int]) -> portion.Interval:
+def range_decode(pairs: List[int]) -> portion.Interval:
     intvls = portion.empty()
 
     int_iter = iter(pairs)
@@ -403,7 +403,7 @@ class Agent(dbus.service.Object):
                 # mreq = struct.pack("=4sl", socket.inet_aton(addr), socket.INADDR_ANY)
                 mreq = (
                     socket.inet_pton(socket.AF_INET, addr)
-                    +socket.inet_pton(socket.AF_INET, '0.0.0.0')
+                    + socket.inet_pton(socket.AF_INET, '0.0.0.0')
                 )
                 sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
@@ -413,7 +413,7 @@ class Agent(dbus.service.Object):
                 self.__logger.info('Listening for multicast %s on %s (%s)', addr, iface, iface_ix)
                 mreq = (
                     socket.inet_pton(socket.AF_INET6, addr)
-                    +struct.pack("@I", iface_ix)
+                    + struct.pack("@I", iface_ix)
                 )
                 sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
 
@@ -442,7 +442,7 @@ class Agent(dbus.service.Object):
             glib.source_remove(self._listen_plain.pop(sock))
         sock.close()
 
-    def polling_start(self, item:PollConfig):
+    def polling_start(self, item: PollConfig):
         self.__logger.info('Polling start to %s at interval %sms', item.address, item.interval_ms)
         tid = glib.timeout_add(item.interval_ms, self._poll, item, True)
         if item.interval_ms > 2000:
@@ -455,7 +455,7 @@ class Agent(dbus.service.Object):
         ''' Signal when a receive-path accept is received.
         '''
 
-    def _poll(self, item:PollConfig, repeat:bool):
+    def _poll(self, item: PollConfig, repeat: bool):
         ''' Send a return-path accept message.
         '''
         data = cbor2.dumps({
@@ -472,7 +472,7 @@ class Agent(dbus.service.Object):
         self._add_tx_item(item, is_transfer=False)
         return repeat
 
-    def _get_tos(self, is_data:bool) -> int:
+    def _get_tos(self, is_data: bool) -> int:
         ''' Get the TOS byte for IP headers '''
         if self._config.ecn_init:
             return ECN_ECT0
@@ -527,7 +527,7 @@ class Agent(dbus.service.Object):
             )
             self._add_tx_item(item, is_transfer=False)
 
-    def _pmtud_recv_probe(self, conv:Conversation, ext):
+    def _pmtud_recv_probe(self, conv: Conversation, ext):
         (nonce, seq_no, confirm_delay) = ext
         self.__logger.debug('Received PMTUD probe %s:%s from %s', nonce, seq_no, conv.peer_address)
 
@@ -547,7 +547,7 @@ class Agent(dbus.service.Object):
         state['seq_nos'] |= portion.closedopen(seq_no, seq_no + 1)
         state['timer'] = glib.timeout_add(confirm_delay, self._pmtud_send_confirm, conv)
 
-    def _pmtud_send_confirm(self, conv:Conversation):
+    def _pmtud_send_confirm(self, conv: Conversation):
         state = self._pmtud_recv[conv.key]
         del self._pmtud_recv[conv.key]
         nonce = state['nonce']
@@ -566,7 +566,7 @@ class Agent(dbus.service.Object):
         )
         self._add_tx_item(item, is_transfer=False)
 
-    def _pmtud_recv_confirm(self, conv:Conversation, ext):
+    def _pmtud_recv_confirm(self, conv: Conversation, ext):
         (nonce, seen_offsets) = ext
 
         state = self._pmtud_send.get(nonce)
@@ -582,7 +582,7 @@ class Agent(dbus.service.Object):
         self.__logger.debug('Received PMTUD ack %s:%s to %s for sizes %s',
                             nonce, seq_nos, conv.peer_address, seen_sizes)
 
-    def _ecn_recvfrom(self, conv:Conversation, ip_ecn:int):
+    def _ecn_recvfrom(self, conv: Conversation, ip_ecn: int):
         # aggregate of all packets from the same peer, regardless of destination
         ecn_key = (conv.peer_address, conv.peer_port)
 
@@ -616,7 +616,7 @@ class Agent(dbus.service.Object):
             if diff > self._config.ecn_feedback_delay:
                 self._ecn_sendto(ecn_key)
 
-    def _ecn_sendto(self, ecn_key:Tuple):
+    def _ecn_sendto(self, ecn_key: Tuple):
         state = self._ecn_state[ecn_key]
         counts = state['counts']
 
@@ -643,14 +643,14 @@ class Agent(dbus.service.Object):
                 # space for TOS `int`
                 socket.CMSG_SPACE(struct.calcsize('@I'))
                 # space for PKTINFO `in_pktinfo`
-                +socket.CMSG_SPACE(struct.calcsize('@I') + 4 + 4)
+                + socket.CMSG_SPACE(struct.calcsize('@I') + 4 + 4)
             )
         elif sock.family == socket.AF_INET6:
             anclen += (
                 # space for TCLASS `int`
                 socket.CMSG_SPACE(struct.calcsize('@I'))
                 # space for PKTINFO `struct in6_pktinfo`
-                +socket.CMSG_SPACE(16 + struct.calcsize('@I'))
+                + socket.CMSG_SPACE(16 + struct.calcsize('@I'))
             )
         data, ancdata, _msg_flags, fromaddr = sock.recvmsg(datalen, anclen)
         localaddr = sock.getsockname()
@@ -702,7 +702,7 @@ class Agent(dbus.service.Object):
         self._recv_datagram(sock, data, conv, ip_tos)
         return True
 
-    def _starttls(self, sock, conv:Conversation, server_side:bool):
+    def _starttls(self, sock, conv: Conversation, server_side: bool):
         self._dtls_prep[conv.key] = sock
 
         # Create a bound-on-both-sides socket which will preferentially
@@ -735,14 +735,14 @@ class Agent(dbus.service.Object):
 
         return conn
 
-    def _dtlsconn_recv(self, _src, _cond, conn, conv:Conversation, *_args, **_kwargs):
+    def _dtlsconn_recv(self, _src, _cond, conn, conv: Conversation, *_args, **_kwargs):
         data = conn.read(64 * 1024)
         self.__logger.info('Received %d octets via DTLS on %s',
                            len(data), conv)
         self._recv_datagram(None, data, conv)
         return True
 
-    def _recv_datagram(self, sock, data:bytes, conv:Conversation, ip_tos:int=0):
+    def _recv_datagram(self, sock, data: bytes, conv: Conversation, ip_tos: int = 0):
         DTLS_FIRST_OCTETS = (
             20,  # change_cipher_spec
             21,  # alert
@@ -815,7 +815,7 @@ class Agent(dbus.service.Object):
 
         self.__logger.debug('Handled %d messages from packet', msg_count)
 
-    def _recv_ext_map(self, sock, extmap:dict, conv:Conversation, timestamp:datetime):
+    def _recv_ext_map(self, sock, extmap: dict, conv: Conversation, timestamp: datetime):
         if ExtensionKey.STARTTLS in extmap:
             if sock:
                 self._starttls(sock, conv, server_side=True)
@@ -887,7 +887,7 @@ class Agent(dbus.service.Object):
         if ExtensionKey.PEER_CONFIRM in extmap:
             self._pmtud_recv_confirm(conv, extmap[ExtensionKey.PEER_CONFIRM])
 
-    def _add_rx_item(self, item:BundleItem):
+    def _add_rx_item(self, item: BundleItem):
         ''' Add a recevied bundle.
         '''
         if item.transfer_id is None:
@@ -962,7 +962,7 @@ class Agent(dbus.service.Object):
         self.__logger.debug('send_bundle_data data len %d, tx_params %s', len(data), tx_params)
         return self.send_bundle_fileobj(BytesIO(data), tx_params)
 
-    def _add_tx_item(self, item, is_transfer:bool=True):
+    def _add_tx_item(self, item, is_transfer: bool = True):
         if is_transfer and item.transfer_id is None:
             item.transfer_id = copy.copy(self._tx_id)
             self._tx_id += 1
@@ -1142,4 +1142,3 @@ class Agent(dbus.service.Object):
     @dbus.service.signal(DBUS_IFACE, signature='sts')
     def send_bundle_finished(self, bid, length, result):
         pass
-

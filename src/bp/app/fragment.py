@@ -107,7 +107,7 @@ class Fragment(AbstractApplication):
             for blk in ctr.bundle.blocks:
                 if (frag_offset == 0
                     or blk.block_flags & CanonicalBlock.Flag.REPLICATE_IN_FRAGMENT
-                    or blk.block_num == Bundle.BLOCK_NUM_PAYLOAD):
+                        or blk.block_num == Bundle.BLOCK_NUM_PAYLOAD):
                     fctr.bundle.blocks.append(blk.copy())
             # ensure full size (with zero-size payload)
             fctr.reload()

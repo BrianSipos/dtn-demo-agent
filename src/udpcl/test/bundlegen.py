@@ -24,13 +24,12 @@ from tcpcl.test.bundlegen import (
 LOGGER = logging.getLogger(__name__)
 
 
-
 def bundle_iterable(genmode, gencount, indata):
     ''' A generator to yield encoded bundles as file-like objects.
     '''
     gen = Generator()
     if genmode == 'stdin':
-        func = lambda: io.BytesIO(indata)
+        def func(): return io.BytesIO(indata)
     elif genmode == 'fullvalid':
         # Some valid bundles
         func = gen.create_valid

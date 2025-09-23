@@ -351,7 +351,7 @@ def bundle_iterable(genmode, gencount, indata):
     '''
     gen = Generator()
     if genmode == 'stdin':
-        func = lambda: io.BytesIO(indata)
+        def func(): return io.BytesIO(indata)
     elif genmode == 'fullvalid':
         # Some valid bundles
         func = gen.create_valid

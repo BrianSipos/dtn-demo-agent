@@ -102,7 +102,7 @@ class Config(object):
     ''' True if outgoing data packets are marked as ECT '''
     ecn_feedback: bool = True
     ''' True if incoming ECN-marked packets are responded to with feedback. '''
-    ecn_feedback_delay:timedelta = timedelta(milliseconds=1000)
+    ecn_feedback_delay: timedelta = timedelta(milliseconds=1000)
 
     # Multicast options with defaults
     multicast: MulticastConfig = field(default_factory=MulticastConfig)
@@ -153,7 +153,7 @@ class Config(object):
             self._bus_conn = dbus.bus.BusConnection(addr_or_type)
         return self._bus_conn
 
-    def get_ssl_connection(self, sock, server_side:bool):
+    def get_ssl_connection(self, sock, server_side: bool):
         ''' Get an :py:class:`dtls.SSLConnection` object configured for this peer.
         '''
         version_map = {

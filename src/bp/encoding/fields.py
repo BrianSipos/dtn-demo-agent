@@ -2,13 +2,13 @@
 '''
 ''' Items related to per-block data.
 '''
+
 import datetime
 import enum
 import logging
 import urllib
 from scapy import volatile
 from scapy_cbor.fields import (CborField, UintField)
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -49,7 +49,7 @@ class EidField(CborField):
                 if not path.startswith('/'):
                     path = '/' + path
             ssp += path
-    
+
             return [scheme_type, ssp]
 
         elif scheme_type == EidField.TypeCode.ipn:
@@ -70,7 +70,7 @@ class EidField(CborField):
             ssp = x[1]
             if isinstance(ssp, int):
                 ssp = EidField.WellKnownSsp(ssp).name
-    
+
             return '{0}:{1}'.format(
                 EidField.TypeCode(scheme_type).name,
                 ssp
@@ -136,7 +136,7 @@ class DtnTimeField(UintField):
         elif isinstance(x, (str, bytes)):
             return DtnTimeField.datetime_to_dtntime(
                 datetime.datetime.fromisoformat(x)
-                    .replace(tzinfo=datetime.timezone.utc)
+                .replace(tzinfo=datetime.timezone.utc)
             )
 
         return int(x)

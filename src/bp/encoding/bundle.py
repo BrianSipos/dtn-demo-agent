@@ -50,7 +50,7 @@ class Bundle(CborArray):
             for blk in self.blocks:
                 blk_data = blk.getfieldval('btsd')
                 if (blk.type_code == Bundle.BLOCK_TYPE_PAYLOAD
-                    and blk_data is not None):
+                        and blk_data is not None):
                     pay = AdminRecord(blk_data)
                     blk.remove_payload()
                     blk.add_payload(pay)
