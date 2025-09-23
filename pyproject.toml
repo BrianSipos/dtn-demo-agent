@@ -10,12 +10,12 @@ authors = [
 ]
 description = "A demonstration agent for the DTN BPv7/TCPCLv4/UDPCLv2"
 readme = "README.md"
-license = { text="LGPL-3" }
+license = "LGPL-3"
+license-files = ["LICENSE"]
 requires-python = ">=3.7"
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: GNU Lesser General Public License (LGPL)",
   "Programming Language :: Python :: 3",
   "Operating System :: OS Independent",
   "Topic :: Software Development :: Libraries",
@@ -42,6 +42,7 @@ dependencies = [
 [project.optional-dependencies]
 test = [
   "pytest",
+  "pytest-subtests",
   "pytest-cov",
   "coverage",
 ]
@@ -64,6 +65,11 @@ container = [
   "cryptography >=0.9",
 ]
 
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
+
 [tool.pylint.MAIN]
 load-plugins="pylint_junit"
 suggestion-mode="no"
@@ -72,8 +78,11 @@ max-line-length=100
 [tool.pylint.DESIGN]
 min-public-methods=1
 
+[tool.autopep8]
+max_line_length=160
+
 [tool.flake8]
-max-line-length=100
+max-line-length=160
 
 [project.scripts]
 tcpcl-messagegen = "tcpcl.test.messagegen:main"
