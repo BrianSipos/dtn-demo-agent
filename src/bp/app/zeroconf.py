@@ -25,7 +25,7 @@ SVCLOCAL = '_dtn-bundle._tcp.local.'
 ''' Global service name to register under '''
 
 
-async def happy_eyeballs(addresses:List, port:int) -> ipaddress._IPAddressBase:
+async def happy_eyeballs(addresses: List, port: int) -> ipaddress._IPAddressBase:
     ''' A simplified form of RFC 8305 for a list of potential addresses.
     '''
     tasks = []
@@ -64,7 +64,7 @@ async def happy_eyeballs(addresses:List, port:int) -> ipaddress._IPAddressBase:
 
 @app('zeroconf')
 class App(AbstractApplication):
-    
+
     DBUS_IFACE = 'org.ietf.dtn.bp.zeroconf'
     ''' Interface name '''
 
@@ -75,16 +75,21 @@ class App(AbstractApplication):
         self._zco = None
         self._browser = None
 
-    def load_config(self, config:Config):
+    def load_config(self, config: Config):
         super().load_config(config)
         self._config = config.apps.get(self._app_name, {})
 
         self._zco = Zeroconf()
 
-        if self._config.get('offer', False):
-            glib.timeout_add(random.randint(5e3, 8e3), self._offer)
-        if self._config.get('enumerate', False):
-            glib.timeout_add(random.randint(5e3, 8e3), self._enumerate)
+        delay = self._config.get('offer', False)
+        if delay is not False:
+            delay = 5e3 if delay is True else max(100, int(1e3 * delay))
+            glib.timeout_add(random.randint(100, delay), self._offer)
+
+        delay = self._config.get('enumerate', False)
+        if delay is not False:
+            delay = 5e3 if delay is True else max(100, int(1e3 * delay))
+            glib.timeout_add(random.randint(100, delay), self._enumerate)
 
     def _iface_addrs(self) -> List[ipaddress._IPAddressBase]:
         all_addrs = []
@@ -149,8 +154,8 @@ class App(AbstractApplication):
             addresses=list(map(str, all_addrs)),
             port=4556,
             properties=dict(
-              txtvers=1,
-              protovers=4,
+                txtvers=1,
+                protovers=4,
             ),
         )
         self._zco.register_service(servinfo)
@@ -160,7 +165,7 @@ class App(AbstractApplication):
         return False
 
     def _enumerate(self):
-        
+
         self._browser = ServiceBrowser(
             self._zco,
             [SVCLOCAL],
@@ -192,7 +197,7 @@ class App(AbstractApplication):
                     port=best_port,
                 ),
             )
-            LOGGER.info('Route item %s', route)
+            LOGGER.info('Add route item %s', route)
             self._agent.add_tx_route(route)
 
             self._agent.get_cla('tcpcl').connect(best_addr, best_port)

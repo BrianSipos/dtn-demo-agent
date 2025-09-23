@@ -172,11 +172,12 @@ class Agent(dbus.service.Object):
             if not self.shutdown():
                 # wait for graceful shutdown
                 eloop.run()
+        self._logger.info('Stopped event loop')
 
-    def add_tx_route(self, item:TxRouteItem):
+    def add_tx_route(self, item: TxRouteItem):
         self._config.tx_route_table.append(item)
 
-    def get_cla(self, name:str) -> bp.cla.AbstractAdaptor:
+    def get_cla(self, name: str) -> bp.cla.AbstractAdaptor:
         return self._cl_agent[name]
 
     def _bus_name_changed(self, servname, old_owner, new_owner):
@@ -194,7 +195,7 @@ class Agent(dbus.service.Object):
 
     def _cl_peer_node_seen(self, cltype):
 
-        def func(nodeid:str, tx_params:dict):
+        def func(nodeid: str, tx_params: dict):
             ''' React to :py:meth:`cla.AbstractAdaptor.peer_node_seen` calls.
             '''
             import re
@@ -213,7 +214,7 @@ class Agent(dbus.service.Object):
 
     def _cl_recv_bundle_finish(self, cltype):
 
-        def func(data:bytes, metadata:dict):
+        def func(data: bytes, metadata: dict):
             ''' React to :py:meth:`cla.AbstractAdaptor.recv_bundle_finish` calls.
             '''
             self._logger.debug('recv_bundle_finish from %s with %s', cltype, metadata)
@@ -438,7 +439,7 @@ class Agent(dbus.service.Object):
         self._logger.debug('Attaching to %s service %s', cltype, servname)
 
         try:
-            cls:bp.cla.AbstractAdaptor = bp.cla.CL_TYPES[cltype]
+            cls: bp.cla.AbstractAdaptor = bp.cla.CL_TYPES[cltype]
         except KeyError:
             raise ValueError('Invalid cltype: {}'.format(cltype))
 

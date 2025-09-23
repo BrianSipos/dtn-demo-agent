@@ -1,0 +1,30 @@
+nets:
+  dtnA:
+    subnet4: "192.168.100.0/24"
+
+nodes:
+  node000:
+    nets: [dtnA]
+    keys:
+      sign:
+        keytype: SECP256R1
+    config:
+      apps:
+        zeroconf:
+          offer: 1
+        safe:
+          endpoint: dtn://node000/safe
+      tls_enable: false
+
+  node001:
+    nets: [dtnA]
+    keys:
+      sign:
+        keytype: SECP256R1
+    config:
+      apps:
+        zeroconf:
+          enumerate: 1
+        safe:
+          endpoint: dtn://node001/safe
+      tls_enable: false

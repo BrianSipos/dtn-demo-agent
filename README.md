@@ -105,7 +105,7 @@ To initialize and start a set of containers:
 
 To observe the log of one of the nodes:
 ```
-docker container exec -it node000 journalctl -f
+./container/run.py --config container/example.yaml exec node000 -- journalctl -f
 ```
 
 To capture traffic across container networks, run similar to:
@@ -115,14 +115,24 @@ wireshark -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -Y 'bpv7' -k
 
 To call DBus methods in one of the nodes:
 ```
-docker container exec -it node000 dbus-send --system --print-reply --dest=org.ietf.dtn.node.udpcl /org/ietf/dtn/udpcl/Agent org.ietf.dtn.udpcl.Agent.pmtud_start string:node002. uint16:4556
+./container/run.py --config container/example.yaml exec node000 dbus-send --system --print-reply --dest=org.ietf.dtn.node.udpcl /org/ietf/dtn/udpcl/Agent org.ietf.dtn.udpcl.Agent.pmtud_start string:node002. uint16:4556
 ```
+
+## ACME Validation Prototype
 
 To perform an ACME validation exchange between two nodes run the script:
 ```
-docker container exec -it node000 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.start_expect_acme_request string:"dDtaviYTPUWFS3NK37YWfQ" string:"tPUZNY4ONIk6LxErRFEjVw" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
+ node000 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.start_expect_acme_request string:"dDtaviYTPUWFS3NK37YWfQ" string:"tPUZNY4ONIk6LxErRFEjVw" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
 docker container exec -it node001 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.send_acme_request string:"dtn://node000/" string:"dDtaviYTPUWFS3NK37YWfQ" string:"tPUZNY4ONIk6LxErRFEjVw" string:"p3yRYFU4KxwQaHQjJ2RdiQ" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
 docker container exec -it node000 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.stop_expect_acme_request string:"dDtaviYTPUWFS3NK37YWfQ"
+```
+
+## SAFE Prototype
+
+To initiate a primary SA with another SAFE endpoint run:
+```
+./container/run.py --config container/example-safe.yaml exec node000 -- dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/safe org.ietf.dtn.bp.safe.start string:dtn://node001/safe
+
 ```
 
 # Wireshark Protocols and Dissectors

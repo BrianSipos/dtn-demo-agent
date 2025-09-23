@@ -58,14 +58,14 @@ class AbstractAdaptor(ABC):
         self.agent_obj = None
         self.bus_conn = None
 
-    def peer_node_seen(self, node_id:str, tx_params:dict):
+    def peer_node_seen(self, node_id: str, tx_params: dict):
         ''' Callback interface to a indicate when a peer is seen
 
         :param node_id: A potential route to use for this peer.
         '''
         raise NotImplementedError()
 
-    def recv_bundle_finish(self, data:bytes, metadata:dict):
+    def recv_bundle_finish(self, data: bytes, metadata: dict):
         ''' Callback interface to a handle received bundles.
 
         :param data: The actual bundle recevied.
@@ -74,7 +74,7 @@ class AbstractAdaptor(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def send_bundle_func(self, tx_params:dict):
+    def send_bundle_func(self, tx_params: dict):
         ''' Interface to get a function to send a bundle to be sent by the CL.
         :param kwargs: Arguments from the routing table.
         '''
@@ -118,7 +118,7 @@ class UdpclAdaptor(AbstractAdaptor):
         agent_iface.connect_to_signal('polling_received', self._handle_polling_received)
         agent_iface.connect_to_signal('recv_bundle_finished', self._handle_recv_bundle_finish)
 
-    def send_bundle_func(self, tx_params:dict):
+    def send_bundle_func(self, tx_params: dict):
         do_tag = tx_params.get('do_tag', False)
 
         def sender(data):
@@ -200,7 +200,18 @@ class TcpclAdaptor(AbstractAdaptor):
                 self._reverse_route(cl_conn)
 
         conn_iface.connect_to_signal('session_state_changed', handle_state_change)
-        state = conn_iface.get_session_state()
+
+        state = None
+        for _ix in range(10):
+            import time
+            time.sleep(0.1)
+            try:
+                state = conn_iface.get_session_state()
+                break
+            except dbus.exceptions.DBusException:
+                pass  # continue waiting
+        if state is None:
+            raise TimeoutError('Failed to get_session_state() after 1000ms')
         handle_state_change(state)
 
     def _conn_detach(self, conn_path):
@@ -212,7 +223,7 @@ class TcpclAdaptor(AbstractAdaptor):
         if cl_conn.nodeid:
             del self._cl_conn_nodeid[cl_conn.nodeid]
 
-    def _conn_ready(self, cl_conn:'TcpclConnection', next_hop:str):
+    def _conn_ready(self, cl_conn: 'TcpclConnection', next_hop: str):
         ''' Handle a new connection being established and
         send any pending data for a next-hop.
 
@@ -237,13 +248,13 @@ class TcpclAdaptor(AbstractAdaptor):
         self._logger.info('Route item %s', route)
         self._agent.add_tx_route(route)
 
-    def connect(self, address:str, port:int):
+    def connect(self, address: str, port: int):
         ''' Initiate a connection preemptively.
         '''
         self._logger.info('Connecting to [%s]:%d', address, port)
         self.agent_obj.connect(address, port)
 
-    def send_bundle_func(self, tx_params:dict):
+    def send_bundle_func(self, tx_params: dict):
         ''' Get an active session or create one if needed.
         '''
         next_nodeid = tx_params.get('next_nodeid')

@@ -258,10 +258,16 @@ class Docker:
         return self.run_docker_compose(['exec'] + args, **kwargs)
 
 
-class Runner:
-    # Available actions correspond to public functions
-    ACTIONS = ['pkigen', 'build', 'start', 'ready', 'check', 'stop', 'delete']
+_ACTIONS = list()
+''' Available actions correspond to public functions '''
 
+@staticmethod
+def action(func):
+    _ACTIONS.append(func.__name__)
+    return func
+
+
+class Runner:
     def __init__(self, args):
         self.args = args
 
@@ -276,6 +282,7 @@ class Runner:
 
     # Action methods follow
 
+    @action
     def pkigen(self):
         pca = PkiCa()
 
@@ -322,6 +329,7 @@ class Runner:
                     fqdn=fqdn,
                 )
 
+    @action
     def build(self):
         compose = {
             'networks': {},
@@ -515,9 +523,11 @@ class Runner:
 
         self._docker.run_docker_compose(['build'])
 
+    @action
     def start(self):
         self._docker.run_docker_compose(['up', '-d', '--force-recreate', '--remove-orphans'])
 
+    @action
     def ready(self):
         ''' Wait for services to be ready '''
         for name, node in self._config['nodes'].items():
@@ -532,7 +542,8 @@ class Runner:
                 except Exception as err:
                     continue
 
-    def check(self):
+    @action
+    def check_sand(self):
         while True:
             least = None
             for node_name in self._config['nodes'].keys():
@@ -545,14 +556,16 @@ class Runner:
                 break
             time.sleep(3)
 
+    @action
     def stop(self):
         self._docker.run_docker_compose(['down'])
 
+    @action
     def delete(self):
         self._docker.run_docker_compose(['rm', '-sf'])
 
-    def exec(self):
-        self._docker.run_exec(self.args.args)
+    def do_exec(self):
+        self._docker.run_exec([self.args.container] + self.args.args)
 
 
 def main():
@@ -574,9 +587,12 @@ def main():
     )
     sub_exec = subparsers.add_parser('exec',
                                      help='Execute within a container')
-    sub_exec.add_argument('args', nargs='+')
+    sub_exec.add_argument('container',
+                          help='Name of container to execute on')
+    sub_exec.add_argument('args', nargs='+',
+                          help='Command and its arguments to execute')
     sub_act = subparsers.add_parser('act', help='Perform one or more action')
-    sub_act.add_argument('actions', choices=Runner.ACTIONS, nargs='+')
+    sub_act.add_argument('actions', choices=_ACTIONS, nargs='+')
     args = parser.parse_args()
 
     logging.basicConfig(level=args.log_level.upper())
@@ -588,9 +604,10 @@ def main():
     runner = Runner(args)
     if args.top_action == 'act':
         for act in args.actions:
-            getattr(runner, act)()
+            func = getattr(runner, act)
+            func()
     elif args.top_action == 'exec':
-        runner.exec()
+        runner.do_exec()
 
 
 if __name__ == '__main__':

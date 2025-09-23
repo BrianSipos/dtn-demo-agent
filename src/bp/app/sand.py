@@ -18,7 +18,7 @@ from typing import List
 from scapy_cbor.util import encode_diagnostic
 from bp.config import Config, TxRouteItem
 from bp.encoding import (
-    AbstractBlock, PrimaryBlock, CanonicalBlock, HopCountBlock,
+    CanonicalBlock, PrimaryBlock, HopCountBlock,
     BlockIntegrityBlock
 )
 from bp.util import BundleContainer, ChainStep
@@ -99,13 +99,13 @@ class OneHopNeighbor(object):
     tx_routes: List[TxRouteItem] = field(default_factory=list)
 
 
-@app('nmp')
-class Nmp(AbstractApplication):
-    ''' Neighbor messaging protocol.
+@app('sand')
+class SAND(AbstractApplication):
+    ''' SAND messaging protocol.
     '''
 
     # Interface name
-    DBUS_IFACE = 'org.ietf.dtn.bp.nmp'
+    DBUS_IFACE = 'org.ietf.dtn.bp.sand'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -115,7 +115,7 @@ class Nmp(AbstractApplication):
         self._encr_chain = []
 
         self._config = None
-        self._nmp_eid = None
+        self.own_eid = None
         self._last_hello = None
         self._hello_min_intvl = None
         self._one_hop = {}
@@ -135,19 +135,19 @@ class Nmp(AbstractApplication):
             with open(config.encr_cert_file, 'rb') as infile:
                 self._encr_chain = load_pem_chain(infile)
 
-        nmp_config = self._config.apps.get(self._app_name, {})
-        LOGGER.debug('nmp_config %s', nmp_config)
+        sand_config = self._config.apps.get(self._app_name, {})
+        LOGGER.debug('sand_config %s', sand_config)
 
-        self._nmp_eid = nmp_config.get('endpoint')
+        self.own_eid = sand_config.get('endpoint')
 
         self._hello_min_intvl = datetime.timedelta(
-            seconds=nmp_config.get('hello_min_intvl', 1)
+            seconds=sand_config.get('hello_min_intvl', 1)
         )
         self._hello_nom_intvl = datetime.timedelta(
-            seconds=nmp_config.get('hello_nom_intvl', 10)
+            seconds=sand_config.get('hello_nom_intvl', 10)
         )
 
-        if nmp_config.get('enable', False):
+        if sand_config.get('enable', False):
             hello_intvl_ms = self._hello_nom_intvl // datetime.timedelta(milliseconds=1)
             LOGGER.info('Sending HELLO at interval %d ms', hello_intvl_ms)
             glib.timeout_add(hello_intvl_ms, self._timer_hello)
@@ -156,29 +156,29 @@ class Nmp(AbstractApplication):
     def add_chains(self, rx_chain, tx_chain):
         rx_chain.append(ChainStep(
             order=-1,
-            name='NMP routing',
+            name='SAND routing',
             action=self._rx_route
         ))
         rx_chain.append(ChainStep(
             order=30,
-            name='NMP handling',
+            name='SAND handling',
             action=self._recv_bundle
         ))
         tx_chain.append(ChainStep(
             order=-1,
-            name='NMP routing',
+            name='SAND routing',
             action=self._tx_route
         ))
 
     def _rx_route(self, ctr):
         eid = ctr.bundle.primary.destination
-        if eid in (self._nmp_eid, NEIGHBOR_EID):
+        if eid in (self.own_eid, NEIGHBOR_EID):
             ctr.record_action('deliver')
 
     def _recv_bundle(self, ctr:BundleContainer) -> bool:
         if self._recv_for(ctr, NEIGHBOR_EID):
             return self._recv_group(ctr)
-        elif self._recv_for(ctr, self._nmp_eid):
+        elif self._recv_for(ctr, self.own_eid):
             return self._recv_own(ctr)
         else:
             return False
@@ -267,7 +267,7 @@ class Nmp(AbstractApplication):
                         neighbor.link_status = LinkStatus.SYMMETRIC
 
             else:
-                LOGGER.warning('Ignoring unknown NMP message type %s', msg_type)
+                LOGGER.warning('Ignoring unknown SAND message type %s', msg_type)
 
         return True
 
@@ -290,14 +290,14 @@ class Nmp(AbstractApplication):
             bundle_flags=(
                 PrimaryBlock.Flag.NO_FRAGMENT
             ),
-            source=self._nmp_eid,
+            source=self.own_eid,
             destination=dest,
-            crc_type=AbstractBlock.CrcType.CRC32,
+            crc_type=CanonicalBlock.CrcType.CRC32,
         )
         ctr.bundle.blocks = [
             CanonicalBlock(
                 block_num=2,
-                crc_type=AbstractBlock.CrcType.CRC32,
+                crc_type=CanonicalBlock.CrcType.CRC32,
             ) / HopCountBlock(
                 limit=1,
                 count=0
@@ -305,14 +305,14 @@ class Nmp(AbstractApplication):
             CanonicalBlock(
                 type_code=1,
                 block_num=1,
-                crc_type=AbstractBlock.CrcType.CRC32,
+                crc_type=CanonicalBlock.CrcType.CRC32,
                 btsd=adu,
             ),
         ]
         return ctr
 
     def _send_msg(self, ctr, address, local_address, local_if):
-        ''' Send an NMP message
+        ''' Send an SAND message
 
         :param ctr: The message container.
         :param address: The remote address to send to.
