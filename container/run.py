@@ -54,7 +54,7 @@ class PkiCa:
             node_key = rsa.generate_private_key(65537, key_size, backend=default_backend())
         elif keytype.startswith('SECP'):
             curve = getattr(ec, keytype)
-            node_key = ec.generate_private_key(curve, backend=default_backend())  # Curve for COSE ES256
+            node_key = ec.generate_private_key(curve(), backend=default_backend())  # Curve for COSE ES256
         else:
             raise ValueError(f'Unknown keytype: {keytype}')
         return node_key
