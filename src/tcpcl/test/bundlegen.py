@@ -102,7 +102,7 @@ def randdtntime():
     if random.uniform(0, 1) < 0.2:
         return 0
     else:
-        return random.randint(1, 1e10)
+        return random.randint(1, int(1e10))
 
 
 def randnodeid():
@@ -124,7 +124,7 @@ def randnodeid():
 def randtimestamp():
     ''' Generate a random timestamp tuple.
     '''
-    return [randdtntime(), random.randint(0, 1e3)]
+    return [randdtntime(), random.randint(0, int(1e3))]
 
 
 def randstatus():
@@ -156,9 +156,9 @@ def randcboritem(maxdepth=10):
     elif itemtype is bool:
         return random.choice([False, True])
     elif itemtype is int:
-        return random.randint(-1e3, 1e3)
+        return random.randint(-int(1e3), int(1e3))
     elif itemtype is float:
-        return random.uniform(-1e3, 1e3)
+        return random.uniform(-int(1e3), int(1e3))
     elif itemtype is bytes:
         return randbytes()
     elif itemtype is str:
@@ -184,7 +184,7 @@ class Generator(object):
     BLOCK_TYPE_BCB = 12
 
     @enum.unique
-    class BlockType(enum.IntFlag):
+    class BlockType(enum.IntEnum):
         ''' Non-primary block types. '''
         PREV_NODE = 6
         BUNDLE_AGE = 7
@@ -216,12 +216,12 @@ class Generator(object):
             return binaryCborTag(randnodeid())
         elif block_type == self.BlockType.BUNDLE_AGE:
             # Bundle Age
-            return binaryCborTag(random.randint(0, 1e10))
+            return binaryCborTag(random.randint(0, int(1e10)))
         elif block_type == self.BlockType.HOP_COUNT:
             # Hop Count
             return binaryCborTag([
-                random.randint(0, 1e1),  # limit
-                random.randint(0, 1e1),  # current
+                random.randint(0, int(1e1)),  # limit
+                random.randint(0, int(1e1)),  # current
             ])
         elif block_type in (self.BLOCK_TYPE_BIB, self.BLOCK_TYPE_BCB):
 
@@ -303,14 +303,14 @@ class Generator(object):
                 randnodeid(),
                 randnodeid(),
                 randtimestamp(),  # creation timestamp
-                random.randint(0, 24 * 60 * 60 * 1e6),  # lifetime (us)
+                random.randint(0, 24 * 60 * 60 * int(1e6)),  # lifetime (us)
             ],
             crc_type_ix=2,
         )
         is_fragment = block.fields[1] & 0x0001
         if is_fragment:
-            block.fields.append(random.randint(0, 1e4))  # fragment offset
-            block.fields.append(random.randint(0, 1e4))  # total application data unit length
+            block.fields.append(random.randint(0, int(1e4)))  # fragment offset
+            block.fields.append(random.randint(0, int(1e4)))  # total application data unit length
         has_crc = block.fields[block.crc_type_ix] != 0
         if has_crc:
             block.fields.append(None)
