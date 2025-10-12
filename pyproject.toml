@@ -63,6 +63,7 @@ docs = [
   "sphinx-argparse",
 ]
 container = [
+  "PyYAML",
   "asn1",
   "cryptography ~=46.0",
 ]

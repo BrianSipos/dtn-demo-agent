@@ -65,7 +65,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Dependencies
-        run: pip3 install "asn1" "cryptography ~=46.0"
+        run: pip3 install PyYAML asn1 "cryptography ~=46.0"
       - name: Prep
         run: ./container/run.py --config container/example.yaml act pkigen build
       - name: Start
