@@ -25,7 +25,7 @@ dependencies = [
   "cbor2 >=4.1",
   "pycose >=1.0.1",
   "crcmod >=1.7",
-  "cryptography >=0.9",
+  "cryptography ~=46.0",
   "certvalidator",
   "dbus-python",
   "portion >=2.1",
@@ -56,7 +56,6 @@ format = [
 flake8 = [
   "flake8",
   "flake8_pyproject",
-  "flake8_formatter_junit_xml",
 ]
 docs = [
   "sphinx <6",
@@ -65,7 +64,7 @@ docs = [
 ]
 container = [
   "asn1",
-  "cryptography >=0.9",
+  "cryptography ~=46.0",
 ]
 
 [tool.pytest.ini_options]

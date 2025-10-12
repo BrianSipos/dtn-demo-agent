@@ -18,7 +18,11 @@ jobs:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
@@ -51,13 +55,17 @@ jobs:
     name: Integration test
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Dependencies
-        run: pip3 install '.[container]'
+        run: pip3 install "asn1" "cryptography ~=46.0"
       - name: Prep
         run: ./container/run.py --config container/example.yaml act pkigen build
       - name: Start
