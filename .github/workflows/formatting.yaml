@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Set up packages
-        run: pip3 install -e '.[format]'
+        run: pip3 install autopep8
       - name: Check code formatting
         run: ./check_format.sh
 
@@ -41,6 +41,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install with dependencies
-        run: pip3 install -e '.[flake8]'
+        run: pip3 install flake8
       - name: Run flake8
         run: flake8 .
