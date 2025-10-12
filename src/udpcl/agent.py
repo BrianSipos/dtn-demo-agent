@@ -44,7 +44,7 @@ ECN_CE = 0x03
 
 
 @enum.unique
-class ExtensionKey(enum.IntFlag):
+class ExtensionKey(enum.IntEnum):
     ''' Extension map keys.
     '''
     TRANSFER = 0x02

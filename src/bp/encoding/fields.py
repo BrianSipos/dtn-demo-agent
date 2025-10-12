@@ -18,14 +18,14 @@ class EidField(CborField):
     '''
 
     @enum.unique
-    class TypeCode(enum.IntFlag):
+    class TypeCode(enum.IntEnum):
         ''' EID scheme codes.
         Flags must be in LSbit-first order.
         '''
         dtn = 1
         ipn = 2
 
-    class WellKnownSsp(enum.IntFlag):
+    class WellKnownSsp(enum.IntEnum):
         ''' Integer-valued well-known SSP.
         '''
         none = 0
