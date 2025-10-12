@@ -10,7 +10,6 @@ authors = [
 ]
 description = "A demonstration agent for the DTN BPv7/TCPCLv4/UDPCLv2"
 readme = "README.md"
-license = { text="LGPL-3" }
 license-files = ["LICENSE"]
 requires-python = ">=3.7"
 classifiers = [
@@ -34,7 +33,7 @@ dependencies = [
   "PyGObject >=3.34", # glib integration
   "PyYAML",
   "python3-dtls",
-  "scapy >=2.4,<2.4.5",
+  "scapy ~=2.6",
   "six",
   "zeroconf",
 ]

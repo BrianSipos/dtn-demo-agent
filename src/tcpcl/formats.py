@@ -5,7 +5,7 @@ Created on May 29, 2016
 '''
 
 from scapy import fields, volatile, packet
-
+from typing import Optional
 from . import sdnv
 
 
@@ -226,13 +226,14 @@ class VerifyError(RuntimeError):
     ''' An exception to indicate a read verification error. '''
 
 
-def verify_sized_item(length, item):
+def verify_sized_item(length:Optional[int], item:packet.Packet) -> None:
     ''' Verify consistency of reading a sized item.
     :param length: The expected size of the field/packet.
-    :type length: int or None
     :param item: The field or packet to take size of.
     :raise VerifyError: if inconsistent.
     '''
+    if length is None:
+        return
     read_len = int(length)
     if read_len != length:
         raise VerifyError('Read length is missing')
