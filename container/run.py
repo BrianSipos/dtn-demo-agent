@@ -50,7 +50,7 @@ class PkiCa:
     def generate_key(self, key_opts: dict) -> Union[rsa.RSAPrivateKey, ec.EllipticCurvePrivateKey]:
         keytype = key_opts.get('keytype', 'SECP256R1').upper()
         if keytype == 'RSA':
-            key_size = 1024
+            key_size = 2048
             node_key = rsa.generate_private_key(65537, key_size, backend=default_backend())
         elif keytype.startswith('SECP'):
             curve = getattr(ec, keytype)
