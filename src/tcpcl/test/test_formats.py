@@ -77,4 +77,3 @@ class TestSdnvField(unittest.TestCase):
         pkt = self.DummyPacket(data)
         self.assertEqual(len(pkt), 2)
         self.assertEqual(pkt.getfieldval('attr'), testval)
-

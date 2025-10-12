@@ -31,12 +31,12 @@ class AbstractApplication(dbus.service.Object):
     :param agent: The parent agent of this application.
     '''
 
-    def __init__(self, app_name:str, agent, bus_kwargs):
+    def __init__(self, app_name: str, agent, bus_kwargs):
         dbus.service.Object.__init__(self, **bus_kwargs)
         self._app_name = app_name
         self._agent = agent
 
-    def load_config(self, config:Config):
+    def load_config(self, config: Config):
         ''' Read any needed configuration data.
 
         :param config: The agent configuration.

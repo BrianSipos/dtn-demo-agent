@@ -90,7 +90,7 @@ class Worker(object):
 
     def _accept(self, bindsock, *args, **kwargs):
         ''' Callback to handle incoming connections.
-        
+
         :return: True to continue listening.
         '''
         sock, fromaddr = bindsock.deliver()
@@ -106,7 +106,7 @@ class Worker(object):
 
     def set_on_stop(self, func):
         ''' Set a callback to be run when this agent is stopped.
-        
+
         :param func: The callback, which takes no arguments.
         '''
         self._on_stop = func
@@ -173,7 +173,7 @@ def main():
         pass
     worker.stop()
 
-    #with scapy.utils.PcapWriter(args.outfile) as fdesc:
+    # with scapy.utils.PcapWriter(args.outfile) as fdesc:
 
 
 if __name__ == '__main__':

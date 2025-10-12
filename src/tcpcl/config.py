@@ -18,6 +18,7 @@ class ListenConfig():
     # Local port to listen on
     port: int = 4556
 
+
 @dataclass
 class ConnectConfig():
     # Remote address to connect to

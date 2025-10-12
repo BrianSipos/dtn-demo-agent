@@ -36,7 +36,7 @@ class PkiCa:
         self._ca_key = None
         self._ca_cert = None
 
-    def other_name_eid(self, eid:str) -> x509.OtherName:
+    def other_name_eid(self, eid: str) -> x509.OtherName:
         ''' Encode a text EID as an Other Name object.
         '''
         eid_enc = asn1.Encoder()
@@ -47,19 +47,19 @@ class PkiCa:
             eid_enc.output()
         )
 
-    def generate_key(self, key_opts:dict) -> Union[rsa.RSAPrivateKey, ec.EllipticCurvePrivateKey]:
+    def generate_key(self, key_opts: dict) -> Union[rsa.RSAPrivateKey, ec.EllipticCurvePrivateKey]:
         keytype = key_opts.get('keytype', 'SECP256R1').upper()
         if keytype == 'RSA':
-            key_size = 1024
+            key_size = 2048
             node_key = rsa.generate_private_key(65537, key_size, backend=default_backend())
         elif keytype.startswith('SECP'):
             curve = getattr(ec, keytype)
-            node_key = ec.generate_private_key(curve, backend=default_backend())  # Curve for COSE ES256
+            node_key = ec.generate_private_key(curve(), backend=default_backend())  # Curve for COSE ES256
         else:
             raise ValueError(f'Unknown keytype: {keytype}')
         return node_key
 
-    def generate_root_ca(self, certfile:str, keyfile:str) -> x509.Certificate:
+    def generate_root_ca(self, certfile: str, keyfile: str) -> x509.Certificate:
         ''' Generate and retain a root CA. '''
         ca_key = self.generate_key({})
 
@@ -102,7 +102,7 @@ class PkiCa:
                 x509.oid.ObjectIdentifier('1.3.6.1.5.5.7.3.35')  # id-kp-bundleSecurity
             ]),
             critical=False,
-         ).add_extension(
+        ).add_extension(
             x509.NameConstraints(
                 permitted_subtrees=[
                     self.other_name_eid('ipn:*.*'),
@@ -110,7 +110,7 @@ class PkiCa:
                 excluded_subtrees=None,
             ),
             critical=True,
-         ).add_extension(
+        ).add_extension(
             x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()),
             critical=False,
         ).add_extension(
@@ -132,7 +132,7 @@ class PkiCa:
         self._ca_key = ca_key
         self._ca_cert = ca_cert
 
-    def generate_end_entity(self, cafile:str, certfile:str, keyfile:str, mode:str, nodeid:str, fqdn:Optional[str]=None) -> x509.Certificate:
+    def generate_end_entity(self, cafile: str, certfile: str, keyfile: str, mode: str, nodeid: str, fqdn: Optional[str] = None) -> x509.Certificate:
         '''
         :param mode: Either 'transport' or 'signing'.
         :param nodeid: The Node ID for the entity as a URI string.
@@ -562,12 +562,12 @@ def main():
                         default='INFO',
                         help='Console logging lowest severity.')
     parser.add_argument('--config', type=str, required=True,
-        help='The scenario YAML file to load',
-    )
+                        help='The scenario YAML file to load',
+                        )
     parser.add_argument('--image-no-cache', default=False, action='store_true')
     parser.add_argument('--stage-dir', default=DEFAULT_STAGEDIR,
-        help='The staging file path'
-    )
+                        help='The staging file path'
+                        )
     subparsers = parser.add_subparsers(
         dest='top_action',
         help='The top action to perform',
@@ -595,4 +595,3 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
-

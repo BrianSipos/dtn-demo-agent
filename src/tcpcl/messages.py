@@ -86,7 +86,7 @@ class SessionInit(formats.NoPayloadPacket):
         formats.UInt32FieldLenField('ext_size', default=None,
                                     length_of='ext_items'),
         formats.ExtensionListField('ext_items', default=[],
-                                   cls=SessionExtendHeader,
+                                   pkt_cls=SessionExtendHeader,
                                    length_from=lambda pkt: pkt.ext_size),
     ]
 
@@ -201,7 +201,7 @@ class TransferSegment(formats.NoPayloadPacket):
         fields.ConditionalField(
             cond=lambda pkt: pkt.flags & TransferSegment.Flag.START,
             fld=formats.ExtensionListField('ext_items', default=[],
-                                           cls=TransferExtendHeader,
+                                           pkt_cls=TransferExtendHeader,
                                            length_from=lambda pkt: pkt.ext_size),
         ),
         formats.UInt64FieldLenField('length', default=None, length_of='data'),

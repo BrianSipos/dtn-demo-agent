@@ -299,7 +299,7 @@ class Connection(object):
             return False
 
         self._logger.debug('Received %d octets (%s)',
-                            len(data), self._conn_name())
+                           len(data), self._conn_name())
         self.recv_raw(data)
         return True
 
@@ -353,7 +353,7 @@ class Connection(object):
         if self.__tx_buf:
             data = self.__tx_buf[:self.CHUNK_SIZE]
             self._logger.debug('Sending message %d/%d octets (%s)',
-                                len(data), len(self.__tx_buf), self._conn_name())
+                               len(data), len(self.__tx_buf), self._conn_name())
             try:
                 tx_size = sock.send(data)
                 self._logger.debug('Sent %d octets', tx_size)
@@ -642,7 +642,7 @@ class Messenger(Connection):
                 raise
             if self.DO_DEBUG_DATA:
                 self._logger.debug('RX packet data: %s',
-                                    binascii.hexlify(pkt_data))
+                                   binascii.hexlify(pkt_data))
             self._logger.debug('Matched message %d octets', len(pkt_data))
 
             # Keep final padding as future data
@@ -854,7 +854,7 @@ class Messenger(Connection):
             except x509.ExtensionNotFound:
                 eku_set = None
             self._logger.debug('Peer EKU: %s', eku_set)
-            #Example print(x509.ObjectIdentifier('1.3.6.1.5.5.7.3.1') in eku_set)
+            # Example print(x509.ObjectIdentifier('1.3.6.1.5.5.7.3.1') in eku_set)
 
             # Exact IPADDR-ID matching
             authn_ipaddrid = match_id(peer_ipaddrid, cert, x509.IPAddress, self._logger, 'IPADDR-ID')
@@ -918,9 +918,9 @@ class Messenger(Connection):
         # PD control
         next_seg_size = int(
             self._send_segment_size
-            -2e-1 * error_size
-            +6e-2 * error_delta
-            -1e-4 * error_accum
+            - 2e-1 * error_size
+            + 6e-2 * error_delta
+            - 1e-4 * error_accum
         )
 
         # Clamp control to the limits
@@ -942,7 +942,7 @@ class Messenger(Connection):
         data = self.__tx_buf[:size]
         if data:
             self._logger.debug('TX popping %d of %d',
-                                len(data), len(self.__tx_buf))
+                               len(data), len(self.__tx_buf))
         self.__tx_buf = self.__tx_buf[len(data):]
 
         self.send_buffer_decreased(len(self.__tx_buf))
@@ -957,7 +957,7 @@ class Messenger(Connection):
         pkt_data = bytes(pkt)
         if self.DO_DEBUG_DATA:
             self._logger.debug('TX packet data: %s',
-                                binascii.hexlify(pkt_data))
+                               binascii.hexlify(pkt_data))
 
         self.__tx_buf += pkt_data
         self.send_ready()
@@ -1485,7 +1485,7 @@ class ContactHandler(Messenger, dbus.service.Object):
         '''
         self._process_queue_pend = None
         self._logger.debug('Processing queue of %d items',
-                            len(self._tx_pend_start))
+                           len(self._tx_pend_start))
 
         # work from the head of the list
         if self._tx_tmp is None:

@@ -16,7 +16,7 @@ CNT_MASK = 0x80
 
 def sdnvlen(val):
     ''' Get the encoded length required to fit an integer value.
-    
+
     :param val: The integer to convert.
     :type val: int or similar
     :return: The length of encoded data required.
@@ -32,7 +32,7 @@ def sdnvlen(val):
 
 def int2sdnv(val):
     ''' Convert from integer to SDNV-encoded data string.
-    
+
     :param val: The integer to convert.
     :type val: int or similar
     :return: The encoded data.
@@ -55,7 +55,7 @@ def int2sdnv(val):
 
 def sdnv2int(data):
     ''' Decode available SDNV data string.
-    
+
     :param data: The full input data.
     :type data: bytes
     :return: A pair of values representing:

@@ -105,7 +105,7 @@ class CertificateStore:
         # self._certs_tprint = dict()
         self._certs_by_ski = dict()
 
-    def add_untrusted_cert(self, data:bytes):
+    def add_untrusted_cert(self, data: bytes):
         if data in self._certs_by_der:
             return
 
@@ -115,7 +115,7 @@ class CertificateStore:
         ski = cert.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value.digest
         self._certs_by_ski[ski] = cert
 
-    def find_chain(self, alg_id:int, want_tprint:bytes) -> Tuple[bytes]:
+    def find_chain(self, alg_id: int, want_tprint: bytes) -> Tuple[bytes]:
         ''' Find a chain corresponding to a specific end-entity thumbprint.
 
         :return: The chain of DER data starting at the end-entity up to any CA.
@@ -191,7 +191,7 @@ class CoseContext(AbstractContext):
                 self._priv_key = load_pem_key(infile)
 
     @staticmethod
-    def get_bpsec_cose_aad(ctr:BundleContainer, target, secblk:CanonicalBlock, aad_scope:dict, addl_protected:bytes) -> bytes:
+    def get_bpsec_cose_aad(ctr: BundleContainer, target, secblk: CanonicalBlock, aad_scope: dict, addl_protected: bytes) -> bytes:
         ''' Extract AAD from a bundle container per Section 2.5.1 of draft-ietf-bpsec-cose
         '''
         aad_list = []
@@ -329,7 +329,7 @@ class CoseContext(AbstractContext):
 
         return cose_key
 
-    def validate_chain_func(self, time_at:datetime.datetime) -> callable:
+    def validate_chain_func(self, time_at: datetime.datetime) -> callable:
         ''' Get a function to validate a certificate chain.
 
         :param time_at: The time to validate at.
