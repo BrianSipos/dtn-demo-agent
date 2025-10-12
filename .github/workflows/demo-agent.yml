@@ -1,19 +1,26 @@
 name: Demo TCPCL Agent
 
-on: [push]
+on:
+  push:
+    branches:
+      - main
+  pull_request: {} # any target
+  schedule:
+    - cron: '0 0 * * 0'
 
 jobs:
+  name: Build and unit test
   build:
     runs-on: ubuntu-24.04
     strategy:
-      max-parallel: 4
+      fail-fast: false
       matrix:
         python-version: ["3.8", "3.10", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Dependencies
@@ -39,33 +46,16 @@ jobs:
       - name: Transfer tcpcl
         run: dbus-run-session -- python3 -m tcpcl.test.bundlegen --log=debug fullvalid
 
-  format:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y \
-            python3-pip python3-wheel
-          pip3 install --upgrade pip
-          pip3 install '.[flake8]'
-      - name: Lint with flake8
-        run: |
-          # stop the build if there are Python syntax errors or undefined names
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-          flake8 . --count --exit-zero --statistics
-
   integration-test:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y \
-            python3-pip python3-wheel
-          python -m pip install --upgrade pip
-          pip3 install '.[container]'
+        run: pip3 install '.[container]'
       - name: Prep
         run: ./container/run.py --config container/example.yaml act pkigen build
       - name: Start

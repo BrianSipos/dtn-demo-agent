@@ -226,7 +226,7 @@ class VerifyError(RuntimeError):
     ''' An exception to indicate a read verification error. '''
 
 
-def verify_sized_item(length:Optional[int], item:packet.Packet) -> None:
+def verify_sized_item(length: Optional[int], item: packet.Packet) -> None:
     ''' Verify consistency of reading a sized item.
     :param length: The expected size of the field/packet.
     :param item: The field or packet to take size of.
