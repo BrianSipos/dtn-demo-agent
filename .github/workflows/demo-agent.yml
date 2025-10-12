@@ -28,7 +28,8 @@ jobs:
           sudo rm /var/lib/man-db/auto-update
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential dbus libdbus-glib-1-dev libgirepository1.0-dev
+            build-essential dbus \
+            python3-dev python3-wheel libdbus-glib-1-dev libgirepository1.0-dev
           # custom cose repo
           pip3 install git+https://github.com/TimothyClaeys/pycose.git@v1.0.1
           # work around lack of release version fix for oscrypto issue #75
