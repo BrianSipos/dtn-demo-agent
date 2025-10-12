@@ -82,9 +82,9 @@ class App(AbstractApplication):
         self._zco = Zeroconf()
 
         if self._config.get('offer', False):
-            glib.timeout_add(random.randint(5e3, 8e3), self._offer)
+            glib.timeout_add(random.randint(int(5e3), int(8e3)), self._offer)
         if self._config.get('enumerate', False):
-            glib.timeout_add(random.randint(5e3, 8e3), self._enumerate)
+            glib.timeout_add(random.randint(int(5e3), int(8e3)), self._enumerate)
 
     def _iface_addrs(self) -> List[ipaddress._IPAddressBase]:
         all_addrs = []
