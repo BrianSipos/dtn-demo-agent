@@ -150,9 +150,9 @@ class TestBpsecCoseSign(unittest.TestCase):
         return ctr
 
     def test_apply_bib_ec2(self):
-        ca_key = ec.generate_private_key(ec.SECP256R1, backend=default_backend())
+        ca_key = ec.generate_private_key(ec.SECP256R1(), backend=default_backend())
         ca_cert = self._dummy_ca_cert(ca_key)
-        end_key = ec.generate_private_key(ec.SECP256R1, backend=default_backend())  # Curve for COSE ES256
+        end_key = ec.generate_private_key(ec.SECP256R1(), backend=default_backend())  # Curve for COSE ES256
         end_cert = self._dummy_end_cert(ca_key, ca_cert, end_key)
 
         ctx = self._app._contexts[BPSEC_COSE_CONTEXT_ID]
