@@ -9,8 +9,8 @@ on:
     - cron: '0 0 * * 0'
 
 jobs:
-  name: Build and unit test
-  build:
+  unit-test:
+    name: Build and unit test
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -47,6 +47,7 @@ jobs:
         run: dbus-run-session -- python3 -m tcpcl.test.bundlegen --log=debug fullvalid
 
   integration-test:
+    name: Integration test
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
