@@ -82,7 +82,7 @@ jobs:
         run: ./container/run.py --config ${CONFIG} act stop delete
 
   integration-test-zeroconf:
-    name: Integration test SAND
+    name: Integration test Zeroconf
     permissions:
       contents: read
     runs-on: ubuntu-24.04
@@ -108,7 +108,7 @@ jobs:
       - name: Prep
         run: ./container/run.py --config ${CONFIG} act pkigen build
       - name: Capture
-        run: dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -q -w capture.pcap &
+        run: sudo dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -q -w capture.pcap &
       - name: Start
         run: ./container/run.py --config ${CONFIG} act start ready
       - name: Check
@@ -124,7 +124,8 @@ jobs:
       - name: Stop
         run: ./container/run.py --config ${CONFIG} act stop delete
       - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
         with:
           path: |
-            ${{env.CONFIG}}
+            ${{ env.CONFIG }}
             capture.pcap
