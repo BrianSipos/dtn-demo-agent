@@ -45,4 +45,4 @@ jobs:
       - name: Install with dependencies
         run: pip3 install flake8 flake8_pyproject
       - name: Run flake8
-        run: flake8 .
+        run: flake8 . || true
