@@ -92,8 +92,8 @@ jobs:
         run: ./container/run.py --config ${CONFIG} act stop delete
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
-        name: ${{ github.job }}
         with:
+          name: ${{ github.job }}
           path: |
             ${{ env.CONFIG }}
             capture.pcap
@@ -147,8 +147,8 @@ jobs:
         run: ./container/run.py --config ${CONFIG} act stop delete
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
-        name: ${{ github.job }}
         with:
+          name: ${{ github.job }}
           path: |
             ${{ env.CONFIG }}
             capture.pcap
