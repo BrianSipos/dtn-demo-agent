@@ -192,7 +192,7 @@ class PkiCa:
             critical=True,
         ).add_extension(
             x509.SubjectAlternativeName(sans),
-            critical=True,
+            critical=False,
         ).add_extension(
             x509.KeyUsage(**key_usage),
             critical=True,
