@@ -181,6 +181,7 @@ class EadItem:
         ]
         return f'{type(self).__name__}({",".join(parts)})'
 
+
 @dataclass
 class EadList:
     ''' A set of EAD per Section 3.8 of RFC 9528 '''
@@ -516,9 +517,9 @@ class CommonState:
                  cred_store: CredStore,
                  id_cred: dict,
                  as_initiator: bool,
-                 ke_priv_key: Optional[EcKeyType]=None,
-                 method: Optional[Method]=None,
-                 conn_id: Optional[bytes]=None):
+                 ke_priv_key: Optional[EcKeyType] = None,
+                 method: Optional[Method] = None,
+                 conn_id: Optional[bytes] = None):
         self._logger = logging.getLogger(f'{__name__}.{type(self).__name__}')
 
         self.cred_store = cred_store
@@ -863,7 +864,7 @@ class EdhocInitiator(CommonState):
         self._suite_ids = list([suite.value for suite in suites])
         self._set_sel_suite(method, self._suite_ids[-1])
 
-    def get_message_1(self, ead: Optional[EadList]=None) -> bytes:
+    def get_message_1(self, ead: Optional[EadList] = None) -> bytes:
         ''' From Section 5.2.1 of RFC 9528 '''
         buf = io.BytesIO()
         enc = cbor2.CBOREncoder(buf)
@@ -942,7 +943,7 @@ class EdhocInitiator(CommonState):
 
         return ead
 
-    def get_message_3(self, ead: Optional[EadList]=None) -> bytes:
+    def get_message_3(self, ead: Optional[EadList] = None) -> bytes:
         self._derive_secrets_3a()
         self._derive_secrets_3b()
         mac_3 = self._get_mac_3(ead)
@@ -1071,7 +1072,7 @@ class EdhocResponder(CommonState):
 
         return ead
 
-    def get_message_2(self, ead: Optional[EadList]=None) -> bytes:
+    def get_message_2(self, ead: Optional[EadList] = None) -> bytes:
         mac_2 = self._get_mac_2(ead=ead)
 
         if self._resp_auth_sign:
@@ -1180,7 +1181,7 @@ class EdhocResponder(CommonState):
 
         return ead
 
-    def get_message_4(self, ead: Optional[EadList]=None) -> bytes:
+    def get_message_4(self, ead: Optional[EadList] = None) -> bytes:
         plain_4 = io.BytesIO()
         enc = cbor2.CBOREncoder(plain_4)
         self._logger.debug('Using EAD_4 %s', ead)

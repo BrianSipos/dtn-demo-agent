@@ -101,7 +101,7 @@ _INFOS: Dict[ActivityType, Type[ActivityInfo]] = {}
 def register_info(act_type: ActivityType):
     ''' Register a class derived from ActivityInfo '''
     def bind(cls: Type[ActivityInfo]):
-        assert(issubclass(cls, ActivityInfo))
+        assert issubclass(cls, ActivityInfo)
         _INFOS[act_type] = cls
         return cls
     return bind
@@ -612,11 +612,11 @@ class SafeEntity:
     def __init__(self, send_pdu: Sender,
                  method: Method,
                  suite: CipherSuite,
-                 authn_priv_key: Optional[CoseKey]=None,
-                 id_cred: Optional[dict]=None,
-                 cred_store: Optional[CredStore]=None,
-                 ke_priv_key: Optional[List[CoseKey]]=None,
-                 conn_id: Optional[bytes]=None):
+                 authn_priv_key: Optional[CoseKey] = None,
+                 id_cred: Optional[dict] = None,
+                 cred_store: Optional[CredStore] = None,
+                 ke_priv_key: Optional[List[CoseKey]] = None,
+                 conn_id: Optional[bytes] = None):
 
         self._own_eid = None
         self._logger = None

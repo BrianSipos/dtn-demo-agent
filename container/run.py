@@ -261,6 +261,7 @@ class Docker:
 _ACTIONS = list()
 ''' Available actions correspond to public functions '''
 
+
 @staticmethod
 def action(func):
     _ACTIONS.append(func.__name__)
