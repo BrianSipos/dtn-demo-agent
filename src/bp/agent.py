@@ -172,6 +172,7 @@ class Agent(dbus.service.Object):
             if not self.shutdown():
                 # wait for graceful shutdown
                 eloop.run()
+        self._logger.info('Stopped event loop')
 
     def add_tx_route(self, item: TxRouteItem):
         self._config.tx_route_table.append(item)

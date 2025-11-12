@@ -9,7 +9,7 @@ nodes:
   node000:
     nets: [dtnA]
     keys:
-      sign:
+      transport:
         keytype: SECP256R1
     config:
       apps:
@@ -19,6 +19,9 @@ nodes:
 
   node001:
     nets: [dtnA, dtnB]
+    keys:
+      transport:
+        keytype: SECP256R1
     config:
       apps:
         zeroconf:
@@ -27,6 +30,9 @@ nodes:
 
   node002:
     nets: [dtnB]
+    keys:
+      transport:
+        keytype: SECP256R1
     config:
       apps:
         zeroconf:

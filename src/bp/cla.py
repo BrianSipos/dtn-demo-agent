@@ -200,7 +200,18 @@ class TcpclAdaptor(AbstractAdaptor):
                 self._reverse_route(cl_conn)
 
         conn_iface.connect_to_signal('session_state_changed', handle_state_change)
-        state = conn_iface.get_session_state()
+
+        state = None
+        for _ix in range(10):
+            import time
+            time.sleep(0.1)
+            try:
+                state = conn_iface.get_session_state()
+                break
+            except dbus.exceptions.DBusException:
+                pass  # continue waiting
+        if state is None:
+            raise TimeoutError('Failed to get_session_state() after 1000ms')
         handle_state_change(state)
 
     def _conn_detach(self, conn_path):

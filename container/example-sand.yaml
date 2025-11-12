@@ -12,17 +12,26 @@ nodes:
       sign:
         keytype: SECP256R1
     config:
-      apps: {}
+      apps:
+        sand:
+          enable: true
+          endpoint: dtn://node000/sand
       tls_enable: true
 
   node001:
     nets: [dtnA, dtnB]
     config:
-      apps: {}
+      apps:
+        sand:
+          enable: true
+          endpoint: dtn://node001/sand
       tls_enable: true
 
   node002:
     nets: [dtnB]
     config:
-      apps: {}
+      apps:
+        sand:
+          enable: true
+          endpoint: dtn://node002/sand
       tls_enable: true

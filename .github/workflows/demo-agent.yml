@@ -1,4 +1,4 @@
-name: Demo TCPCL Agent
+name: Demo Agent
 
 on:
   push:
@@ -58,6 +58,8 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-24.04
+    env:
+      CONFIG: container/example-sand.yaml
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -71,10 +73,10 @@ jobs:
       - name: Dependencies
         run: pip3 install PyYAML asn1 "cryptography ~=46.0"
       - name: Prep
-        run: ./container/run.py --config container/example.yaml act pkigen build
+        run: ./container/run.py --config ${CONFIG} act pkigen build
       - name: Start
-        run: ./container/run.py --config container/example.yaml act start ready
+        run: ./container/run.py --config ${CONFIG} act start ready
       - name: Check
-        run: ./container/run.py --config container/example.yaml act check
+        run: ./container/run.py --config ${CONFIG} act check_sand
       - name: Stop
-        run: ./container/run.py --config container/example.yaml act stop delete
+        run: ./container/run.py --config ${CONFIG} act stop delete
