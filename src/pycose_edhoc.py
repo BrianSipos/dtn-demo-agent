@@ -359,7 +359,7 @@ def perform_ecdh(priv_key: EcKeyType, peer_key: EcKeyType) -> bytes:
     ''' Derive a shared secret from a pair of ECDH private and public keys.
     '''
     LOGGER.debug('ECDH with %s and %s', priv_key, peer_key)
-    if type(priv_key) != type(peer_key):
+    if not isinstance(priv_key, type(peer_key)):
         raise ValueError('Peer key must be the same type as our key')
 
     if isinstance(priv_key, EC2Key):
