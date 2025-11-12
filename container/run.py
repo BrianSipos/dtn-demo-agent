@@ -79,7 +79,7 @@ class PkiCa:
         ).not_valid_after(
             self._nowtime + datetime.timedelta(days=10)
         ).add_extension(
-            x509.BasicConstraints(ca=True, path_length=1),
+            x509.BasicConstraints(ca=True, path_length=0),
             critical=True,
         ).add_extension(
             x509.KeyUsage(
@@ -192,7 +192,7 @@ class PkiCa:
             critical=True,
         ).add_extension(
             x509.SubjectAlternativeName(sans),
-            critical=False,
+            critical=True,
         ).add_extension(
             x509.KeyUsage(**key_usage),
             critical=True,

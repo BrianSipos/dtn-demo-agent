@@ -53,8 +53,8 @@ jobs:
       - name: Transfer tcpcl
         run: dbus-run-session -- python3 -m tcpcl.test.bundlegen --log=debug fullvalid
 
-  integration-test:
-    name: Integration test
+  integration-test-sand:
+    name: Integration test SAND
     permissions:
       contents: read
     runs-on: ubuntu-24.04
@@ -80,3 +80,51 @@ jobs:
         run: ./container/run.py --config ${CONFIG} act check_sand
       - name: Stop
         run: ./container/run.py --config ${CONFIG} act stop delete
+
+  integration-test-zeroconf:
+    name: Integration test SAND
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    env:
+      CONFIG: container/example-zeroconf.yaml
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dependencies
+        run: |
+          sudo rm /var/lib/man-db/auto-update
+          sudo apt-get update
+          sudo apt-get install -y \
+            tshark
+          pip3 install PyYAML asn1 "cryptography ~=46.0"
+      - name: Prep
+        run: ./container/run.py --config ${CONFIG} act pkigen build
+      - name: Capture
+        run: dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -q -w capture.pcap &
+      - name: Start
+        run: ./container/run.py --config ${CONFIG} act start ready
+      - name: Check
+        run: |
+          while true
+          do
+            MSG_CNT=$(tshark -r capture.pcap tcpcl | grep SESS_INIT | wc -l)
+            if [ ${MSG_CNT} -ge 2]
+            then
+              break
+            fi
+          done
+      - name: Stop
+        run: ./container/run.py --config ${CONFIG} act stop delete
+      - uses: actions/upload-artifact@v4
+        with:
+          path: |
+            ${{env.CONFIG}}
+            capture.pcap
