@@ -50,11 +50,11 @@ class CborArray(AbstractCborStruct):
     def self_build(self, *_args, **_kwargs):
         lst = []
 
-        #LOGGER.info('CborArray.self_build fields=%s', self.fields)
+        # LOGGER.info('CborArray.self_build fields=%s', self.fields)
         for defn in self.fields_desc:
             data_val = self.getfieldval(defn.name)
             try:
-                #LOGGER.info('CborArray.self_build name=%s, data_val=%s', defn.name, data_val)
+                # LOGGER.info('CborArray.self_build name=%s, data_val=%s', defn.name, data_val)
                 lst = defn.addfield(self, lst, data_val)
             except Exception as err:
                 if conf.debug_dissector:
@@ -84,7 +84,7 @@ class CborArray(AbstractCborStruct):
             # if array was modified
             orig_s = s.copy()
             (s, data_val) = defn.getfield(self, s)
-            #LOGGER.info('CborArray.do_dissect name=%s, data_val=%s', defn.name, data_val)
+            # LOGGER.info('CborArray.do_dissect name=%s, data_val=%s', defn.name, data_val)
             if s != orig_s:
                 self.fields[defn.name] = data_val
 

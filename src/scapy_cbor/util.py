@@ -9,7 +9,7 @@ import six
 
 def encode_diagnostic(obj, **kwargs):
     ''' Encode a Python object as a CBOR Extended Diagnostic Notation string.
-    
+
     :param kwargs: Special options:
       indent: if provided, indent this many spaces
       bstr_as: either 'hex' (default) or 'base64'

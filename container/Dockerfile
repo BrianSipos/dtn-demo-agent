@@ -1,4 +1,4 @@
-FROM ubuntu:22.04 AS systemd-base
+FROM ubuntu:24.04 AS systemd-base
 ENV DEBIAN_FRONTEND="noninteractive"
 
 ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt
@@ -29,24 +29,21 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     python3-dbus dbus \
     rustc cargo
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install --upgrade pip && \
-    pip3 install pip-tools maturin
+    pip3 install --break-system-packages pip-tools maturin
 
-# Work-around python3-dtls requiring openssl-1.1 but not available on 22.04
-RUN --mount=type=cache,target=/var/cache/apt apt-get update && \
-    apt-get install -yq curl && \
-    curl -svLO http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.23_amd64.deb && \
-    dpkg -i libssl1.1_*_amd64.deb && \
-    apt-get -fy install && \
-    rm libssl1.1_*_amd64.deb
+# Work-around python3-dtls requiring openssl-1.1 but not available on 24.04
+#RUN --mount=type=cache,target=/var/cache/apt apt-get update && \
+#    apt-get install -yq curl && \
+#    curl -svLO http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.23_amd64.deb && \
+#    dpkg -i libssl1.1_*_amd64.deb && \
+#    apt-get -fy install && \
+#    rm libssl1.1_*_amd64.deb
 
-COPY pyproject.toml /root/agent/
-#RUN --mount=type=cache,target=/root/.cache/pip \
-#    cd /root/agent && \
-#    pip-compile pyproject.toml && \
-#    pip3 install -r requirements.txt
-COPY src/ /root/agent/src/
-RUN --mount=type=cache,target=/root/.cache/pip pip3 install /root/agent
+COPY pyproject.toml /usr/local/src/agent/
+COPY src/ /usr/local/src/agent/src/
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --break-system-packages /usr/local/src/agent && \
+    pip3 install --break-system-packages --force-reinstall git+https://github.com/wbond/oscrypto.git@master
 
 COPY container/dbus.conf /etc/dbus-1/system.d/org.ietf.dtn.conf
 COPY container/*.service container/*.slice /usr/local/lib/systemd/system/

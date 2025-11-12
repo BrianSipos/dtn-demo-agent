@@ -21,6 +21,7 @@ class AddressObject:
 
     :param text: The input to convert.
     '''
+
     def __init__(self, text: Optional[str], proto=socket.IPPROTO_TCP):
         self.family = None
         self.ipaddr = None
@@ -38,6 +39,7 @@ class AddressObject:
 
         self.family = socket.AF_INET if ipaddr.version == 4 else socket.AF_INET6
         self.ipaddr = ipaddr
+
 
 @dataclass
 class Conversation:
@@ -295,7 +297,7 @@ class Agent(dbus.service.Object):
         return True
 
     @dbus.service.method(DBUS_IFACE, in_signature='sq', out_signature='o')
-    def connect(self, address:str, port:int) -> str:
+    def connect(self, address: str, port: int) -> str:
         ''' Initiate an outgoing connection and defer handling state to
         `glib` event loop.
 
