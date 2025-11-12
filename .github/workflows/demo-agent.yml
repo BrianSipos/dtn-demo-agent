@@ -73,7 +73,7 @@ jobs:
       - name: Dependencies
         run: pip3 install PyYAML asn1 "cryptography ~=46.0"
       - name: Prep
-        run: ./container/run.py --config ${CONFIG} act pkigen build
+        run: ./container/run.py --config ${CONFIG} act pkigen build create
       - name: Start
         run: ./container/run.py --config ${CONFIG} act start ready
       - name: Check
@@ -106,7 +106,7 @@ jobs:
             tshark
           pip3 install PyYAML asn1 "cryptography ~=46.0"
       - name: Prep
-        run: ./container/run.py --config ${CONFIG} act pkigen build
+        run: ./container/run.py --config ${CONFIG} act pkigen build create
       - name: Capture
         run: sudo dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -q -w capture.pcap &
       - name: Start

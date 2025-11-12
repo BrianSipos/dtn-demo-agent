@@ -525,8 +525,12 @@ class Runner:
         self._docker.run_docker_compose(['build'])
 
     @action
+    def create(self):
+        self._docker.run_docker_compose(['create', '--force-recreate', '--remove-orphans'])
+
+    @action
     def start(self):
-        self._docker.run_docker_compose(['up', '-d', '--force-recreate', '--remove-orphans'])
+        self._docker.run_docker_compose(['up', '-d'])
 
     @action
     def ready(self):
