@@ -111,16 +111,18 @@ jobs:
         run: sudo dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -q -w capture.pcap &
       - name: Start
         run: ./container/run.py --config ${CONFIG} act start ready
-      - name: Check
+      - name: Check messages
         run: |
-          while true
+          for IX in $(seq 10)
           do
+            sleep 1
             MSG_CNT=$(tshark -r capture.pcap tcpcl | grep SESS_INIT | wc -l)
-            if [ ${MSG_CNT} -ge 2]
+            if [ ${MSG_CNT} -ge 2 ]
             then
-              break
+              exit 0
             fi
           done
+          exit 2
       - name: Stop
         run: ./container/run.py --config ${CONFIG} act stop delete
       - uses: actions/upload-artifact@v4
