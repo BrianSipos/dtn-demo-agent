@@ -109,9 +109,9 @@ jobs:
         run: ./container/run.py --config ${CONFIG} act pkigen build create
       - name: Capture
         run: |
-          sudo touch /tmp/capture.pcap
-          sudo chmod 644 /tmp/capture.pcap
-          sudo dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -q -g -w /tmp/capture.pcap &
+          sudo touch capture.pcap
+          sudo chmod 644 capture.pcap
+          sudo dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 5353 or icmp' -q -g -w capture.pcap &
       - name: Start
         run: ./container/run.py --config ${CONFIG} act start ready
       - name: Check messages
@@ -119,7 +119,7 @@ jobs:
           for IX in $(seq 10)
           do
             sleep 1
-            MSG_CNT=$(tshark -r /tmp/capture.pcap tcpcl | grep SESS_INIT | wc -l)
+            MSG_CNT=$(tshark -r capture.pcap tcpcl | grep SESS_INIT | wc -l)
             if [ ${MSG_CNT} -ge 2 ]
             then
               exit 0
@@ -133,4 +133,4 @@ jobs:
         with:
           path: |
             ${{ env.CONFIG }}
-            /tmp/capture.pcap
+            capture.pcap
