@@ -71,15 +71,32 @@ jobs:
         with:
           python-version: "3.12"
       - name: Dependencies
-        run: pip3 install PyYAML asn1 "cryptography ~=46.0"
+        run: |
+          sudo rm /var/lib/man-db/auto-update
+          sudo apt-get update
+          sudo apt-get install -y \
+            tshark
+          pip3 install PyYAML asn1 "cryptography ~=46.0"
       - name: Prep
         run: ./container/run.py --config ${CONFIG} act pkigen build create
+      - name: Capture
+        run: |
+          sudo touch capture.pcap
+          sudo chmod 644 capture.pcap
+          sudo dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -q -w capture.pcap &
       - name: Start
         run: ./container/run.py --config ${CONFIG} act start ready
       - name: Check
         run: ./container/run.py --config ${CONFIG} act check_sand
       - name: Stop
         run: ./container/run.py --config ${CONFIG} act stop delete
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        name: ${{ github.job }}
+        with:
+          path: |
+            ${{ env.CONFIG }}
+            capture.pcap
 
   integration-test-zeroconf:
     name: Integration test Zeroconf
@@ -111,7 +128,7 @@ jobs:
         run: |
           sudo touch capture.pcap
           sudo chmod 644 capture.pcap
-          sudo dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 5353 or icmp' -q -g -w capture.pcap &
+          sudo dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 5353 or icmp' -q -w capture.pcap &
       - name: Start
         run: ./container/run.py --config ${CONFIG} act start ready
       - name: Check messages
@@ -130,6 +147,7 @@ jobs:
         run: ./container/run.py --config ${CONFIG} act stop delete
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
+        name: ${{ github.job }}
         with:
           path: |
             ${{ env.CONFIG }}
