@@ -549,7 +549,8 @@ class Runner:
 
     @action
     def check_sand(self):
-        while True:
+        # limit number of checks
+        for _ix in range(10):
             least = None
             for node_name in self._config['nodes'].keys():
                 comp = self._docker.run_exec(['-T', node_name, 'journalctl', '--unit=dtn-bp-agent@node'], capture_output=True, text=True)
@@ -558,8 +559,11 @@ class Runner:
                     least = got
             LOGGER.info('Least number of verified BIBs: %s', least)
             if least >= 3:
-                break
+                return
             time.sleep(3)
+
+        self._docker.run_exec(['-T', node_name, 'journalctl', '--unit=dtn-bp-agent@node'])
+        raise RuntimeError('Did not see at least 3 verified BIBs')
 
     @action
     def stop(self):

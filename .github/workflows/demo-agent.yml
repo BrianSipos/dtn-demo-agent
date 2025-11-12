@@ -108,7 +108,10 @@ jobs:
       - name: Prep
         run: ./container/run.py --config ${CONFIG} act pkigen build create
       - name: Capture
-        run: sudo dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -q -w /tmp/capture.pcap &
+        run: |
+          sudo touch /tmp/capture.pcap
+          sudo chmod 644 /tmp/capture.pcap
+          sudo dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -q -g -w /tmp/capture.pcap &
       - name: Start
         run: ./container/run.py --config ${CONFIG} act start ready
       - name: Check messages
