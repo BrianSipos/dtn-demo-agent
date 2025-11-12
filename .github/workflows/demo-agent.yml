@@ -108,7 +108,7 @@ jobs:
       - name: Prep
         run: ./container/run.py --config ${CONFIG} act pkigen build create
       - name: Capture
-        run: sudo dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -q -w capture.pcap &
+        run: sudo dumpcap -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -q -w /tmp/capture.pcap &
       - name: Start
         run: ./container/run.py --config ${CONFIG} act start ready
       - name: Check messages
@@ -116,7 +116,7 @@ jobs:
           for IX in $(seq 10)
           do
             sleep 1
-            MSG_CNT=$(tshark -r capture.pcap tcpcl | grep SESS_INIT | wc -l)
+            MSG_CNT=$(tshark -r /tmp/capture.pcap tcpcl | grep SESS_INIT | wc -l)
             if [ ${MSG_CNT} -ge 2 ]
             then
               exit 0
@@ -130,4 +130,4 @@ jobs:
         with:
           path: |
             ${{ env.CONFIG }}
-            capture.pcap
+            /tmp/capture.pcap
