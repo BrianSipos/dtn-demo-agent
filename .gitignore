@@ -3,6 +3,7 @@
 .pydevproject
 
 container/workdir
+*.pcap
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

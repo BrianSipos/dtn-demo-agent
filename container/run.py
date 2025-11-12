@@ -79,7 +79,7 @@ class PkiCa:
         ).not_valid_after(
             self._nowtime + datetime.timedelta(days=10)
         ).add_extension(
-            x509.BasicConstraints(ca=True, path_length=1),
+            x509.BasicConstraints(ca=True, path_length=0),
             critical=True,
         ).add_extension(
             x509.KeyUsage(
@@ -525,8 +525,12 @@ class Runner:
         self._docker.run_docker_compose(['build'])
 
     @action
+    def create(self):
+        self._docker.run_docker_compose(['create', '--force-recreate', '--remove-orphans'])
+
+    @action
     def start(self):
-        self._docker.run_docker_compose(['up', '-d', '--force-recreate', '--remove-orphans'])
+        self._docker.run_docker_compose(['up', '-d'])
 
     @action
     def ready(self):
@@ -545,7 +549,8 @@ class Runner:
 
     @action
     def check_sand(self):
-        while True:
+        # limit number of checks
+        for _ix in range(10):
             least = None
             for node_name in self._config['nodes'].keys():
                 comp = self._docker.run_exec(['-T', node_name, 'journalctl', '--unit=dtn-bp-agent@node'], capture_output=True, text=True)
@@ -554,8 +559,11 @@ class Runner:
                     least = got
             LOGGER.info('Least number of verified BIBs: %s', least)
             if least >= 3:
-                break
+                return
             time.sleep(3)
+
+        self._docker.run_exec(['-T', node_name, 'journalctl', '--unit=dtn-bp-agent@node'])
+        raise RuntimeError('Did not see at least 3 verified BIBs')
 
     @action
     def stop(self):
