@@ -84,12 +84,12 @@ class App(AbstractApplication):
         delay = self._config.get('offer', False)
         if delay is not False:
             delay = 5e3 if delay is True else max(100, int(1e3 * delay))
-            glib.timeout_add(random.randint(100, delay), self._offer)
+            glib.timeout_add(random.randint(100, int(delay)), self._offer)
 
         delay = self._config.get('enumerate', False)
         if delay is not False:
             delay = 5e3 if delay is True else max(100, int(1e3 * delay))
-            glib.timeout_add(random.randint(100, delay), self._enumerate)
+            glib.timeout_add(random.randint(100, int(delay)), self._enumerate)
 
     def _iface_addrs(self) -> List[ipaddress._IPAddressBase]:
         all_addrs = []
