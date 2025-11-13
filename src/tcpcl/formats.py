@@ -61,53 +61,20 @@ class UInt16PayloadLenField(fields.LenField):
         kwargs['fmt'] = '!H'
         fields.LenField.__init__(self, *args, **kwargs)
 
+
 class SdnvField(sdnv.SDNV2):
     ''' Represent a single independent SDNV-encoded integer.
-
-    If the value/default is None the output is the zero-value SDNV.
-
-    :param maxval: The maximum value allowed in this field.
-        Warnings will be output if the actual value is above this limit
     '''
-    __slots__ = ['_maxval']
-
-    def __init__(self, name, default, maxval=None):
-        sdnv.SDNV2.__init__(self, name, default, fmt='!s')
-        if maxval is None:
-            maxval = 2 ** 32 - 1
-        self._maxval = maxval
-
-    def randval(self):
-        return volatile.RandNum(0, self._maxval)
-
-
-class SdnvPayloadLenField(sdnv.SDNV2LenField):
-    ''' An SDNV value which represents the octet length of the payload data.
-    '''
-
-    def i2m(self, pkt, x):
-        if x is None:
-            x = len(pkt.payload)
-        return SdnvField.i2m(self, pkt, x)
 
 
 class SdnvFieldLenField(sdnv.SDNV2FieldLenField):
     ''' An SDNV value which represents a count/length of another field.
     '''
 
-    def i2h(self, pkt, x):
-        ''' override to extract value from packet '''
-        if x is None:
-            x = self.extract(pkt)
-            x = self.adjust(pkt, x)
-        return x
 
-    def i2m(self, pkt, x):
-        ''' override to extract value from packet '''
-        if x is None:
-            x = self.extract(pkt)
-            x = self.adjust(pkt, x)
-        return SdnvField.i2m(self, pkt, x)
+class SdnvPayloadLenField(sdnv.SDNV2LenField):
+    ''' An SDNV value which represents the octet length of the payload data.
+    '''
 
 
 class ExtensionListField(fields.PacketListField):
