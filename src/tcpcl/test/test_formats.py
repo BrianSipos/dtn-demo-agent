@@ -60,8 +60,8 @@ class TestSdnvField(unittest.TestCase):
         # Default value
         self.assertIsNone(pkt.getfieldval('attr'))
         self.assertIsNone(pkt.attr)
-        data = bytes(pkt)
-        self.assertSequenceEqual(data, binascii.unhexlify(b'00'))
+        with self.assertRaises(TypeError):
+            bytes(pkt)
 
         # Particular value
         testval = 12345

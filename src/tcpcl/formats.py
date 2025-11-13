@@ -5,8 +5,8 @@ Created on May 29, 2016
 '''
 
 from scapy import fields, volatile, packet
+from scapy.contrib import sdnv
 from typing import Optional
-from . import sdnv
 
 
 class UInt8Field(fields.Field):
@@ -61,8 +61,7 @@ class UInt16PayloadLenField(fields.LenField):
         kwargs['fmt'] = '!H'
         fields.LenField.__init__(self, *args, **kwargs)
 
-
-class SdnvField(fields.Field):
+class SdnvField(sdnv.SDNV2):
     ''' Represent a single independent SDNV-encoded integer.
 
     If the value/default is None the output is the zero-value SDNV.
@@ -73,36 +72,16 @@ class SdnvField(fields.Field):
     __slots__ = ['_maxval']
 
     def __init__(self, name, default, maxval=None):
-        fields.Field.__init__(self, name, default, fmt='!s')
+        sdnv.SDNV2.__init__(self, name, default, fmt='!s')
         if maxval is None:
             maxval = 2 ** 32 - 1
         self._maxval = maxval
-
-    def i2m(self, pkt, x):
-        ''' Convert internal-to-machine encoding. '''
-        if x is None:
-            x = 0
-        return sdnv.int2sdnv(x)
-
-    def m2i(self, pkt, x):
-        ''' Convert machine-to-internal encoding. '''
-        if x is None:
-            return None, 0
-        return sdnv.sdnv2int(x)[1]
-
-    def addfield(self, pkt, s, val):
-        ''' Append this field to a packet contents. '''
-        return s + self.i2m(pkt, val)
-
-    def getfield(self, pkt, s):
-        ''' Extract this field from a packet contents. '''
-        return sdnv.sdnv2int(s)
 
     def randval(self):
         return volatile.RandNum(0, self._maxval)
 
 
-class SdnvPayloadLenField(SdnvField):
+class SdnvPayloadLenField(sdnv.SDNV2LenField):
     ''' An SDNV value which represents the octet length of the payload data.
     '''
 
@@ -112,35 +91,9 @@ class SdnvPayloadLenField(SdnvField):
         return SdnvField.i2m(self, pkt, x)
 
 
-class SdnvFieldLenField(SdnvField):
+class SdnvFieldLenField(sdnv.SDNV2FieldLenField):
     ''' An SDNV value which represents a count/length of another field.
     '''
-    __slots__ = ['extract', 'adjust']
-
-    def __init__(self, name, default=None, count_of=None, length_of=None, adjust=None):
-        SdnvField.__init__(self, name, default)
-        if length_of:
-
-            def func(pkt):
-                fld, fval = pkt.getfield_and_val(length_of)
-                val = fld.i2len(pkt, fval)
-                return val
-
-            self.extract = func
-        elif count_of:
-
-            def func(pkt):
-                fld, fval = pkt.getfield_and_val(count_of)
-                val = fld.i2count(pkt, fval)
-                return val
-
-            self.extract = func
-        else:
-            raise ValueError('One of length_of or count_of is required')
-
-        if adjust is None:
-            def adjust(pkt, x): return x
-        self.adjust = adjust
 
     def i2h(self, pkt, x):
         ''' override to extract value from packet '''
