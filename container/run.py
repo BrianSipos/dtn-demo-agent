@@ -562,7 +562,8 @@ class Runner:
                 return
             time.sleep(3)
 
-        self._docker.run_exec(['-T', node_name, 'journalctl', '--unit=dtn-bp-agent@node'])
+        for node_name in self._config['nodes'].keys():
+            self._docker.run_exec(['-T', node_name, 'journalctl', '--unit=dtn-bp-agent@node'])
         raise RuntimeError('Did not see at least 3 verified BIBs')
 
     @action
