@@ -94,6 +94,7 @@ tcpcl-messagegen = "tcpcl.test.messagegen:main"
 tcpcl-bundlegen = "tcpcl.test.bundlegen:main"
 tcpcl-agent = "tcpcl.cmd:main"
 udpcl-agent = "udpcl.cmd:main"
+ltpcl-agent = "ltpcl.cmd:main"
 bp-agent = "bp.cmd:main"
 
 [project.urls]
