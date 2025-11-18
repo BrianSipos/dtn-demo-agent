@@ -26,22 +26,6 @@ def main():
                         help='Console logging lowest level displayed.')
     parser.add_argument('--config-file', type=str,
                         help='Configuration file to load from')
-    subp = parser.add_subparsers(dest='action', help='action')
-
-    parser_listen = subp.add_parser('listen',
-                                    help='Listen for TCP connections')
-    parser_listen.add_argument('--address', type=str, default='',
-                               help='Listen name or address')
-    parser_listen.add_argument('--port', type=int, default=4556,
-                               help='Listen TCP port')
-
-    parser_conn = subp.add_parser('connect',
-                                  help='Make a TCP connection')
-    parser_conn.add_argument('address', type=str,
-                             help='Host name or address')
-    parser_conn.add_argument('--port', type=int, default=4556,
-                             help='Host TCP port')
-
     args = parser.parse_args()
 
     root_logging(args.log_level.upper() if args.log_level else 'WARNING')
@@ -56,15 +40,6 @@ def main():
             config.from_file(infile)
     if config.log_level and not args.log_level:
         logging.getLogger().setLevel(config.log_level.upper())
-
-    if args.action == 'listen':
-        config.init_listen.append(
-            ListenConfig(address=args.address, port=args.port)
-        )
-    elif args.action == 'connect':
-        config.init_connect.append(
-            ConnectConfig(address=args.address, port=args.port)
-        )
 
     agent = Agent(config)
     agent.exec_loop()
