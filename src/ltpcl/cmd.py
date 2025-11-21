@@ -4,17 +4,9 @@ import argparse
 import logging
 import sys
 from dbus.mainloop.glib import DBusGMainLoop
-from tcpcl.config import Config
-from tcpcl.agent import Agent
-
-
-def root_logging(log_level):
-    ''' Initialize logging.
-    '''
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s PID:%(process)s TID:%(threadName)s <%(levelname)s> %(name)s: %(message)s"
-    )
+from tcpcl.cmd import root_logging
+from ltpcl.config import Config
+from ltpcl.agent import Agent
 
 
 def main():
@@ -45,4 +37,4 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main(*sys.argv))
+    sys.exit(main())
