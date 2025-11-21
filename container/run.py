@@ -174,9 +174,7 @@ class PkiCa:
             key_usage['key_agreement'] = True
 
         node_cert = x509.CertificateBuilder().subject_name(
-            x509.Name([
-                x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, nodeid),
-            ]),
+            # no name
         ).issuer_name(
             self._ca_cert.subject
         ).public_key(
@@ -192,7 +190,7 @@ class PkiCa:
             critical=True,
         ).add_extension(
             x509.SubjectAlternativeName(sans),
-            critical=False,
+            critical=True,
         ).add_extension(
             x509.KeyUsage(**key_usage),
             critical=True,
