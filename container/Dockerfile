@@ -39,11 +39,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 #    apt-get -fy install && \
 #    rm libssl1.1_*_amd64.deb
 
-COPY pyproject.toml /usr/local/src/agent/
-COPY src/ /usr/local/src/agent/src/
+COPY pyproject.toml /usr/local/src/node/
+COPY src/ /usr/local/src/node/src/
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install --break-system-packages /usr/local/src/agent && \
-    pip3 install --break-system-packages --force-reinstall git+https://github.com/wbond/oscrypto.git@master
+    pip3 install --break-system-packages /usr/local/src/node && \
+    pip3 install --break-system-packages --force-reinstall \
+        git+https://github.com/BrianSipos/pycose.git@sipos-combined-patches \
+        git+https://github.com/BrianSipos/certvalidator.git@allow-critical-san \
+        git+https://github.com/wbond/oscrypto.git@master
 
 COPY container/dbus.conf /etc/dbus-1/system.d/org.ietf.dtn.conf
 COPY container/*.service container/*.slice /usr/local/lib/systemd/system/

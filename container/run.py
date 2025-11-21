@@ -174,7 +174,7 @@ class PkiCa:
             key_usage['key_agreement'] = True
 
         node_cert = x509.CertificateBuilder().subject_name(
-            # no name
+            x509.Name([])  # empty name
         ).issuer_name(
             self._ca_cert.subject
         ).public_key(
@@ -294,7 +294,10 @@ class Runner:
 
         for (node_name, node_opts) in self._config['nodes'].items():
             ipn_node = node_opts.get('ipn_node')
-            nodeid = f'ipn:{ipn_node}.0' if ipn_node else 'dtn://{}/'.format(node_name)
+            if ipn_node:
+                nodeid = 'ipn:{}.0'.format(ipn_node)
+            else:
+                nodeid = 'dtn://{}/'.format(node_name)
 
             # Ubuntu common path mounted to /etc/ssl/
             nodedir = os.path.join(self._stagedir, 'nodes', node_name, 'ssl')
@@ -458,7 +461,7 @@ class Runner:
             bp_rx_routes = extconfig.get('bp_rx_routes', [])
             bp_rx_routes += [
                 {
-                    'eid_pattern': f'dtn://{node_name}/.*',
+                    'eid_pattern': 'dtn://{}/.*'.format(node_name),
                     'action': 'deliver',
                 },
                 {
