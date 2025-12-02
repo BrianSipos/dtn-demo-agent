@@ -582,7 +582,8 @@ class Agent(dbus.service.Object):
         self.__logger.debug('Received PMTUD ack %s:%s to %s for sizes %s',
                             nonce, seq_nos, conv.peer_address, seen_sizes)
 
-    def _ecn_recvfrom(self, conv: Conversation, ip_ecn: int):
+    def _ecn_recvfrom(self, conv: Conversation, ip_ecn: int) -> None:
+        ''' Handle a non-zero ECN marking '''
         # aggregate of all packets from the same peer, regardless of destination
         ecn_key = (conv.peer_address, conv.peer_port)
 
@@ -608,18 +609,24 @@ class Agent(dbus.service.Object):
 
         if state['timer'] is not None:
             glib.source_remove(state['timer'])
-        delay = self._config.ecn_feedback_delay // timedelta(milliseconds=1)
+        delay = self._config.ecn_feedback_max // timedelta(milliseconds=1)
         state['timer'] = glib.timeout_add(delay, self._ecn_sendto, ecn_key)
 
-        if state['last'] is not None:
-            diff = state['last'] - datetime.now(timezone.utc)
-            if diff > self._config.ecn_feedback_delay:
+        if ip_ecn == ECN_CE:
+            self.__logger.debug('ECN CE marking seen')
+            # minimum delay based on CE marking
+            if state['last'] is None:
                 self._ecn_sendto(ecn_key)
+            else:
+                diff = datetime.now(timezone.utc) - state['last']
+                if diff > self._config.ecn_feedback_min:
+                    self._ecn_sendto(ecn_key)
 
     def _ecn_sendto(self, ecn_key: Tuple):
         state = self._ecn_state[ecn_key]
-        counts = state['counts']
+        state['last'] = datetime.now(timezone.utc)
 
+        counts = state['counts']
         msg = cbor2.dumps({
             ExtensionKey.ECN_COUNTS: [counts.ect0, counts.ect1, counts.ce],
         })

@@ -6,7 +6,8 @@ ENV PIP_DEFAULT_TIMEOUT=300
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 # Distro upgrade for security patches
-RUN apt-get update && apt-get upgrade -y
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get upgrade -y
 
 # Use systemd as top-level process
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -22,12 +23,14 @@ CMD [ "/sbin/init" ]
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
-    apt-get install -yq git python3-pip python3-venv pkg-config \
-    python3-setuptools \
-    python3-cairo \
-    python3-gi \
-    python3-dbus dbus \
-    rustc cargo
+    apt-get install -yq \
+        iproute2 \
+        git python3-pip python3-venv pkg-config \
+        python3-setuptools \
+        python3-cairo \
+        python3-gi \
+        python3-dbus dbus \
+        rustc cargo
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --break-system-packages pip-tools maturin
 

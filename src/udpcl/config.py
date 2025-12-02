@@ -102,7 +102,10 @@ class Config(object):
     ''' True if outgoing data packets are marked as ECT '''
     ecn_feedback: bool = True
     ''' True if incoming ECN-marked packets are responded to with feedback. '''
-    ecn_feedback_delay: timedelta = timedelta(milliseconds=1000)
+    ecn_feedback_min: timedelta = timedelta(milliseconds=100)
+    ''' Maximum interval between ECN feedback '''
+    ecn_feedback_max: timedelta = timedelta(milliseconds=5000)
+    ''' Maximum interval between ECN feedback '''
 
     # Multicast options with defaults
     multicast: MulticastConfig = field(default_factory=MulticastConfig)

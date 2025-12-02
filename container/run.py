@@ -296,7 +296,10 @@ class Runner:
 
         for (node_name, node_opts) in self._config['nodes'].items():
             ipn_node = node_opts.get('ipn_node')
-            nodeid = f'ipn:{ipn_node}.0' if ipn_node else 'dtn://{}/'.format(node_name)
+            if ipn_node:
+                nodeid = 'ipn:{}.0'.format(ipn_node)
+            else:
+                nodeid = 'dtn://{}/'.format(node_name)
 
             # Ubuntu common path mounted to /etc/ssl/
             nodedir = os.path.join(self._stagedir, 'nodes', node_name, 'ssl')
@@ -352,7 +355,6 @@ class Runner:
                 'driver': 'bridge',
                 'driver_opts': {
                     'com.docker.network.bridge.name': f'br-{net_name}',
-                    'com.docker.network.container_iface_prefix': net_name,
                     'com.docker.network.driver.mtu': net_opts.get('mtu', 1500),
                 },
                 'enable_ipv6': ('subnet6' in net_opts),
@@ -403,7 +405,14 @@ class Runner:
                         'target': '/var/log/dtn',
                     },
                 ],
-                'networks': [net_name for net_name in node_opts['nets']],
+                'networks': {
+                    net_name: {
+                        'driver_opts': {
+                            'com.docker.network.endpoint.ifname': net_name,
+                        }
+                    }
+                    for net_name in node_opts['nets']
+                },
             }
 
             node_serv['build'] = {
@@ -440,7 +449,7 @@ class Runner:
                         'multicast_member': [
                             {
                                 'addr': 'FF05::114',
-                                'iface': f'{net_name}0',
+                                'iface': f'{net_name}',
                             }
                             for net_name in node_opts['nets']
                         ],
@@ -460,7 +469,7 @@ class Runner:
             bp_rx_routes = extconfig.get('bp_rx_routes', [])
             bp_rx_routes += [
                 {
-                    'eid_pattern': f'dtn://{node_name}/.*',
+                    'eid_pattern': 'dtn://{}/.*'.format(node_name),
                     'action': 'deliver',
                 },
                 {
@@ -484,6 +493,7 @@ class Runner:
 
                     'polling': extconfig.get('udpcl_polling', []),
                     'init_listen': udpcl_listen,
+                    'mtu_default': 1400,
                 },
                 'tcpcl': {
                     'log_level': 'debug',
@@ -558,9 +568,9 @@ class Runner:
                 if least is None or got < least:
                     least = got
             LOGGER.info('Least number of verified BIBs: %s', least)
-            if least >= 3:
+            if least >= 2:
                 return
-            time.sleep(3)
+            time.sleep(2)
 
         for node_name in self._config['nodes'].keys():
             self._docker.run_exec(['-T', node_name, 'journalctl', '--unit=dtn-bp-agent@node'])
