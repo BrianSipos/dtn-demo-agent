@@ -119,7 +119,7 @@ def main():
         return 0
 
     # (address,port) combo to use UDPCL on
-    address = ('localhost', 4556)
+    address = ('127.0.0.1', 4556)
     listening = multiprocessing.Semaphore(value=0)
 
     # Must run before connection or real main loop is constructed
@@ -146,7 +146,8 @@ def main():
         agent = udpcl.agent.Agent(config)
         listening.acquire()
         tx_params = dict(
-            address='localhost',
+            address=address[0],
+            port=address[1]
         )
         agent_xfer_bundles(agent, tx_params, bit)
         agent.exec_loop()
