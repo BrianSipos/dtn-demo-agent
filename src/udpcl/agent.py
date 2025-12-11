@@ -282,6 +282,9 @@ class UdpSender:
 
 @dataclass
 class TxSendItem:
+    ''' A single SDU item to transmit '''
+    item: BundleItem
+    ''' Source bundle ID to signal on '''
     sender: Callable[[bytes], None] = None
     ''' Callable to send one datagram with no extra parameters. '''
     dgram_iter: Optional[Iterable[bytes]] = None
@@ -290,8 +293,10 @@ class TxSendItem:
 
 @dataclass
 class TxSendWait:
-    ''' GLib callback event ID '''
+    agent: 'Agent'
+    ''' The parent agent to report on '''
     glib_timer_id: Optional[int] = None
+    ''' GLib callback event ID '''
 
     tok_avail: int = 0
     ''' Size of available bucket to send (millibytes) '''
@@ -457,7 +462,13 @@ class TxSendWait:
                     self.cur_dgram = next(self.cur_item.dgram_iter)
                 except StopIteration:
                     # no more in this iterator
-                    LOGGER.debug('CCA ran out of dgrams')
+                    LOGGER.debug('CCA done with item')
+                    self.agent.send_bundle_finished(
+                        str(self.cur_item.item.transfer_id),
+                        self.cur_item.item.total_length,
+                        'success'
+                    )
+
                     self.cur_item = None
                     continue
 
@@ -534,7 +545,7 @@ class Agent(dbus.service.Object):
         self._dtls_sess = {}
 
         self._tx_id = 0
-        self._tx_queue = []
+        self._tx_queue: List[BundleItem] = []
         # map from transfer ID to :py:cls:`Transfer`
         self._rx_fragments = {}
         self._rx_id = 0
@@ -1341,12 +1352,12 @@ class Agent(dbus.service.Object):
             self._recv_wait[sock] = glib.io_add_watch(sock, glib.IO_IN, self._sock_recvfrom)
 
         if sock not in self._send_wait:
-            send_wait = TxSendWait()
+            send_wait = TxSendWait(agent=self)
             self._send_wait[sock] = send_wait
         else:
             send_wait = self._send_wait[sock]
 
-        tx_item = TxSendItem()
+        tx_item = TxSendItem(item=item)
 
         # if self._config.dtls_enable_tx:
         #     conn = self._dtls_sess.get(conv.key)
@@ -1410,14 +1421,6 @@ class Agent(dbus.service.Object):
         else:
             send_wait.tx_item_queue.append(tx_item)
         send_wait.start()
-
-        # not really success, as TX is deferred
-        if item.transfer_id is not None:
-            self.send_bundle_finished(
-                str(item.transfer_id),
-                item.total_length,
-                'success'
-            )
 
         return bool(self._tx_queue)
 

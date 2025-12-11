@@ -119,7 +119,7 @@ def main():
         return 0
 
     # (address,port) combo to use UDPCL on
-    address = ('127.0.0.1', 4556)
+    address = ('localhost', 4556)
     listening = multiprocessing.Semaphore(value=0)
 
     # Must run before connection or real main loop is constructed
