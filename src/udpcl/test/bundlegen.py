@@ -91,7 +91,7 @@ def main():
                         help='Names of test modes enabled')
     parser.add_argument('--use-tls', type=bool, default=False,
                         help='Enable DTLS operation')
-    parser.add_argument('--mtu-default', type=int, default=None,
+    parser.add_argument('--mtu-default', type=int, default=1400,
                         help='Entity maximum transmit size')
     parser.add_argument('genmode',
                         choices=('stdin', 'fullvalid', 'randcbor', 'randbytes'),
