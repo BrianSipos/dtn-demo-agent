@@ -27,6 +27,10 @@ LOGGER = logging.getLogger(__name__)
 
 # Patch socket module
 try:
+    IP_RECVTOS = socket.IP_RECVTOS
+except AttributeError:
+    IP_RECVTOS = 13
+try:
     IP_PKTINFO = socket.IP_PKTINFO
 except AttributeError:
     IP_PKTINFO = 8
@@ -214,7 +218,7 @@ class Conversation:
             sock.bind(sockaddr)
 
         if self.family == socket.AF_INET:
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_RECVTOS, 1)
+            sock.setsockopt(socket.IPPROTO_IP, IP_RECVTOS, 1)
             sock.setsockopt(socket.IPPROTO_IP, IP_PKTINFO, 1)
         elif self.family == socket.AF_INET6:
             sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_RECVTCLASS, 1)
@@ -623,7 +627,7 @@ class Agent(dbus.service.Object):
         self.__logger.info('Listening on %s:%d', conv.local_address, conv.local_port)
 
         if conv.family == socket.AF_INET:
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_RECVTOS, 1)
+            sock.setsockopt(socket.IPPROTO_IP, IP_RECVTOS, 1)
 
         multicast_member = opts.get('multicast_member', [])
         for item in multicast_member:
