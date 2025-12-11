@@ -897,7 +897,7 @@ class Agent(dbus.service.Object):
 
         send_wait.cur_ecn = EcnCounts(*ext)
 
-    def _sock_recvfrom(self, sock: socket.socket, *_args, **_kwargs)->bool:
+    def _sock_recvfrom(self, sock: socket.socket, *_args, **_kwargs) -> bool:
         ''' Callback to handle incoming datagrams.
 
         :return: True to continue listening.
