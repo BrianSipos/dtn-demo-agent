@@ -804,16 +804,16 @@ class CoseContext(AbstractContext):
                       secsrc_eid: str) -> CoseKey:
         ''' Get a local COSE key associated with a specific COSE message and security source EID '''
         kid_item = hdr_src.get_attr(headers.KID)
-        LOGGER.debug('Trying key based on KID %s', kid_item)
         if kid_item:
+            LOGGER.debug('Trying key based on KID %s with store containing %s', kid_item, self.sym_key_store.keys())
             if kid_item in self.sym_key_store:
                 return self.sym_key_store.get(kid_item)
             LOGGER.error('Given kid parameter %s but no key found, falling through', kid_item)
 
         x5t_item = hdr_src.get_attr(headers.X5t)
         x5chain_item = hdr_src.get_attr(headers.X5chain)
-        LOGGER.debug('Trying key based on x5t %s and x5chain %s', x5t_item, x5chain_item)
         if x5t_item or x5chain_item:
+            LOGGER.debug('Trying key based on x5t %s and x5chain %s', x5t_item, x5chain_item)
             # Look up cert chain to validate signature
             x5t = X5T.decode(x5t_item) if x5t_item else None
 
