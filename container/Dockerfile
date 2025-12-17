@@ -38,12 +38,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 #    apt-get -fy install && \
 #    rm libssl1.1_*_amd64.deb
 
-COPY pyproject.toml /usr/local/src/agent/
-COPY src/ /usr/local/src/agent/src/
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --break-system-packages --force-reinstall \
         git+https://github.com/BrianSipos/pycose.git@sipos-combined-patches \
-        git+https://github.com/wbond/oscrypto.git@master && \
+        git+https://github.com/wbond/oscrypto.git@master
+
+COPY pyproject.toml /usr/local/src/agent/
+COPY src/ /usr/local/src/agent/src/
+RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --break-system-packages \
         /usr/local/src/agent
 
