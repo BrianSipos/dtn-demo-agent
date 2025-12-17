@@ -11,6 +11,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from pycose.keys import SymmetricKey
+from bp.encoding.admin import StatusReport
 from bp.encoding.blocks import PrimaryBlock, CanonicalBlock
 from bp.encoding.bundle import Bundle
 from bp.util import BundleContainer
@@ -18,7 +19,7 @@ from bp.encoding.bpsec import (TargetResultList, TypeValuePair,
                                BlockIntegrityBlock, BlockConfidentalityBlock)
 from bp.config import Config
 from bp.agent import Agent
-from bp.app.bpsec import SecAssociation, CoseContext, BPSEC_COSE_CONTEXT_ID
+from bp.app.bpsec import CoseContext, BPSEC_COSE_CONTEXT_ID
 
 LOGGER = logging.getLogger()
 SELFDIR = os.path.dirname(os.path.abspath(__file__))
@@ -210,14 +211,14 @@ class TestBpsecCoseSign(unittest.TestCase):
         result = self._ctx.verify_bib(ctr, bib)
         self.assertIsNone(result)
 
-    def test_verify_bib_symmetric(self):
+    def test_verify_bib_symmetric_kek_valid(self):
         with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
             cosekey = SymmetricKey.decode(infile.read())
 
         self._ctx.sym_key_store.clear()
         self._ctx.sym_key_store[cosekey.kid] = cosekey
 
-        with open(os.path.join(SELFDIR, 'data', 'integrity.cbor'), 'rb') as infile:
+        with open(os.path.join(SELFDIR, 'data', 'interop-integrity.cbor'), 'rb') as infile:
             ctr = BundleContainer(bundle=Bundle(infile.read()))
             self.assertSetEqual(set(), ctr.bundle.check_all_crc())
         LOGGER.info('got %s', repr(ctr.bundle))
@@ -229,14 +230,52 @@ class TestBpsecCoseSign(unittest.TestCase):
         result = self._ctx.verify_bib(ctr, bib)
         self.assertIsNone(result)
 
-    def test_verify_bcb_symmetric(self):
+    def test_verify_bib_symmetric_direct_valid(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.1.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+
+        with open(os.path.join(SELFDIR, 'data', 'exampleA.1.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
+
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertSetEqual({3}, set(bib.block_num for bib in bib_set))
+        bib = bib_set[0]
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
+        result = self._ctx.verify_bib(ctr, bib)
+        self.assertIsNone(result)
+
+    def test_verify_bib_symmetric_direct_invalid_mod_scope(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.1.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+
+        with open(os.path.join(SELFDIR, 'data', 'exampleA.1-altered-aad.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
+
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertSetEqual({5}, set(bib.block_num for bib in bib_set))
+        bib = bib_set[0]
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
+        result = self._ctx.verify_bib(ctr, bib)
+        self.assertEqual(StatusReport.ReasonCode.FAILED_SEC, result)
+
+    def test_verify_bcb_symmetric_kek_valid(self):
         with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
             cosekey = SymmetricKey.decode(infile.read())
 
         self._ctx.sym_key_store.clear()
         self._ctx.sym_key_store[cosekey.kid] = cosekey
 
-        with open(os.path.join(SELFDIR, 'data', 'confidentiality.cbor'), 'rb') as infile:
+        with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality.cbor'), 'rb') as infile:
             ctr = BundleContainer(bundle=Bundle(infile.read()))
             self.assertSetEqual(set(), ctr.bundle.check_all_crc())
         LOGGER.info('got %s', repr(ctr.bundle))
