@@ -34,7 +34,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
               build-essential dbus \
-              python3-dev python3-wheel libcairo2-dev libdbus-glib-1-dev libgirepository-2.0-dev
+              python3-dev python3-wheel python3-setuptools \
+              libdbus-glib-1-dev libcairo2-dev libgirepository-2.0-dev
           # custom pycose repo
           # work around lack of release version fix for oscrypto issue #75
           # https://github.com/wbond/oscrypto/pull/76

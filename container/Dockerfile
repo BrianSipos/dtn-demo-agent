@@ -22,12 +22,11 @@ CMD [ "/sbin/init" ]
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
-    apt-get install -yq git python3-pip python3-venv pkg-config \
-    python3-setuptools \
-    python3-cairo \
-    python3-gi \
-    python3-dbus dbus \
-    rustc cargo
+    apt-get install -yq \
+        git python3-pip python3-venv python3-wheel python3-setuptools \
+        libdbus-glib-1-dev libcairo2-dev libgirepository-2.0-dev \
+        pkg-config \
+        dbus 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --break-system-packages pip-tools maturin
 
@@ -42,8 +41,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY pyproject.toml /usr/local/src/agent/
 COPY src/ /usr/local/src/agent/src/
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install --break-system-packages /usr/local/src/agent && \
-    pip3 install --break-system-packages --force-reinstall git+https://github.com/wbond/oscrypto.git@master
+    pip3 install --break-system-packages --force-reinstall \
+        git+https://github.com/BrianSipos/pycose.git@sipos-combined-patches \
+        git+https://github.com/wbond/oscrypto.git@master && \
+    pip3 install --break-system-packages \
+        /usr/local/src/agent
 
 COPY container/dbus.conf /etc/dbus-1/system.d/org.ietf.dtn.conf
 COPY container/*.service container/*.slice /usr/local/lib/systemd/system/
