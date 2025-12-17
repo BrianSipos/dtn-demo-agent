@@ -245,9 +245,9 @@ class CanonicalBlock(AbstractBlock):
                     pay = cls(pay_data)
                     self.add_payload(pay)
                 except Exception as err:
-                    if conf.debug_dissector:
-                        raise
-                    LOGGER.warning('CanonicalBlock failed to dissect payload: %s', err)
+                    LOGGER.warning('CanonicalBlock failed to dissect BTSD (maybe encrypted?): %s', err)
+                    # if conf.debug_dissector:
+                    #     raise
 
         return super().post_dissect(s)
 
