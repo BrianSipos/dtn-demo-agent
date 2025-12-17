@@ -224,13 +224,12 @@ class CoseSecOpCtx:
         addl_unprotected_map = cbor2.loads(addl_unprotected) if addl_unprotected else {}
         dupe_keys = set(addl_protected_map.keys()).intersection(set(addl_unprotected_map.keys()))
         if dupe_keys:
-            LOGGER.warning('Duplicate keys in additional headers: %s', dupe_keys)
-            return StatusReport.ReasonCode.FAILED_SEC
+            raise ValueError(f'Duplicate keys in additional headers: {dupe_keys}')
         self.addl_headers = dict(addl_protected_map)
         self.addl_headers.update(addl_unprotected_map)
 
         # use additional headers as defaults in highest layers
-        self.addl_parsed = CoseMessage._parse_header(self.addl_headers, allow_unknown_attributes=True)
+        self.addl_parsed = CoseMessage._parse_header(self.addl_headers, allow_unknown_attributes=False)
 
     def get_external_aad(self) -> bytes:
         ''' Generate External AAD from a bundle container per Section 2.5.1 of draft-ietf-bpsec-cose
@@ -274,6 +273,24 @@ class CoseSecOpCtx:
 
         LOGGER.debug('External AAD encoded %s', aad_data.hex())
         return aad_data
+
+    def decode_msg(self, result: TypeValuePair) -> CoseMessage:
+        ''' Decode a COSE message froma  result value and condition it
+        for this context.
+        This relies on :py:ivar:`tgt_blk` and other optional fields to be set.
+        '''
+        msg_cls: CoseMessage = CoseMessage._COSE_MSG_ID[result.type_code]
+
+        # replace detached payload
+        msg_enc = bytes(result.getfieldval('value'))
+        msg_dec = cbor2.loads(msg_enc)
+        LOGGER.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
+        msg_dec[2] = self.tgt_blk.getfieldval('btsd')
+
+        msg_obj = msg_cls.from_cose_obj(msg_dec, allow_unknown_attributes=False)
+        msg_obj.external_aad = self.get_external_aad()
+
+        return msg_obj
 
 
 class CoseContext(AbstractContext):
@@ -586,7 +603,6 @@ class CoseContext(AbstractContext):
             secop.tgt_blk = tgt_blk
             one_failure = self.verify_bib_target(secop, result)
             if one_failure is not None:
-                LOGGER.error('Failed verifying BIB num %d target block num %d', bib.block_num, tgt_blk_num)
                 failure = one_failure
 
         return failure
@@ -594,25 +610,14 @@ class CoseContext(AbstractContext):
     def verify_bib_target(self, secop: CoseSecOpCtx, result: TypeValuePair) -> Optional[int]:
         ''' Verify a single BIB security operation on a single target.
         '''
-        msg_cls: CoseMessage = CoseMessage._COSE_MSG_ID[result.type_code]
-
-        # replace detached payload
-        msg_enc = bytes(result.getfieldval('value'))
-        msg_dec = cbor2.loads(msg_enc)
-        LOGGER.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
-        # replace detached payload temporarily
-        msg_dec[2] = secop.tgt_blk.getfieldval('btsd')
-
-        msg_obj = msg_cls.from_cose_obj(msg_dec, allow_unknown_attributes=False)
-        msg_obj.external_aad = secop.get_external_aad()
-
         valid = False
-        # TODO: inject into other message types
         try:
-            if msg_cls is Mac0Message:
+            msg_obj = secop.decode_msg(result)
+
+            if isinstance(msg_obj, Mac0Message):
                 valid = self._verify_bib_mac0(secop, msg_obj)
 
-            elif msg_cls is MacMessage:
+            elif isinstance(msg_obj, MacMessage):
                 # Any one must be valid, but not all
                 for r_ix, recip in enumerate(msg_obj.recipients):
                     one_valid = self._verify_bib_mac(secop, msg_obj, recip)
@@ -620,10 +625,10 @@ class CoseContext(AbstractContext):
                         LOGGER.warning('Failed to verify COSE_Mac recipient %s with key k=%s', r_ix, msg_obj.key)
                     valid |= one_valid
 
-            elif msg_cls is Sign1Message:
+            elif isinstance(msg_obj, Sign1Message):
                 valid = self._verify_bib_sign1(secop, msg_obj)
 
-            elif msg_cls is SignMessage:
+            elif isinstance(msg_obj, SignMessage):
                 # Any one must be valid, but not all
                 for s_ix, signer in enumerate(msg_obj.signers):
                     one_valid = self._verify_bib_sign(secop, msg_obj, signer)
@@ -635,7 +640,7 @@ class CoseContext(AbstractContext):
                 raise TypeError(f'Unhandled message class {msg_cls}')
 
         except Exception as err:
-            LOGGER.error('Failed to verify BIB num %d target block num %d: %s', secop.sec_blk.block_num, secop.tgt_blk.block_num, err)
+            LOGGER.error('Exception during verify of BIB num %d target block num %d: %s', secop.sec_blk.block_num, secop.tgt_blk.block_num, err)
             LOGGER.debug('%s', traceback.format_exc())
             valid = False
 
@@ -721,7 +726,6 @@ class CoseContext(AbstractContext):
             secop.tgt_blk = tgt_blk
             one_failure = self.verify_bcb_target(secop, result)
             if one_failure is not None:
-                LOGGER.error('Failed verifying BCB num %d target block num %d', bcb.block_num, tgt_blk_num)
                 failure = one_failure
 
         return failure
@@ -729,25 +733,14 @@ class CoseContext(AbstractContext):
     def verify_bcb_target(self, secop: CoseSecOpCtx, result: TypeValuePair) -> Optional[int]:
         ''' Verify a single BCB security operation on a single target.
         '''
-        msg_cls: CoseMessage = CoseMessage._COSE_MSG_ID[result.type_code]
-
-        # replace detached payload
-        msg_enc = bytes(result.getfieldval('value'))
-        msg_dec = cbor2.loads(msg_enc)
-        LOGGER.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
-        # replace detached payload temporarily
-        msg_dec[2] = secop.tgt_blk.getfieldval('btsd')
-
-        msg_obj = msg_cls.from_cose_obj(msg_dec, allow_unknown_attributes=False)
-        msg_obj.external_aad = secop.get_external_aad()
-
         valid = False
-        # TODO: inject into other message types
         try:
-            if msg_cls is Enc0Message:
+            msg_obj = secop.decode_msg(result)
+
+            if isinstance(msg_obj, Enc0Message):
                 valid = self._verify_bcb_enc0(secop, msg_obj)
 
-            elif msg_cls is EncMessage:
+            elif isinstance(msg_obj, EncMessage):
                 # Any one must be valid, but not all
                 for r_ix, recip in enumerate(msg_obj.recipients):
                     one_valid = self._verify_bcb_enc(secop, msg_obj, recip)
@@ -759,7 +752,7 @@ class CoseContext(AbstractContext):
                 raise TypeError(f'Unhandled message class {msg_cls}')
 
         except Exception as err:
-            LOGGER.error('Failed to verify BCB num %d target block num %d: %s', secop.sec_blk.block_num, secop.tgt_blk.block_num, err)
+            LOGGER.error('Exception during verify of BCB num %d target block num %d: %s', secop.sec_blk.block_num, secop.tgt_blk.block_num, err)
             LOGGER.debug('%s', traceback.format_exc())
             valid = False
 

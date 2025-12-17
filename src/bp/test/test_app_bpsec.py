@@ -256,7 +256,26 @@ class TestBpsecCoseSign(unittest.TestCase):
         self._ctx.sym_key_store.clear()
         self._ctx.sym_key_store[cosekey.kid] = cosekey
 
-        with open(os.path.join(SELFDIR, 'data', 'exampleA.1-altered-aad.cbor'), 'rb') as infile:
+        with open(os.path.join(SELFDIR, 'data', 'interop-altered-aad.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
+
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertSetEqual({5}, set(bib.block_num for bib in bib_set))
+        bib = bib_set[0]
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
+        result = self._ctx.verify_bib(ctr, bib)
+        self.assertEqual(StatusReport.ReasonCode.FAILED_SEC, result)
+
+    def test_verify_bib_symmetric_direct_unknown_critical_header(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.1.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+
+        with open(os.path.join(SELFDIR, 'data', 'interop-critical-header.cbor'), 'rb') as infile:
             ctr = BundleContainer(bundle=Bundle(infile.read()))
             self.assertSetEqual(set(), ctr.bundle.check_all_crc())
         LOGGER.info('got %s', repr(ctr.bundle))
