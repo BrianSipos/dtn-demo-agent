@@ -163,6 +163,119 @@ class CertificateStore:
         return chain
 
 
+@dataclass
+class CoseSecOpCtx:
+    ''' Collection of external data needed to process one security operation
+    in the COSE Context.
+    '''
+    ctr: BundleContainer
+    sec_blk: CanonicalBlock
+
+    ssrc_enc: Optional[bytes] = None
+    ''' Encoded security source from the security block '''
+    aad_scope: Optional[Dict[int, int]] = None
+    ''' Decoded AAD Scope parameter '''
+    addl_protected: Optional[bytes] = None
+    ''' Encoded Additional Protected parameter '''
+    addl_headers: Optional[Dict] = None
+    ''' All additional headers combined together and de-duplicated '''
+    addl_parsed: Optional[Dict] = None
+    ''' All additional headers parsed by :py:mod:`pycose`. '''
+
+    tgt_blk: Optional[CanonicalBlock] = None
+    ''' Target block for specific operations, which can be modified '''
+
+    def check_secblk(self) -> bool:
+        ''' Initial consistency check of :py:ivar:`sec_blk`
+        '''
+        type_ids = [param.type_code for param in self.sec_blk.payload.parameters]
+        if len(set(type_ids)) != len(type_ids):
+            LOGGER.error('Duplicate parameter IDs')
+            return False
+
+        for tgt_ix, target_results in enumerate(self.sec_blk.payload.results):
+            type_ids = [res.type_code for res in target_results.results]
+            if len(set(type_ids)) != len(type_ids):
+                LOGGER.error('Duplicate result IDs for index %d', tgt_ix)
+                return False
+
+        return True
+
+    def extract_secblk(self) -> None:
+        ''' Extract derived fields from :py:ivar:`sec_blk`
+        '''
+
+        # Encoded security source EID
+        ssrc_fld, ssrc_val = self.sec_blk.payload.getfield_and_val('source')
+        self.ssrc_enc = cbor2.dumps(ssrc_fld.i2m(self.sec_blk.payload, ssrc_val))
+
+        self.addl_protected = b''
+        addl_unprotected = b''
+        self.aad_scope = {0: 1, -1: 1, -2: 1}
+        for param in self.sec_blk.payload.parameters:
+            if param.type_code == 3:
+                self.addl_protected = bytes(param.value)
+            elif param.type_code == 4:
+                addl_unprotected = bytes(param.value)
+            elif param.type_code == 5:
+                self.aad_scope = dict(param.value)
+
+        addl_protected_map = cbor2.loads(self.addl_protected) if self.addl_protected else {}
+        addl_unprotected_map = cbor2.loads(addl_unprotected) if addl_unprotected else {}
+        dupe_keys = set(addl_protected_map.keys()).intersection(set(addl_unprotected_map.keys()))
+        if dupe_keys:
+            LOGGER.warning('Duplicate keys in additional headers: %s', dupe_keys)
+            return StatusReport.ReasonCode.FAILED_SEC
+        self.addl_headers = dict(addl_protected_map)
+        self.addl_headers.update(addl_unprotected_map)
+
+        # use additional headers as defaults in highest layers
+        self.addl_parsed = CoseMessage._parse_header(self.addl_headers, allow_unknown_attributes=True)
+
+    def get_external_aad(self) -> bytes:
+        ''' Generate External AAD from a bundle container per Section 2.5.1 of draft-ietf-bpsec-cose
+        '''
+        # roundabout way of forcing sorted map
+        aad_scope_enc = cbor2.dumps(self.aad_scope, canonical=True)
+        aad_scope = cbor2.loads(aad_scope_enc)
+
+        aad_data = self.ssrc_enc + aad_scope_enc
+
+        # processing order by block number in CBOR sort logic
+        for blk_num, flags in aad_scope.items():
+            if blk_num in (0, -2, self.sec_blk.block_num) and flags & CoseContext.AadScopeFlag.BTSD:
+                LOGGER.error(f'Invalid AAD Scope flags for block {blk_num}')
+
+            if blk_num == -1:
+                blk = self.tgt_blk
+            elif blk_num == -2:
+                # security block is not yet part of the bundle
+                blk = self.sec_blk
+            elif blk_num == 0:
+                blk = self.ctr.bundle.primary
+            else:
+                blk = self.ctr.block_num(blk_num)
+            is_primary = isinstance(blk, PrimaryBlock)
+
+            if is_primary:
+                if flags & CoseContext.AadScopeFlag.METADATA:
+                    blk.update_crc()
+                    aad_data += bytes(blk)
+
+            else:
+                if flags & CoseContext.AadScopeFlag.METADATA:
+                    # block metadata not in array framing
+                    aad_data += b''.join(cbor2.dumps(item) for item in blk.build()[:3])
+
+                if flags & CoseContext.AadScopeFlag.BTSD:
+                    aad_data += cbor2.dumps(bytes(blk.btsd))
+
+        aad_data += cbor2.dumps(self.addl_protected)
+
+        LOGGER.debug('External AAD encoded %s', aad_data.hex())
+        return aad_data
+
+
 class CoseContext(AbstractContext):
 
     @enum.unique
@@ -198,51 +311,6 @@ class CoseContext(AbstractContext):
         if config.sign_key_file:
             with open(config.sign_key_file, 'rb') as infile:
                 self._priv_key = load_pem_key(infile)
-
-    @staticmethod
-    def get_bpsec_cose_aad(ctr: BundleContainer, target: CanonicalBlock, secblk: CanonicalBlock,
-                           ssrc_enc: bytes, aad_scope: dict, addl_protected: bytes) -> bytes:
-        ''' Generate External AAD from a bundle container per Section 2.5.1 of draft-ietf-bpsec-cose
-        '''
-        # roundabout way of forcing sorted map
-        aad_scope_enc = cbor2.dumps(aad_scope, canonical=True)
-        aad_scope = cbor2.loads(aad_scope_enc)
-
-        aad_data = ssrc_enc + aad_scope_enc
-
-        # processing order by block number in CBOR sort logic
-        for blk_num, flags in aad_scope.items():
-            if blk_num in (0, -2, secblk.block_num) and flags & CoseContext.AadScopeFlag.BTSD:
-                LOGGER.error(f'Invalid AAD Scope flags for block {blk_num}')
-
-            if blk_num == -1:
-                blk = target
-            elif blk_num == -2:
-                # security block is not yet part of the bundle
-                blk = secblk
-            elif blk_num == 0:
-                blk = ctr.bundle.primary
-            else:
-                blk = ctr.block_num(blk_num)
-            is_primary = isinstance(blk, PrimaryBlock)
-
-            if is_primary:
-                if flags & CoseContext.AadScopeFlag.METADATA:
-                    blk.update_crc()
-                    aad_data += bytes(blk)
-
-            else:
-                if flags & CoseContext.AadScopeFlag.METADATA:
-                    # block metadata not in array framing
-                    aad_data += b''.join(cbor2.dumps(item) for item in blk.build()[:3])
-
-                if flags & CoseContext.AadScopeFlag.BTSD:
-                    aad_data += cbor2.dumps(bytes(blk.btsd))
-
-        aad_data += cbor2.dumps(addl_protected)
-
-        LOGGER.debug('External AAD encoded %s', aad_data.hex())
-        return aad_data
 
     @staticmethod
     def extract_cose_key(keyobj):
@@ -447,16 +515,20 @@ class CoseContext(AbstractContext):
         }
         uhdr = {}
 
+        secop = CoseSecOpCtx(ctr=ctr, sec_blk=bib, ssrc_enc=ssrc_enc,
+                             aad_scope=aad_scope, addl_protected=addl_protected)
+
         # Sign each target with one result per
         target_result = []
-        for blk_num in bib_data.getfieldval('targets'):
-            target_blk = ctr.block_num(blk_num)
-            target_blk.ensure_block_type_specific_data()
-            target_plaintext = target_blk.getfieldval('btsd')
+        for tgt_blk_num in bib_data.getfieldval('targets'):
+            tgt_blk = ctr.block_num(tgt_blk_num)
+            tgt_blk.ensure_block_type_specific_data()
+            target_plaintext = tgt_blk.getfieldval('btsd')
 
-            ext_aad_enc = CoseContext.get_bpsec_cose_aad(ctr, target_blk, bib, ssrc_enc, aad_scope, addl_protected)
+            secop.tgt_blk = tgt_blk
+            ext_aad_enc = secop.get_external_aad()
             LOGGER.debug('Signing target %d AAD %s payload %s',
-                         blk_num, encode_diagnostic(ext_aad_enc),
+                         tgt_blk_num, encode_diagnostic(ext_aad_enc),
                          encode_diagnostic(target_plaintext))
             msg_obj = Sign1Message(
                 phdr=phdr,
@@ -496,157 +568,241 @@ class CoseContext(AbstractContext):
 
         :return: An error code, or None if successful.
         '''
-        type_ids = [param.type_code for param in bib.payload.parameters]
-        if len(set(type_ids)) != len(type_ids):
-            LOGGER.error('Duplicate parameter IDs')
+        secop = CoseSecOpCtx(ctr=ctr, sec_blk=bib)
+        if not secop.check_secblk():
             return StatusReport.ReasonCode.FAILED_SEC
-
-        for target_results in bib.payload.results:
-            type_ids = [res.type_code for res in target_results.results]
-            if len(set(type_ids)) != len(type_ids):
-                LOGGER.error('Duplicate result IDs')
-                return StatusReport.ReasonCode.FAILED_SEC
-
-        # Encoded security source EID
-        ssrc_fld, ssrc_val = bib.payload.getfield_and_val('source')
-        ssrc_enc = cbor2.dumps(ssrc_fld.i2m(bib.payload, ssrc_val))
-
-        addl_protected = b''
-        addl_unprotected = b''
-        aad_scope = {0: 1, -1: 1, -2: 1}
-        for param in bib.payload.parameters:
-            if param.type_code == 3:
-                addl_protected = bytes(param.value)
-            elif param.type_code == 4:
-                addl_unprotected = bytes(param.value)
-            elif param.type_code == 5:
-                aad_scope = dict(param.value)
-
-        addl_protected_map = cbor2.loads(addl_protected) if addl_protected else {}
-        addl_unprotected_map = cbor2.loads(addl_unprotected) if addl_unprotected else {}
-        dupe_keys = set(addl_protected_map.keys()).intersection(set(addl_unprotected_map.keys()))
-        if dupe_keys:
-            LOGGER.warning('Duplicate keys in additional headers: %s', dupe_keys)
-            return StatusReport.ReasonCode.FAILED_SEC
-        addl_headers = dict(addl_protected_map)
-        addl_headers.update(addl_unprotected_map)
+        secop.extract_secblk()
 
         failure = None
-        for (ix, blk_num) in enumerate(bib.payload.targets):
-            target_blk = ctr.block_num(blk_num)
-            result_list = bib.payload.results[ix].results
+        for (tgt_ix, tgt_blk_num) in enumerate(bib.payload.targets):
+            tgt_blk = ctr.block_num(tgt_blk_num)
+            result_list = bib.payload.results[tgt_ix].results
             if len(result_list) != 1:
-                LOGGER.error('Failed to find cert chain for block num %d', blk_num)
+                LOGGER.error('Result array in BIB num %d does not have exactly one result', bib.block_num)
                 failure = StatusReport.ReasonCode.FAILED_SEC
                 break
-
             result = result_list[0]
-            msg_cls: CoseMessage = CoseMessage._COSE_MSG_ID[result.type_code]
 
-            # replace detached payload
-            msg_enc = bytes(result.getfieldval('value'))
-            msg_dec = cbor2.loads(msg_enc)
-            LOGGER.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
-            # replace detached payload temporarily
-            msg_dec[2] = target_blk.getfieldval('btsd')
-
-            msg_obj = msg_cls.from_cose_obj(msg_dec, allow_unknown_attributes=False)
-            msg_obj.external_aad = CoseContext.get_bpsec_cose_aad(ctr, target_blk, bib, ssrc_enc, aad_scope, addl_protected)
-
-            # use additional headers as defaults in highest layers
-            addl_parsed = msg_cls._parse_header(addl_headers, allow_unknown_attributes=True)
-
-            valid = False
-            # TODO: inject into other message types
-            try:
-                if msg_cls is Mac0Message:
-                    for (key, val) in addl_parsed.items():
-                        msg_obj.uhdr.setdefault(key, val)
-                    valid = self._verify_bib_mac0(ctr, bib, msg_obj)
-
-                elif msg_cls is MacMessage:
-                    # Any one must be valid, but not all
-                    for r_ix, recip in enumerate(msg_obj.recipients):
-                        for (key, val) in addl_parsed.items():
-                            recip.uhdr.setdefault(key, val)
-                        one_valid = self._verify_bib_mac(ctr, bib, msg_obj, recip)
-                        if not one_valid:
-                            LOGGER.warning('Failed to verify COSE_Mac recipient %s with key k=%s', r_ix, msg_obj.key)
-                        valid |= one_valid
-
-                elif msg_cls is Sign1Message:
-                    for (key, val) in addl_parsed.items():
-                        msg_obj.uhdr.setdefault(key, val)
-                    valid = self._verify_bib_sign1(ctr, bib, msg_obj)
-
-                elif msg_cls is SignMessage:
-                    # Any one must be valid, but not all
-                    for s_ix, signer in enumerate(msg_obj.signers):
-                        for (key, val) in addl_parsed.items():
-                            signer.uhdr.setdefault(key, val)
-                        one_valid = self._verify_bib_sign(ctr, bib, msg_obj, signer)
-                        if not one_valid:
-                            LOGGER.warning('Failed to verify COSE_Sign signer %s with key k=%s', s_ix, msg_obj.key)
-                        valid |= one_valid
-
-                else:
-                    raise TypeError(f'Unhandled message class {msg_cls}')
-
-            except Exception as err:
-                LOGGER.error('Failed to verify security for block num %d: %s', blk_num, err)
-                LOGGER.debug('%s', traceback.format_exc())
-                valid = False
-
-            if valid:
-                LOGGER.info('Verified BIB num %d, target block num %d', bib.block_num, blk_num)
-            else:
-                LOGGER.error('Failed to verify BIB num %d, target block num %d', bib.block_num, blk_num)
-                failure = StatusReport.ReasonCode.FAILED_SEC
+            secop.tgt_blk = tgt_blk
+            one_failure = self.verify_bib_target(secop, result)
+            if one_failure is not None:
+                LOGGER.error('Failed verifying BIB num %d target block num %d', bib.block_num, tgt_blk_num)
+                failure = one_failure
 
         return failure
 
-    def _verify_bib_mac0(self, ctr: BundleContainer, bib: CanonicalBlock, msg_obj: Mac0Message) -> bool:
-        ''' Verify a single result with a COSE_Mac0 '''
+    def verify_bib_target(self, secop: CoseSecOpCtx, result: TypeValuePair) -> Optional[int]:
+        ''' Verify a single BIB security operation on a single target.
+        '''
+        msg_cls: CoseMessage = CoseMessage._COSE_MSG_ID[result.type_code]
+
+        # replace detached payload
+        msg_enc = bytes(result.getfieldval('value'))
+        msg_dec = cbor2.loads(msg_enc)
+        LOGGER.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
+        # replace detached payload temporarily
+        msg_dec[2] = secop.tgt_blk.getfieldval('btsd')
+
+        msg_obj = msg_cls.from_cose_obj(msg_dec, allow_unknown_attributes=False)
+        msg_obj.external_aad = secop.get_external_aad()
+
+        valid = False
+        # TODO: inject into other message types
         try:
-            msg_obj.key = self._get_cose_key(ctr, msg_obj, bib.payload.source)
+            if msg_cls is Mac0Message:
+                valid = self._verify_bib_mac0(secop, msg_obj)
+
+            elif msg_cls is MacMessage:
+                # Any one must be valid, but not all
+                for r_ix, recip in enumerate(msg_obj.recipients):
+                    one_valid = self._verify_bib_mac(secop, msg_obj, recip)
+                    if not one_valid:
+                        LOGGER.warning('Failed to verify COSE_Mac recipient %s with key k=%s', r_ix, msg_obj.key)
+                    valid |= one_valid
+
+            elif msg_cls is Sign1Message:
+                valid = self._verify_bib_sign1(secop, msg_obj)
+
+            elif msg_cls is SignMessage:
+                # Any one must be valid, but not all
+                for s_ix, signer in enumerate(msg_obj.signers):
+                    one_valid = self._verify_bib_sign(secop, msg_obj, signer)
+                    if not one_valid:
+                        LOGGER.warning('Failed to verify COSE_Sign signer %s with key k=%s', s_ix, msg_obj.key)
+                    valid |= one_valid
+
+            else:
+                raise TypeError(f'Unhandled message class {msg_cls}')
+
+        except Exception as err:
+            LOGGER.error('Failed to verify BIB num %d target block num %d: %s', secop.sec_blk.block_num, secop.tgt_blk.block_num, err)
+            LOGGER.debug('%s', traceback.format_exc())
+            valid = False
+
+        if valid:
+            LOGGER.info('Verified BIB num %d, target block num %d', secop.sec_blk.block_num, secop.tgt_blk.block_num)
+            return None
+        else:
+            LOGGER.error('Failed to verify BIB num %d, target block num %d', secop.sec_blk.block_num, secop.tgt_blk.block_num)
+            return StatusReport.ReasonCode.FAILED_SEC
+
+    def _verify_bib_mac0(self, secop: CoseSecOpCtx, msg_obj: Mac0Message) -> bool:
+        ''' Verify a single result with a COSE_Mac0 '''
+        for (key, val) in secop.addl_parsed.items():
+            msg_obj.uhdr.setdefault(key, val)
+
+        try:
+            msg_obj.key = self._get_cose_key(secop.ctr, msg_obj, secop.sec_blk.payload.source)
             return msg_obj.verify_tag()
         except Exception as err:
             LOGGER.error('Failed to verify COSE_Mac0: %s', err)
             LOGGER.debug('%s', traceback.format_exc())
             return False
 
-    def _verify_bib_mac(self, ctr: BundleContainer, bib: CanonicalBlock, msg_obj: MacMessage, recip: CoseRecipient) -> bool:
+    def _verify_bib_mac(self, secop: CoseSecOpCtx, msg_obj: MacMessage, recip: CoseRecipient) -> bool:
         ''' Verify a single result with a COSE_Mac '''
+        for (key, val) in secop.addl_parsed.items():
+            recip.uhdr.setdefault(key, val)
+
         try:
-            recip.key = self._get_cose_key(ctr, recip, bib.payload.source)
+            recip.key = self._get_cose_key(secop.ctr, recip, secop.sec_blk.payload.source)
             return msg_obj.verify_tag(recip)
         except Exception as err:
             LOGGER.error('Failed to verify COSE_Mac recipient %s: %s', recip, err)
             LOGGER.debug('%s', traceback.format_exc())
             return False
 
-    def _verify_bib_sign1(self, ctr: BundleContainer, bib: CanonicalBlock, msg_obj: Sign1Message) -> bool:
+    def _verify_bib_sign1(self, secop: CoseSecOpCtx, msg_obj: Sign1Message) -> bool:
         ''' Verify a single result with a COSE_Sign1 '''
+        for (key, val) in secop.addl_parsed.items():
+            msg_obj.uhdr.setdefault(key, val)
+
         try:
-            msg_obj.key = self._get_cose_key(ctr, msg_obj, bib.payload.source)
+            msg_obj.key = self._get_cose_key(secop.ctr, msg_obj, secop.sec_blk.payload.source)
             return msg_obj.verify_signature()
         except Exception as err:
             LOGGER.error('Failed to verify COSE_Sign1: %s', err)
             LOGGER.debug('%s', traceback.format_exc())
             return False
 
-    def _verify_bib_sign(self, ctr: BundleContainer, bib: CanonicalBlock, msg_obj: SignMessage, signer: CoseSignature) -> bool:
+    def _verify_bib_sign(self, secop: CoseSecOpCtx, msg_obj: SignMessage, signer: CoseSignature) -> bool:
         ''' Verify a single result with a COSE_Mac '''
+        for (key, val) in secop.addl_parsed.items():
+            signer.uhdr.setdefault(key, val)
+
         try:
-            signer.key = self._get_cose_key(ctr, signer, bib.payload.source)
+            signer.key = self._get_cose_key(secop.ctr, signer, secop.sec_blk.payload.source)
             return msg_obj.verify_signature(signer)
         except Exception as err:
             LOGGER.error('Failed to verify COSE_Sign signer %s: %s', signer, err)
             LOGGER.debug('%s', traceback.format_exc())
             return False
 
+    def verify_bcb(self, ctr: BundleContainer, bcb: CanonicalBlock):
+        ''' Verify all targets in a single BCB based on local policy config.
+
+        :return: An error code, or None if successful.
+        '''
+        secop = CoseSecOpCtx(ctr=ctr, sec_blk=bcb)
+        if not secop.check_secblk():
+            return StatusReport.ReasonCode.FAILED_SEC
+        secop.extract_secblk()
+
+        failure = None
+        for (tgt_ix, tgt_blk_num) in enumerate(bcb.payload.targets):
+            tgt_blk = ctr.block_num(tgt_blk_num)
+            result_list = bcb.payload.results[tgt_ix].results
+            if len(result_list) != 1:
+                LOGGER.error('Result array in BCB num %d does not have exactly one result', bcb.block_num)
+                failure = StatusReport.ReasonCode.FAILED_SEC
+                break
+            result = result_list[0]
+
+            secop.tgt_blk = tgt_blk
+            one_failure = self.verify_bcb_target(secop, result)
+            if one_failure is not None:
+                LOGGER.error('Failed verifying BCB num %d target block num %d', bcb.block_num, tgt_blk_num)
+                failure = one_failure
+
+        return failure
+
+    def verify_bcb_target(self, secop: CoseSecOpCtx, result: TypeValuePair) -> Optional[int]:
+        ''' Verify a single BCB security operation on a single target.
+        '''
+        msg_cls: CoseMessage = CoseMessage._COSE_MSG_ID[result.type_code]
+
+        # replace detached payload
+        msg_enc = bytes(result.getfieldval('value'))
+        msg_dec = cbor2.loads(msg_enc)
+        LOGGER.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
+        # replace detached payload temporarily
+        msg_dec[2] = secop.tgt_blk.getfieldval('btsd')
+
+        msg_obj = msg_cls.from_cose_obj(msg_dec, allow_unknown_attributes=False)
+        msg_obj.external_aad = secop.get_external_aad()
+
+        valid = False
+        # TODO: inject into other message types
+        try:
+            if msg_cls is Enc0Message:
+                valid = self._verify_bcb_enc0(secop, msg_obj)
+
+            elif msg_cls is EncMessage:
+                # Any one must be valid, but not all
+                for r_ix, recip in enumerate(msg_obj.recipients):
+                    one_valid = self._verify_bcb_enc(secop, msg_obj, recip)
+                    if not one_valid:
+                        LOGGER.warning('Failed to verify COSE_Enc recipient %s with key k=%s', r_ix, msg_obj.key)
+                    valid |= one_valid
+
+            else:
+                raise TypeError(f'Unhandled message class {msg_cls}')
+
+        except Exception as err:
+            LOGGER.error('Failed to verify BCB num %d target block num %d: %s', secop.sec_blk.block_num, secop.tgt_blk.block_num, err)
+            LOGGER.debug('%s', traceback.format_exc())
+            valid = False
+
+        if valid:
+            LOGGER.info('Verified BCB num %d, target block num %d', secop.sec_blk.block_num, secop.tgt_blk.block_num)
+            return None
+        else:
+            LOGGER.error('Failed to verify BCB num %d, target block num %d', secop.sec_blk.block_num, secop.tgt_blk.block_num)
+            return StatusReport.ReasonCode.FAILED_SEC
+
+    def _verify_bcb_enc0(self, secop: CoseSecOpCtx, msg_obj: Enc0Message) -> bool:
+        ''' Verify a single result with a COSE_Enc0 '''
+        for (key, val) in secop.addl_parsed.items():
+            msg_obj.uhdr.setdefault(key, val)
+
+        try:
+            msg_obj.key = self._get_cose_key(secop.ctr, msg_obj, secop.sec_blk.payload.source)
+            # ignore the plaintext
+            msg_obj.decrypt()
+            return True
+        except Exception as err:
+            LOGGER.error('Failed to verify COSE_Enc0: %s', err)
+            LOGGER.debug('%s', traceback.format_exc())
+            return False
+
+    def _verify_bcb_enc(self, secop: CoseSecOpCtx, msg_obj: EncMessage, recip: CoseRecipient) -> bool:
+        ''' Verify a single result with a COSE_Mac '''
+        for (key, val) in secop.addl_parsed.items():
+            recip.uhdr.setdefault(key, val)
+
+        try:
+            recip.key = self._get_cose_key(secop.ctr, recip, secop.sec_blk.payload.source)
+            # ignore the plaintext
+            msg_obj.decrypt(recip)
+            return True
+        except Exception as err:
+            LOGGER.error('Failed to verify COSE_Enc recipient %s: %s', recip, err)
+            LOGGER.debug('%s', traceback.format_exc())
+            return False
+
     def _get_cose_key(self, ctr: BundleContainer, hdr_src: Union[CoseMessage, CoseRecipient, CoseSignature],
-                      peer_nodeid: str) -> CoseKey:
+                      secsrc_eid: str) -> CoseKey:
+        ''' Get a local COSE key associated with a specific COSE message and security source EID '''
         kid_item = hdr_src.get_attr(headers.KID)
         if kid_item:
             if kid_item in self.sym_key_store:
@@ -701,16 +857,13 @@ class CoseContext(AbstractContext):
                 self.cert_store.add_untrusted_cert(data)
 
             end_cert = x509.load_der_x509_certificate(found_chain[0], default_backend())
-            authn_nodeid = tcpcl.session.match_id(peer_nodeid, end_cert, OID_ON_EID, LOGGER, 'NODE-ID')
+            authn_nodeid = tcpcl.session.match_id(secsrc_eid, end_cert, OID_ON_EID, LOGGER, 'NODE-ID')
             if authn_nodeid:
                 return self.extract_cose_key(end_cert.public_key())
             # Continue on to verification
-            LOGGER.error('Failed to authenticate peer identity "%s", falling through', peer_nodeid)
+            LOGGER.error('Failed to authenticate peer identity "%s", falling through', secsrc_eid)
 
         raise RuntimeError('No parameter for key identity found')
-
-    def verify_bcb(self, ctr, bcb):
-        raise NotImplementedError('no BCB handling')
 
 
 @app('bpsec')

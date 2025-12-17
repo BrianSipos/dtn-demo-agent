@@ -15,7 +15,7 @@ from bp.encoding.blocks import PrimaryBlock, CanonicalBlock
 from bp.encoding.bundle import Bundle
 from bp.util import BundleContainer
 from bp.encoding.bpsec import (TargetResultList, TypeValuePair,
-                               BlockIntegrityBlock)
+                               BlockIntegrityBlock, BlockConfidentalityBlock)
 from bp.config import Config
 from bp.agent import Agent
 from bp.app.bpsec import SecAssociation, CoseContext, BPSEC_COSE_CONTEXT_ID
@@ -179,9 +179,9 @@ class TestBpsecCoseSign(unittest.TestCase):
         ctr = self._dummy_ctr()
         self._app._apply_bib(ctr)
 
-        bibs = ctr.block_type(BlockIntegrityBlock)
-        self.assertNotEqual([], bibs)
-        bib = bibs[0]
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertEqual(1, len(bib_set))
+        bib = bib_set[0]
         self.assertEqual([1], bib.payload.targets)
         self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
 
@@ -201,31 +201,49 @@ class TestBpsecCoseSign(unittest.TestCase):
         ctr = self._dummy_ctr()
         self._ctx.apply_bib(ctr)
 
-        bibs = ctr.block_type(BlockIntegrityBlock)
-        self.assertNotEqual([], bibs)
-        bib = bibs[0]
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertEqual(1, len(bib_set))
+        bib = bib_set[0]
         self.assertEqual([1], bib.payload.targets)
         self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
 
         result = self._ctx.verify_bib(ctr, bib)
         self.assertIsNone(result)
 
-    def test_verify_bib_symmetric_sa(self):
+    def test_verify_bib_symmetric(self):
         with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
             cosekey = SymmetricKey.decode(infile.read())
 
         self._ctx.sym_key_store.clear()
         self._ctx.sym_key_store[cosekey.kid] = cosekey
 
-        FILE_NAMES = ['integrity.cbor']
-        for name in FILE_NAMES:
-            with self.subTest(name):
-                with open(os.path.join(SELFDIR, 'data', name), 'rb') as infile:
-                    ctr = BundleContainer(bundle=Bundle(infile.read()))
-                    self.assertSetEqual(set(), ctr.bundle.check_all_crc())
-                LOGGER.info('got %s', repr(ctr.bundle))
+        with open(os.path.join(SELFDIR, 'data', 'integrity.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
 
-                bib_set = ctr.block_type(BlockIntegrityBlock)
-                self.assertSetEqual({5}, set(bib.block_num for bib in bib_set))
-                result = self._ctx.verify_bib(ctr, bib_set[0])
-                self.assertIsNone(result)
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertSetEqual({5}, set(bib.block_num for bib in bib_set))
+        bib = bib_set[0]
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
+        result = self._ctx.verify_bib(ctr, bib)
+        self.assertIsNone(result)
+
+    def test_verify_bcb_symmetric(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+
+        with open(os.path.join(SELFDIR, 'data', 'confidentiality.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
+
+        bib_set = ctr.block_type(BlockConfidentalityBlock)
+        self.assertSetEqual({5}, set(bib.block_num for bib in bib_set))
+        bib = bib_set[0]
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
+        result = self._ctx.verify_bcb(ctr, bib)
+        self.assertIsNone(result)
