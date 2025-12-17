@@ -27,7 +27,7 @@ SELFDIR = os.path.dirname(os.path.abspath(__file__))
 class TestBpsecCoseSign(unittest.TestCase):
 
     @classmethod
-    def setUpClass(cls)->None:
+    def setUpClass(cls) -> None:
         super().setUpClass()
 
         from dbus.mainloop.glib import DBusGMainLoop
@@ -35,7 +35,7 @@ class TestBpsecCoseSign(unittest.TestCase):
         cls.eloop = DBusGMainLoop(set_as_default=True)
 
     @classmethod
-    def tearDownClass(cls)->None:
+    def tearDownClass(cls) -> None:
         cls.eloop = None
 
         super().tearDownClass()

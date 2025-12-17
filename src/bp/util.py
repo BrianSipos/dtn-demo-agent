@@ -198,7 +198,7 @@ class BundleContainer(object):
             blk.overloaded_fields['block_num'] = blk_num
         return blk_num
 
-    def record_action(self, action: str, reason: Optional[int]=None):
+    def record_action(self, action: str, reason: Optional[int] = None):
         ''' Mark an action on this bundle.
         '''
         self.actions[action] = datetime.datetime.now(datetime.timezone.utc)
