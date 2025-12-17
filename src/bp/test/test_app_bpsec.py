@@ -1,31 +1,44 @@
-''' Test the module :py:mod:`bp.blocks`.
+''' Test the module :py:mod:`bp.app.bpsec`.
 '''
 import datetime
+import logging
+import os
+import re
 import unittest
 import asn1
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
-from bp.encoding.fields import (EidField)
+from pycose.keys import SymmetricKey
 from bp.encoding.blocks import PrimaryBlock, CanonicalBlock
+from bp.encoding.bundle import Bundle
 from bp.util import BundleContainer
 from bp.encoding.bpsec import (TargetResultList, TypeValuePair,
                                BlockIntegrityBlock)
 from bp.config import Config
 from bp.agent import Agent
-from bp.app.bpsec import Bpsec, BPSEC_COSE_CONTEXT_ID
+from bp.app.bpsec import SecAssociation, CoseContext, BPSEC_COSE_CONTEXT_ID
+
+LOGGER = logging.getLogger()
+SELFDIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class TestBpsecCoseSign(unittest.TestCase):
 
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls)->None:
         super().setUpClass()
 
         from dbus.mainloop.glib import DBusGMainLoop
         # Must run before connection or real main loop is constructed
-        DBusGMainLoop(set_as_default=True)
+        cls.eloop = DBusGMainLoop(set_as_default=True)
+
+    @classmethod
+    def tearDownClass(cls)->None:
+        cls.eloop = None
+
+        super().tearDownClass()
 
     def setUp(self):
         super().setUp()
@@ -34,6 +47,10 @@ class TestBpsecCoseSign(unittest.TestCase):
         config.node_id = 'dtn://node/'
         self._bp = Agent(config)
         self._app = self._bp._app['bpsec']
+        self.assertIsNotNone(self._app)
+
+        self._ctx: CoseContext = self._app._contexts[BPSEC_COSE_CONTEXT_ID]
+        self.assertIsNotNone(self._ctx)
 
     def _dummy_ca_cert(self, ca_key):
         ca_name = x509.Name([
@@ -155,10 +172,9 @@ class TestBpsecCoseSign(unittest.TestCase):
         end_key = ec.generate_private_key(ec.SECP256R1(), backend=default_backend())  # Curve for COSE ES256
         end_cert = self._dummy_end_cert(ca_key, ca_cert, end_key)
 
-        ctx = self._app._contexts[BPSEC_COSE_CONTEXT_ID]
-        ctx._ca_certs = [ca_cert]
-        ctx._cert_chain = [end_cert]
-        ctx._priv_key = end_key
+        self._ctx._ca_certs = [ca_cert]
+        self._ctx._cert_chain = [end_cert]
+        self._ctx._priv_key = end_key
 
         ctr = self._dummy_ctr()
         self._app._apply_bib(ctr)
@@ -167,10 +183,10 @@ class TestBpsecCoseSign(unittest.TestCase):
         self.assertNotEqual([], bibs)
         bib = bibs[0]
         self.assertEqual([1], bib.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
 
-        ctr.record_action('deliver')
-        self.assertFalse(self._app._verify_bib(ctr))
-        self.assertEqual({'deliver'}, ctr.actions.keys())
+        result = self._ctx.verify_bib(ctr, bib)
+        self.assertIsNone(result)
 
     def test_apply_bib_rsa(self):
         ca_key = rsa.generate_private_key(0x10001, 1024, backend=default_backend())
@@ -178,19 +194,38 @@ class TestBpsecCoseSign(unittest.TestCase):
         end_key = rsa.generate_private_key(0x10001, 1024, backend=default_backend())
         end_cert = self._dummy_end_cert(ca_key, ca_cert, end_key)
 
-        ctx = self._app._contexts[BPSEC_COSE_CONTEXT_ID]
-        ctx._ca_certs = [ca_cert]
-        ctx._cert_chain = [end_cert]
-        ctx._priv_key = end_key
+        self._ctx._ca_certs = [ca_cert]
+        self._ctx._cert_chain = [end_cert]
+        self._ctx._priv_key = end_key
 
         ctr = self._dummy_ctr()
-        self._app._apply_bib(ctr)
+        self._ctx.apply_bib(ctr)
 
         bibs = ctr.block_type(BlockIntegrityBlock)
         self.assertNotEqual([], bibs)
         bib = bibs[0]
         self.assertEqual([1], bib.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
 
-        ctr.record_action('deliver')
-        self.assertFalse(self._app._verify_bib(ctr))
-        self.assertEqual({'deliver'}, ctr.actions.keys())
+        result = self._ctx.verify_bib(ctr, bib)
+        self.assertIsNone(result)
+
+    def test_verify_bib_symmetric_sa(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+
+        FILE_NAMES = ['integrity.cbor']
+        for name in FILE_NAMES:
+            with self.subTest(name):
+                with open(os.path.join(SELFDIR, 'data', name), 'rb') as infile:
+                    ctr = BundleContainer(bundle=Bundle(infile.read()))
+                    self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+                LOGGER.info('got %s', repr(ctr.bundle))
+
+                bib_set = ctr.block_type(BlockIntegrityBlock)
+                self.assertSetEqual({5}, set(bib.block_num for bib in bib_set))
+                result = self._ctx.verify_bib(ctr, bib_set[0])
+                self.assertIsNone(result)

@@ -57,8 +57,16 @@ class StatusReport(CborArray):
         HOP_LIMIT_EXC = 9  # "Hop limit exceeded"
         TRAFIC_PAIRED = 10  # "Traffic pared"
 
-        UNKNOWN_SEC = 13  # "Unknown Security Operation"
-        FAILED_SEC = 15  # "Failed Security Operation"
+        MISSING_SEC = 12
+        ''' Missing security operation '''
+        UNKNOWN_SEC = 13
+        ''' Unknown Security Operation '''
+        UNEXPECT_SEC = 14
+        ''' Unexpected security operation '''
+        FAILED_SEC = 15
+        ''' Failed Security Operation '''
+        CONFLICT_SEC = 16
+        ''' Conflicting security operation '''
 
     fields_desc = (
         PacketField('status', default=StatusInfoArray(), cls=StatusInfoArray),

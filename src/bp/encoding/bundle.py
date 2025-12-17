@@ -1,6 +1,7 @@
 ''' Whole bundle encodings and helper functions.
 '''
 import cbor2
+from typing import Set
 from scapy_cbor.fields import (PacketField, PacketListField)
 from scapy_cbor.packets import (CborArray)
 from .blocks import (PrimaryBlock, CanonicalBlock)
@@ -78,7 +79,7 @@ class Bundle(CborArray):
             blk.ensure_block_type_specific_data()
             blk.update_crc()
 
-    def check_all_crc(self):
+    def check_all_crc(self) -> Set[int]:
         ''' Check for CRC failures.
 
         :return: The set of block numbers with failed CRC check.

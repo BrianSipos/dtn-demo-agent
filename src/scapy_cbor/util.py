@@ -26,7 +26,7 @@ def encode_diagnostic(obj, **kwargs):
             nextkw['indent'] += 2
         parts = (encode_diagnostic(item, **nextkw) for item in obj)
         wsp_sep = '\n' if indent is not None else ' '
-        mid = f',{wsp_sep}'.join(parts)
+        mid = f', {wsp_sep}'.join(parts)
         text = f'[{wsp_sep}{mid}{wsp_sep}{wsp_indent}]'
     elif isinstance(obj, dict):
         nextkw = copy.copy(kwargs)
@@ -38,17 +38,19 @@ def encode_diagnostic(obj, **kwargs):
             enc_val = encode_diagnostic(val, **nextkw)
             if indent is not None:
                 enc_val = enc_val[indent + 2:]
-            return f'{enc_key}:{enc_val}'
+            return f'{enc_key}: {enc_val}'
 
         parts = (encode_pair(*pair) for pair in obj.items())
         wsp_sep = '\n' if indent is not None else ' '
-        mid = f',{wsp_sep}'.join(parts)
+        mid = f', {wsp_sep}'.join(parts)
         text = f'{{{wsp_sep}{mid}{wsp_sep}{wsp_indent}}}'
-    elif isinstance(obj, six.integer_types) or hasattr(obj, '__int__'):
-        text = str(int(obj))
-    elif isinstance(obj, bool) or hasattr(obj, '__bool__'):
+    elif obj is None:
+        text = 'null'
+    elif isinstance(obj, bool):
         text = 'true' if bool(obj) else 'false'
-    elif isinstance(obj, six.binary_type) or hasattr(obj, '__bytes__'):
+    elif isinstance(obj, six.integer_types):
+        text = str(int(obj))
+    elif isinstance(obj, six.binary_type):
         enc = bytes(obj)
         bstr_as = kwargs.get('bstr_as', 'hex')
         if bstr_as == 'hex':
@@ -59,8 +61,6 @@ def encode_diagnostic(obj, **kwargs):
             raise ValueError('Invalid bstr_as parameter')
     elif isinstance(obj, six.text_type):
         text = '"{}"'.format(obj)
-    elif obj is None:
-        text = 'null'
     else:
         raise TypeError('Unencodable value ({}): {}'.format(type(obj), repr(obj)))
 

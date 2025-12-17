@@ -26,17 +26,18 @@ dependencies = [
   "pycose ~=1.0",
   "crcmod ~=1.7",
   "cryptography >=41",
-  "pycryptodome ~=3.21",
   "certvalidator",
   "dbus-python",
+  "ifaddr ~=0.2",
   "portion ~=2.1",
   "psutil",
+  "pycryptodome ~=3.21",
   "PyGObject ~=3.34", # glib integration
   "PyYAML",
   "python3-dtls",
   "scapy ~=2.6",
   "six",
-  "zeroconf",
+  "zeroconf ~=0.148",
 ]
 
 [project.optional-dependencies]
@@ -71,9 +72,11 @@ container = [
 
 [tool.pytest.ini_options]
 addopts = [
-    "--log-cli-level=warning",
     "--import-mode=importlib",
 ]
+log_level="DEBUG"
+log_cli="True"
+log_cli_level="INFO"
 
 [tool.pylint.MAIN]
 load-plugins="pylint_junit"

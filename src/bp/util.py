@@ -3,8 +3,9 @@
 from dataclasses import dataclass, field, fields
 import datetime
 import functools
-from typing import Optional, Callable
+from typing import Dict, Optional, Callable
 import logging
+from bp.config import TxRouteItem
 from bp.encoding import (
     Bundle, AbstractBlock, PrimaryBlock, CanonicalBlock,
     AdminRecord,
@@ -31,18 +32,18 @@ class BundleContainer(object):
             bundle = Bundle()
         self.bundle = bundle
         # Block number generator
-        self._last_block_num = 1
+        self._last_block_num: int = 1
         # Map from block number to single Block
-        self._block_num = {}
+        self._block_num: Dict[int, CanonicalBlock] = {}
         # Map from block type to list of Blocks
-        self._block_type = {}
+        self._block_type: Dict[int, CanonicalBlock] = {}
         # History of actions
-        self.actions = {}
+        self.actions: Dict[str, datetime.datetime] = {}
         # Last status reason
-        self.status_reason = None
+        self.status_reason: int = None
 
-        self.route = None
-        self.sender = None
+        self.route: TxRouteItem = None
+        self.sender: Callable = None
 
         self.reload()
 
@@ -197,7 +198,7 @@ class BundleContainer(object):
             blk.overloaded_fields['block_num'] = blk_num
         return blk_num
 
-    def record_action(self, action, reason=None):
+    def record_action(self, action: str, reason: Optional[int]=None):
         ''' Mark an action on this bundle.
         '''
         self.actions[action] = datetime.datetime.now(datetime.timezone.utc)

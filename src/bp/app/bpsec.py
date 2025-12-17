@@ -2,18 +2,26 @@
 '''
 from abc import ABC, abstractmethod
 import cbor2
+from dataclasses import dataclass
 import datetime
 import enum
 import logging
-from typing import Tuple
+import re
+import traceback
+from typing import Dict, List, Literal, Optional, Tuple, Union
 from certvalidator import CertificateValidator, ValidationContext
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
-from pycose.messages import CoseMessage, Sign1Message
+from pycose.messages import (
+    CoseMessage, Mac0Message, MacMessage, Sign1Message, SignMessage,
+    Enc0Message, EncMessage
+)
+from pycose.messages.recipient import CoseRecipient
+from pycose.messages.signer import CoseSignature
 from pycose import algorithms, headers
-from pycose.keys import curves, keyparam, EC2Key, RSAKey, CoseKey
+from pycose.keys import curves, keyparam, CoseKey, EC2Key, RSAKey, SymmetricKey
 from pycose.exceptions import CoseUnsupportedCurve
 from pycose.extensions.x509 import X5T, X5Chain
 from pycose.algorithms import CoseAlgorithm
@@ -66,14 +74,42 @@ class AbstractContext(ABC):
         raise NotImplementedError()
 
 
+@dataclass
+class SecAssociation:
+    ''' A single security association with endpoint pattern matching and
+    resulting security operation details including symmetric key.
+    '''
+
+    src_pat: re.Pattern
+    dst_pat: re.Pattern
+
+    secop: Literal['bib', 'bcb']
+    ''' Type of operation to apply '''
+    target_types: List[int]
+    ''' Naive list of block types to target '''
+    role: Literal['source', 'verifier', 'acceptor']
+    ''' Role for the operation '''
+
+    sym_key: Optional[SymmetricKey]
+    ''' Key to use for the operation '''
+
+    def is_match(self, ctr: BundleContainer) -> bool:
+        ''' Check for a match on a bundle '''
+        src_match = self.src_pat.fullmatch(ctr.bundle.primary.source)
+        dst_match = self.dst_pat.fullmatch(ctr.bundle.primary.destination)
+        LOGGER.debug('SA match on src %s %s dst %s %s', ctr.bundle.primary.source,
+                     src_match, ctr.bundle.primary.destination, dst_match)
+        return src_match is not None and dst_match is not None
+
+
 class CertificateStore:
     ''' Logic for managing certificate bags. '''
 
     def __init__(self):
         # Map from DER to decoded Certificate
-        self._certs_by_der = dict()
-        # self._certs_tprint = dict()
-        self._certs_by_ski = dict()
+        self._certs_by_der: Dict[bytes, x509.Certificate] = dict()
+        # Map from subject key identifier digest to Certificate
+        self._certs_by_ski: Dict[bytes, x509.Certificate] = dict()
 
     def add_untrusted_cert(self, data: bytes):
         if data in self._certs_by_der:
@@ -141,7 +177,10 @@ class CoseContext(AbstractContext):
         self._ca_certs = []
         self._cert_chain = []
         self._priv_key = None
+
+        self.sym_key_store: Dict[bytes, SymmetricKey] = dict()
         self.cert_store = CertificateStore()
+        self.sec_assoc: List[SecAssociation] = list()
 
     def load_config(self, config):
         self._config = config
@@ -161,21 +200,24 @@ class CoseContext(AbstractContext):
                 self._priv_key = load_pem_key(infile)
 
     @staticmethod
-    def get_bpsec_cose_aad(ctr: BundleContainer, target, secblk: CanonicalBlock, aad_scope: dict, addl_protected: bytes) -> bytes:
-        ''' Extract AAD from a bundle container per Section 2.5.1 of draft-ietf-bpsec-cose
+    def get_bpsec_cose_aad(ctr: BundleContainer, target: CanonicalBlock, secblk: CanonicalBlock,
+                           ssrc_enc: bytes, aad_scope: dict, addl_protected: bytes) -> bytes:
+        ''' Generate External AAD from a bundle container per Section 2.5.1 of draft-ietf-bpsec-cose
         '''
-        aad_list = []
-        aad_list.append(aad_scope)
+        # roundabout way of forcing sorted map
+        aad_scope_enc = cbor2.dumps(aad_scope, canonical=True)
+        aad_scope = cbor2.loads(aad_scope_enc)
 
-        # processing order by block number
-        for blk_num, flags in sorted(aad_scope.items()):
+        aad_data = ssrc_enc + aad_scope_enc
 
+        # processing order by block number in CBOR sort logic
+        for blk_num, flags in aad_scope.items():
             if blk_num in (0, -2, secblk.block_num) and flags & CoseContext.AadScopeFlag.BTSD:
                 LOGGER.error(f'Invalid AAD Scope flags for block {blk_num}')
 
             if blk_num == -1:
                 blk = target
-            elif blk_num == -2 or blk_num == secblk.block_num:
+            elif blk_num == -2:
                 # security block is not yet part of the bundle
                 blk = secblk
             elif blk_num == 0:
@@ -187,19 +229,20 @@ class CoseContext(AbstractContext):
             if is_primary:
                 if flags & CoseContext.AadScopeFlag.METADATA:
                     blk.update_crc()
-                    aad_list.append(blk.build())
+                    aad_data += bytes(blk)
 
             else:
                 if flags & CoseContext.AadScopeFlag.METADATA:
                     # block metadata not in array framing
-                    aad_list += blk.build()[:3]
+                    aad_data += b''.join(cbor2.dumps(item) for item in blk.build()[:3])
+
                 if flags & CoseContext.AadScopeFlag.BTSD:
-                    aad_list.append(blk.btsd)
+                    aad_data += cbor2.dumps(bytes(blk.btsd))
 
-        aad_list.append(addl_protected)
+        aad_data += cbor2.dumps(addl_protected)
 
-        LOGGER.debug('AAD-structure %s', aad_list)
-        return b''.join(cbor2.dumps(item) for item in aad_list)
+        LOGGER.debug('External AAD encoded %s', aad_data.hex())
+        return aad_data
 
     @staticmethod
     def extract_cose_key(keyobj):
@@ -331,7 +374,7 @@ class CoseContext(AbstractContext):
 
         return validate
 
-    def apply_bib(self, ctr):
+    def apply_bib(self, ctr: BundleContainer):
         if not self._priv_key:
             LOGGER.warning('No private key')
             return
@@ -371,6 +414,10 @@ class CoseContext(AbstractContext):
             ],
         )
 
+        # Encoded security source EID
+        ssrc_fld, ssrc_val = bib_data.getfield_and_val('source')
+        ssrc_enc = cbor2.dumps(ssrc_fld.i2m(bib_data, ssrc_val))
+
         # identity in additional headers
         if self._config.integrity_include_chain:
             addl_unprotected_map[headers.X5chain.identifier] = X5Chain(x5chain).encode()
@@ -407,7 +454,7 @@ class CoseContext(AbstractContext):
             target_blk.ensure_block_type_specific_data()
             target_plaintext = target_blk.getfieldval('btsd')
 
-            ext_aad_enc = CoseContext.get_bpsec_cose_aad(ctr, target_blk, bib, aad_scope, addl_protected)
+            ext_aad_enc = CoseContext.get_bpsec_cose_aad(ctr, target_blk, bib, ssrc_enc, aad_scope, addl_protected)
             LOGGER.debug('Signing target %d AAD %s payload %s',
                          blk_num, encode_diagnostic(ext_aad_enc),
                          encode_diagnostic(target_plaintext))
@@ -444,7 +491,26 @@ class CoseContext(AbstractContext):
         bib.add_payload(bib_data)
         ctr.add_block(bib)
 
-    def verify_bib(self, ctr, bib):
+    def verify_bib(self, ctr: BundleContainer, bib: CanonicalBlock) -> Optional[int]:
+        ''' Verify all targets in a single BIB based on local policy config.
+
+        :return: An error code, or None if successful.
+        '''
+        type_ids = [param.type_code for param in bib.payload.parameters]
+        if len(set(type_ids)) != len(type_ids):
+            LOGGER.error('Duplicate parameter IDs')
+            return StatusReport.ReasonCode.FAILED_SEC
+
+        for target_results in bib.payload.results:
+            type_ids = [res.type_code for res in target_results.results]
+            if len(set(type_ids)) != len(type_ids):
+                LOGGER.error('Duplicate result IDs')
+                return StatusReport.ReasonCode.FAILED_SEC
+
+        # Encoded security source EID
+        ssrc_fld, ssrc_val = bib.payload.getfield_and_val('source')
+        ssrc_enc = cbor2.dumps(ssrc_fld.i2m(bib.payload, ssrc_val))
+
         addl_protected = b''
         addl_unprotected = b''
         aad_scope = {0: 1, -1: 1, -2: 1}
@@ -465,94 +531,183 @@ class CoseContext(AbstractContext):
         addl_headers = dict(addl_protected_map)
         addl_headers.update(addl_unprotected_map)
 
-        bundle_at = DtnTimeField.dtntime_to_datetime(
-            ctr.bundle.primary.create_ts.getfieldval('dtntime')
-        )
-        val_func = self.validate_chain_func(bundle_at)
-        LOGGER.debug('Validating certificates at time %s', bundle_at)
-
         failure = None
         for (ix, blk_num) in enumerate(bib.payload.targets):
             target_blk = ctr.block_num(blk_num)
-            for result in bib.payload.results[ix].results:
-                msg_cls = CoseMessage._COSE_MSG_ID[result.type_code]
+            result_list = bib.payload.results[ix].results
+            if len(result_list) != 1:
+                LOGGER.error('Failed to find cert chain for block num %d', blk_num)
+                failure = StatusReport.ReasonCode.FAILED_SEC
+                break
 
-                # replace detached payload
-                msg_enc = bytes(result.getfieldval('value'))
-                msg_dec = cbor2.loads(msg_enc)
-                LOGGER.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
-                msg_dec[2] = target_blk.getfieldval('btsd')
+            result = result_list[0]
+            msg_cls: CoseMessage = CoseMessage._COSE_MSG_ID[result.type_code]
 
-                msg_obj = msg_cls.from_cose_obj(msg_dec, allow_unknown_attributes=False)
-                msg_obj.external_aad = CoseContext.get_bpsec_cose_aad(ctr, target_blk, bib, aad_scope, addl_protected)
-                # use additional headers as defaults
-                for (key, val) in msg_cls._parse_header(addl_headers, allow_unknown_attributes=False).items():
-                    msg_obj.uhdr.setdefault(key, val)
+            # replace detached payload
+            msg_enc = bytes(result.getfieldval('value'))
+            msg_dec = cbor2.loads(msg_enc)
+            LOGGER.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
+            # replace detached payload temporarily
+            msg_dec[2] = target_blk.getfieldval('btsd')
 
-                x5t_item = msg_obj.get_attr(headers.X5t)
-                x5t = X5T.decode(x5t_item) if x5t_item else None
+            msg_obj = msg_cls.from_cose_obj(msg_dec, allow_unknown_attributes=False)
+            msg_obj.external_aad = CoseContext.get_bpsec_cose_aad(ctr, target_blk, bib, ssrc_enc, aad_scope, addl_protected)
 
-                x5chain_item = msg_obj.get_attr(headers.X5chain)
-                if isinstance(x5chain_item, bytes):
-                    x5chain = [x5chain_item]
+            # use additional headers as defaults in highest layers
+            addl_parsed = msg_cls._parse_header(addl_headers, allow_unknown_attributes=True)
+
+            valid = False
+            # TODO: inject into other message types
+            try:
+                if msg_cls is Mac0Message:
+                    for (key, val) in addl_parsed.items():
+                        msg_obj.uhdr.setdefault(key, val)
+                    valid = self._verify_bib_mac0(ctr, bib, msg_obj)
+
+                elif msg_cls is MacMessage:
+                    # Any one must be valid, but not all
+                    for r_ix, recip in enumerate(msg_obj.recipients):
+                        for (key, val) in addl_parsed.items():
+                            recip.uhdr.setdefault(key, val)
+                        one_valid = self._verify_bib_mac(ctr, bib, msg_obj, recip)
+                        if not one_valid:
+                            LOGGER.warning('Failed to verify COSE_Mac recipient %s with key k=%s', r_ix, msg_obj.key)
+                        valid |= one_valid
+
+                elif msg_cls is Sign1Message:
+                    for (key, val) in addl_parsed.items():
+                        msg_obj.uhdr.setdefault(key, val)
+                    valid = self._verify_bib_sign1(ctr, bib, msg_obj)
+
+                elif msg_cls is SignMessage:
+                    # Any one must be valid, but not all
+                    for s_ix, signer in enumerate(msg_obj.signers):
+                        for (key, val) in addl_parsed.items():
+                            signer.uhdr.setdefault(key, val)
+                        one_valid = self._verify_bib_sign(ctr, bib, msg_obj, signer)
+                        if not one_valid:
+                            LOGGER.warning('Failed to verify COSE_Sign signer %s with key k=%s', s_ix, msg_obj.key)
+                        valid |= one_valid
+
                 else:
-                    x5chain = x5chain_item
-                LOGGER.info('Validating X5t %s and X5chain length %d', x5t.encode() if x5t else None, len(x5chain) if x5chain else 0)
+                    raise TypeError(f'Unhandled message class {msg_cls}')
 
-                found_chain = None
-                if x5t is None and x5chain:
-                    # Only one possible end-entity cert
-                    LOGGER.warning('No X5T in header, assuming single chain')
-                    found_chain = x5chain
-                else:
-                    LOGGER.debug('Attempting to find cert chain matching %s', x5t.encode())
-                    if x5chain and x5t.matches(x5chain[0]):
-                        found_chain = x5chain
-                    else:
-                        try:
-                            found_chain = self.cert_store.find_chain(x5t.alg.identifier, x5t.thumbprint)
-                        except Exception as err:
-                            LOGGER.debug('No cert_store chain found matching %s: %s', x5t.encode(), err)
+            except Exception as err:
+                LOGGER.error('Failed to verify security for block num %d: %s', blk_num, err)
+                LOGGER.debug('%s', traceback.format_exc())
+                valid = False
 
-                if not found_chain:
-                    LOGGER.error('Failed to find cert chain for block num %d', blk_num)
-                    failure = StatusReport.ReasonCode.FAILED_SEC
-                    continue
-
-                LOGGER.debug('Validating chain with %d certs against %d CAs', len(found_chain), len(self._ca_certs))
-                try:
-                    val_func(found_chain)
-                except Exception as err:
-                    LOGGER.error('Failed to verify chain on block num %d: %s', blk_num, err)
-                    failure = StatusReport.ReasonCode.FAILED_SEC
-                    continue
-
-                # Ensure validated ones are present for next time
-                for data in found_chain:
-                    self.cert_store.add_untrusted_cert(data)
-
-                peer_nodeid = bib.payload.source
-                end_cert = x509.load_der_x509_certificate(found_chain[0], default_backend())
-                authn_nodeid = tcpcl.session.match_id(peer_nodeid, end_cert, OID_ON_EID, LOGGER, 'NODE-ID')
-                if not authn_nodeid:
-                    LOGGER.error('Failed to authenticate peer "%s" on block num %d', peer_nodeid, blk_num)
-                    failure = StatusReport.ReasonCode.FAILED_SEC
-                    # Continue on to verification
-
-                try:
-                    msg_obj.key = self.extract_cose_key(end_cert.public_key())
-                    valid = msg_obj.verify_signature()
-                except Exception as err:
-                    valid = False
-                    LOGGER.error('Failed to verify signature on block num %d: %s', blk_num, err)
-                    failure = StatusReport.ReasonCode.FAILED_SEC
-
-                if valid:
-                    LOGGER.info('Verified BIB target block num %d', blk_num)
-                else:
-                    LOGGER.error('Failed to verify BIB target block num %d', blk_num)
+            if valid:
+                LOGGER.info('Verified BIB num %d, target block num %d', bib.block_num, blk_num)
+            else:
+                LOGGER.error('Failed to verify BIB num %d, target block num %d', bib.block_num, blk_num)
+                failure = StatusReport.ReasonCode.FAILED_SEC
 
         return failure
+
+    def _verify_bib_mac0(self, ctr: BundleContainer, bib: CanonicalBlock, msg_obj: Mac0Message) -> bool:
+        ''' Verify a single result with a COSE_Mac0 '''
+        try:
+            msg_obj.key = self._get_cose_key(ctr, msg_obj, bib.payload.source)
+            return msg_obj.verify_tag()
+        except Exception as err:
+            LOGGER.error('Failed to verify COSE_Mac0: %s', err)
+            LOGGER.debug('%s', traceback.format_exc())
+            return False
+
+    def _verify_bib_mac(self, ctr: BundleContainer, bib: CanonicalBlock, msg_obj: MacMessage, recip: CoseRecipient) -> bool:
+        ''' Verify a single result with a COSE_Mac '''
+        try:
+            recip.key = self._get_cose_key(ctr, recip, bib.payload.source)
+            return msg_obj.verify_tag(recip)
+        except Exception as err:
+            LOGGER.error('Failed to verify COSE_Mac recipient %s: %s', recip, err)
+            LOGGER.debug('%s', traceback.format_exc())
+            return False
+
+    def _verify_bib_sign1(self, ctr: BundleContainer, bib: CanonicalBlock, msg_obj: Sign1Message) -> bool:
+        ''' Verify a single result with a COSE_Sign1 '''
+        try:
+            msg_obj.key = self._get_cose_key(ctr, msg_obj, bib.payload.source)
+            return msg_obj.verify_signature()
+        except Exception as err:
+            LOGGER.error('Failed to verify COSE_Sign1: %s', err)
+            LOGGER.debug('%s', traceback.format_exc())
+            return False
+
+    def _verify_bib_sign(self, ctr: BundleContainer, bib: CanonicalBlock, msg_obj: SignMessage, signer: CoseSignature) -> bool:
+        ''' Verify a single result with a COSE_Mac '''
+        try:
+            signer.key = self._get_cose_key(ctr, signer, bib.payload.source)
+            return msg_obj.verify_signature(signer)
+        except Exception as err:
+            LOGGER.error('Failed to verify COSE_Sign signer %s: %s', signer, err)
+            LOGGER.debug('%s', traceback.format_exc())
+            return False
+
+    def _get_cose_key(self, ctr: BundleContainer, hdr_src: Union[CoseMessage, CoseRecipient, CoseSignature],
+                      peer_nodeid: str) -> CoseKey:
+        kid_item = hdr_src.get_attr(headers.KID)
+        if kid_item:
+            if kid_item in self.sym_key_store:
+                return self.sym_key_store.get(kid_item)
+            LOGGER.error('Given kid parameter %s but no key found, falling through', kid_item)
+
+        x5t_item = hdr_src.get_attr(headers.X5t)
+        x5chain_item = hdr_src.get_attr(headers.X5chain)
+        if x5t_item or x5chain_item:
+            # Look up cert chain to validate signature
+            x5t = X5T.decode(x5t_item) if x5t_item else None
+
+            if isinstance(x5chain_item, bytes):
+                x5chain = [x5chain_item]
+            else:
+                x5chain = x5chain_item
+            LOGGER.info('Validating X5t %s and X5chain length %d', x5t.encode() if x5t else None, len(x5chain) if x5chain else 0)
+
+            bundle_at = DtnTimeField.dtntime_to_datetime(
+                ctr.bundle.primary.create_ts.getfieldval('dtntime')
+            )
+            val_func = self.validate_chain_func(bundle_at)
+            LOGGER.debug('Validating certificates at time %s', bundle_at)
+
+            found_chain = None
+            if x5t is None and x5chain:
+                # Only one possible end-entity cert
+                LOGGER.info('No X5T in header, assuming single chain')
+                found_chain = x5chain
+            else:
+                LOGGER.debug('Attempting to find cert chain matching %s', x5t.encode())
+                if x5chain and x5t.matches(x5chain[0]):
+                    found_chain = x5chain
+                else:
+                    try:
+                        found_chain = self.cert_store.find_chain(x5t.alg.identifier, x5t.thumbprint)
+                    except Exception as err:
+                        LOGGER.debug('No cert_store chain found matching %s: %s', x5t.encode(), err)
+
+            if not found_chain:
+                raise RuntimeError('Failed to find cert chain')
+
+            LOGGER.debug('Validating chain with %d certs against %d CAs', len(found_chain), len(self._ca_certs))
+            try:
+                val_func(found_chain)
+            except Exception as err:
+                LOGGER.debug('%s', traceback.format_exc())
+                raise RuntimeError(f'Failed to verify cert chain: {err}') from err
+
+            # Ensure validated ones are present for next time
+            for data in found_chain:
+                self.cert_store.add_untrusted_cert(data)
+
+            end_cert = x509.load_der_x509_certificate(found_chain[0], default_backend())
+            authn_nodeid = tcpcl.session.match_id(peer_nodeid, end_cert, OID_ON_EID, LOGGER, 'NODE-ID')
+            if authn_nodeid:
+                return self.extract_cose_key(end_cert.public_key())
+            # Continue on to verification
+            LOGGER.error('Failed to authenticate peer identity "%s", falling through', peer_nodeid)
+
+        raise RuntimeError('No parameter for key identity found')
 
     def verify_bcb(self, ctr, bcb):
         raise NotImplementedError('no BCB handling')
@@ -647,7 +802,7 @@ class Bpsec(AbstractApplication):
 
         return None
 
-    def _verify_bib(self, ctr):
+    def _verify_bib(self, ctr: BundleContainer) -> bool:
         ''' Check for and verify any BIBs.
         '''
         if 'deliver' not in ctr.actions:
