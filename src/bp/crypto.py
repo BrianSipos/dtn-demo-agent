@@ -14,7 +14,7 @@ def load_pem_key(infile: TextIO):
     return serialization.load_pem_private_key(infile.read(), None, default_backend())
 
 
-def load_pem_chain(infile: TextIO) ->List[x509.Certificate]:
+def load_pem_chain(infile: TextIO) -> List[x509.Certificate]:
     ''' Read a certificate chain from file.
     '''
     certs = []
