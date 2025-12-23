@@ -18,16 +18,19 @@ from pycose.messages import (
     CoseMessage, Mac0Message, MacMessage, Sign1Message, SignMessage,
     Enc0Message, EncMessage
 )
-from pycose.messages.recipient import CoseRecipient
+from pycose.messages.recipient import CoseRecipient, KeyWrap
 from pycose.messages.signer import CoseSignature
 from pycose import algorithms, headers
-from pycose.keys import curves, keyparam, CoseKey, EC2Key, RSAKey, SymmetricKey
+from pycose.keys import (
+    curves, keyparam, keyops, CoseKey, EC2Key, RSAKey, SymmetricKey
+)
 from pycose.exceptions import CoseUnsupportedCurve
 from pycose.extensions.x509 import X5T, X5Chain
 from pycose.algorithms import CoseAlgorithm
 
 from scapy_cbor.util import encode_diagnostic
 import tcpcl.session
+from bp.config import Config
 from bp.encoding import (
     DtnTimeField, Timestamp,
     AbstractBlock, PrimaryBlock, CanonicalBlock, StatusReport,
@@ -49,26 +52,23 @@ class AbstractContext(ABC):
     '''
 
     @abstractmethod
-    def load_config(self, config):
+    def load_config(self, config: Config):
         raise NotImplementedError()
 
     @abstractmethod
-    def apply_bib(self, ctr):
+    def apply_bib(self, ctr: BundleContainer) -> None:
         ''' Attempt to apply a BIB to a bundle.
 
         :param ctr: The entire bundle container.
-        :type ctr: :py:cls:`BundleContainer`
         '''
         raise NotImplementedError()
 
     @abstractmethod
-    def verify_bib(self, ctr, bib):
+    def verify_bib(self, ctr: BundleContainer, bib: CanonicalBlock) -> Optional[int]:
         ''' Verify a BIB for this context.
 
         :param ctr: The entire bundle container.
-        :type ctr: :py:cls:`BundleContainer`
         :param bib: The specific BIB to verify.
-        :type bib: :py:cls:`CanonicalBlock`
         :return: A non-None status value if failed.
         '''
         raise NotImplementedError()
@@ -303,16 +303,18 @@ class CoseContext(AbstractContext):
     def __init__(self):
         super().__init__()
 
-        self._config = None
+        self._config: Optional[Config] = None
         self._ca_certs = []
         self._cert_chain = []
-        self._priv_key = None
+        # Index into either asym_key_store or sym_key_store
+        self.priv_key_id: Optional[bytes] = None
 
+        self.asym_key_store: Dict[bytes, CoseKey] = dict()
         self.sym_key_store: Dict[bytes, SymmetricKey] = dict()
         self.cert_store = CertificateStore()
         self.sec_assoc: List[SecAssociation] = list()
 
-    def load_config(self, config):
+    def load_config(self, config: Config):
         self._config = config
 
         if config.verify_ca_file:
@@ -327,7 +329,18 @@ class CoseContext(AbstractContext):
 
         if config.sign_key_file:
             with open(config.sign_key_file, 'rb') as infile:
-                self._priv_key = load_pem_key(infile)
+                pkey = load_pem_key(infile)
+
+            try:
+                cose_key = self.extract_cose_key(pkey)
+            except Exception as err:
+                LOGGER.error('Cannot handle private key: %s', repr(err))
+                raise
+
+            cose_key.kid = b'PEM'
+            cose_key.key_ops = [keyops.SignOp]
+            self.asym_key_store[cose_key.kid] = cose_key
+            self.priv_key_id = cose_key.kid
 
     @staticmethod
     def extract_cose_key(keyobj):
@@ -459,27 +472,36 @@ class CoseContext(AbstractContext):
 
         return validate
 
-    def apply_bib(self, ctr: BundleContainer):
-        if not self._priv_key:
-            LOGGER.warning('No private key')
+    def apply_bib(self, ctr: BundleContainer) -> None:
+        if not self.priv_key_id:
+            LOGGER.warning('No private key ID')
             return
 
         addl_protected_map = {}
         addl_unprotected_map = {}
-        aad_scope = {0: 1, 1: 1}  # primary and target metadata
+        aad_scope = {0: 1, -1: 1}  # primary and target metadata
 
-        target_block_nums = [
+        # arbitrary ordering
+        target_block_nums = sorted([
             blk.block_num
             for blk in ctr.bundle.blocks
             if blk.type_code in self._config.integrity_for_blocks
-        ]
+        ])
         if not target_block_nums:
             LOGGER.warning('No target blocks have matching type')
             return
 
-        x5chain = []
-        for cert in self._cert_chain:
-            x5chain.append(encode_der_cert(cert))
+        if self.priv_key_id in self.sym_key_store:
+            priv_key = self.sym_key_store[self.priv_key_id]
+            x5chain = None
+        elif self.priv_key_id in self.asym_key_store:
+            # any asymmetric key associated with a cert
+            priv_key = self.asym_key_store[self.priv_key_id]
+            x5chain = []
+            for cert in self._cert_chain:
+                x5chain.append(encode_der_cert(cert))
+        else:
+            raise RuntimeError(f'No private key with KID {self.priv_key_id}')
 
         # A little switcharoo to avoid cached overload_fields on `data`
         bib = CanonicalBlock(
@@ -498,16 +520,16 @@ class CoseContext(AbstractContext):
                 TypeValuePair(type_code=5, value=aad_scope),
             ],
         )
-
         # Encoded security source EID
         ssrc_fld, ssrc_val = bib_data.getfield_and_val('source')
         ssrc_enc = cbor2.dumps(ssrc_fld.i2m(bib_data, ssrc_val))
 
-        # identity in additional headers
-        if self._config.integrity_include_chain:
-            addl_unprotected_map[headers.X5chain.identifier] = X5Chain(x5chain).encode()
-        else:
-            addl_unprotected_map[headers.X5t.identifier] = X5T.from_certificate(algorithms.Sha256, x5chain[0]).encode()
+        # identity de-duplicated in additional headers
+        if x5chain:
+            if self._config.integrity_include_chain:
+                addl_unprotected_map[headers.X5chain.identifier] = X5Chain(x5chain).encode()
+            else:
+                addl_unprotected_map[headers.X5t.identifier] = X5T.from_certificate(algorithms.Sha256, x5chain[0]).encode()
 
         # Inject optional additional headers
         addl_protected = cbor2.dumps(addl_protected_map) if addl_protected_map else b''
@@ -521,21 +543,10 @@ class CoseContext(AbstractContext):
                 TypeValuePair(type_code=4, value=addl_unprotected)
             )
 
-        try:
-            cose_key = self.extract_cose_key(self._priv_key)
-        except Exception as err:
-            LOGGER.error('Cannot handle private key: %s', repr(err))
-            return
-
-        phdr = {
-            headers.Algorithm: cose_key.alg,
-        }
-        uhdr = {}
-
         secop = CoseSecOpCtx(ctr=ctr, sec_blk=bib, ssrc_enc=ssrc_enc,
                              aad_scope=aad_scope, addl_protected=addl_protected)
 
-        # Sign each target with one result per
+        # Message for each target with one result per op/target
         target_result = []
         for tgt_blk_num in bib_data.getfieldval('targets'):
             tgt_blk = ctr.block_num(tgt_blk_num)
@@ -544,24 +555,99 @@ class CoseContext(AbstractContext):
 
             secop.tgt_blk = tgt_blk
             ext_aad_enc = secop.get_external_aad()
-            LOGGER.debug('Signing target %d AAD %s payload %s',
+            LOGGER.debug('Integrity protecting target %d AAD %s payload %s',
                          tgt_blk_num, encode_diagnostic(ext_aad_enc),
                          encode_diagnostic(target_plaintext))
-            msg_obj = Sign1Message(
-                phdr=phdr,
-                uhdr=uhdr,
-                payload=target_plaintext,
-                # Non-encoded parameters
-                external_aad=ext_aad_enc,
-                key=cose_key
-            )
-            LOGGER.debug('Signing with COSE key %s', repr(cose_key))
-            msg_enc = msg_obj.encode(
-                tag=False
-            )
-            # detach payload
-            msg_dec = cbor2.loads(msg_enc)
-            msg_dec[2] = None
+
+            if isinstance(priv_key, SymmetricKey):
+                if keyops.MacCreateOp in priv_key.key_ops:
+                    # direct MAC
+                    msg_obj = Mac0Message(
+                        phdr={
+                            headers.Algorithm: priv_key.alg,
+                        },
+                        uhdr={
+                            headers.KID: priv_key.kid,
+                        },
+                        payload=target_plaintext,
+                        # Non-encoded parameters
+                        external_aad=ext_aad_enc,
+                        key=priv_key
+                    )
+                    LOGGER.debug('MAC with COSE key %s', repr(priv_key))
+                    msg_enc = msg_obj.encode(
+                        tag=False
+                    )
+                    # detach payload
+                    msg_dec = cbor2.loads(msg_enc)
+                    msg_dec[2] = None
+
+                elif keyops.WrapOp in priv_key.key_ops:
+                    # use equivalent security strength
+                    MAC_ALGS = {
+                        32: algorithms.HMAC256,
+                        48: algorithms.HMAC384,
+                        64: algorithms.HMAC512,
+                    }
+                    mac_alg = MAC_ALGS[len(priv_key.k)]
+
+                    recip = KeyWrap(
+                        phdr=dict(),
+                        uhdr={
+                            headers.Algorithm: priv_key.alg,
+                            headers.KID: priv_key.kid,
+                        },
+                        # Non-encoded parameters
+                        key=priv_key
+                    )
+                    msg_obj = MacMessage(
+                        phdr={
+                            headers.Algorithm: mac_alg,
+                        },
+                        uhdr=dict(),
+                        payload=target_plaintext,
+                        recipients=[recip],
+                        # Non-encoded parameters
+                        external_aad=ext_aad_enc
+                    )
+                    LOGGER.debug('MAC with COSE KEK %s', repr(priv_key))
+                    msg_enc = msg_obj.encode(
+                        tag=False
+                    )
+                    # detach payload
+                    msg_dec = cbor2.loads(msg_enc)
+                    msg_dec[2] = None
+
+                else:
+                    raise ValueError(f'Cannot MAC with key having {priv_key.key_ops}')
+
+            else:
+                phdr = {
+                    headers.Algorithm: priv_key.alg,
+                }
+                uhdr = dict()
+
+                if keyops.SignOp in priv_key.key_ops:
+                    # Direct signing
+                    msg_obj = Sign1Message(
+                        phdr=phdr,
+                        uhdr=uhdr,
+                        payload=target_plaintext,
+                        # Non-encoded parameters
+                        external_aad=ext_aad_enc,
+                        key=priv_key
+                    )
+                    LOGGER.debug('Signing with COSE key %s', repr(priv_key))
+                    msg_enc = msg_obj.encode(
+                        tag=False
+                    )
+                    # detach payload
+                    msg_dec = cbor2.loads(msg_enc)
+                    msg_dec[2] = None
+
+                else:
+                    raise ValueError(f'Cannot sign with key having {priv_key.key_ops}')
+
             msg_enc = cbor2.dumps(msg_dec)
             LOGGER.debug('Sending COSE message %s', encode_diagnostic(msg_dec))
 
@@ -640,7 +726,7 @@ class CoseContext(AbstractContext):
                 raise TypeError(f'Unhandled message class {msg_cls}')
 
         except Exception as err:
-            LOGGER.error('Exception during verify of BIB num %d target block num %d: %s', secop.sec_blk.block_num, secop.tgt_blk.block_num, err)
+            LOGGER.error('Exception during verify of BIB num %d, target block num %d: %s', secop.sec_blk.block_num, secop.tgt_blk.block_num, err)
             LOGGER.debug('%s', traceback.format_exc())
             valid = False
 
@@ -752,7 +838,7 @@ class CoseContext(AbstractContext):
                 raise TypeError(f'Unhandled message class {msg_cls}')
 
         except Exception as err:
-            LOGGER.error('Exception during verify of BCB num %d target block num %d: %s', secop.sec_blk.block_num, secop.tgt_blk.block_num, err)
+            LOGGER.error('Exception during verify of BCB num %d, target block num %d: %s', secop.sec_blk.block_num, secop.tgt_blk.block_num, err)
             LOGGER.debug('%s', traceback.format_exc())
             valid = False
 

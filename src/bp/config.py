@@ -70,7 +70,7 @@ class Config(object):
     encr_cert_file: Optional[str] = None
     # Local private key PEM file
     encr_key_file: Optional[str] = None
-    # Sign outgoing blocks of this type
+    # BIB target outgoing blocks of this type
     integrity_for_blocks: Set[int] = field(default_factory=lambda: {1})
     # Include certificate chain in integrity parameters
     integrity_include_chain: bool = True

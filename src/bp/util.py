@@ -1,9 +1,9 @@
 ''' Utility helpers.
 '''
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass
 import datetime
 import functools
-from typing import Dict, Optional, Callable
+from typing import Callable, Dict, List, Optional, Tuple, Type, Union
 import logging
 from bp.config import TxRouteItem
 from bp.encoding import (
@@ -13,6 +13,9 @@ from bp.encoding import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+BlockType = Union[int, Type[object]]
+''' Identifier for block type as either a type code or a BTSD class '''
 
 
 class BundleContainer(object):
@@ -36,7 +39,7 @@ class BundleContainer(object):
         # Map from block number to single Block
         self._block_num: Dict[int, CanonicalBlock] = {}
         # Map from block type to list of Blocks
-        self._block_type: Dict[int, CanonicalBlock] = {}
+        self._block_type: Dict[int, List[CanonicalBlock]] = {}
         # History of actions
         self.actions: Dict[str, datetime.datetime] = {}
         # Last status reason
@@ -50,7 +53,7 @@ class BundleContainer(object):
     def __repr__(self, *_args, **_kwargs):
         return self.bundle.show(dump=True)
 
-    def block_num(self, num):
+    def block_num(self, num: int) -> CanonicalBlock:
         ''' Look up a block by unique number.
 
         :param num: The block number to look up.
@@ -59,7 +62,7 @@ class BundleContainer(object):
         '''
         return self._block_num[num]
 
-    def block_type(self, type_code):
+    def block_type(self, type_code: BlockType) -> List[CanonicalBlock]:
         ''' Look up a block by type code or data class.
 
         :param type_code: The type code to look up.
@@ -67,7 +70,7 @@ class BundleContainer(object):
         '''
         return self._block_type.get(type_code, [])
 
-    def log_name(self):
+    def log_name(self) -> str:
         ''' Get a log-friendly name for this bundle.
         '''
         return '(dest {}, ident {})'.format(
@@ -75,7 +78,7 @@ class BundleContainer(object):
             self.bundle_ident()
         )
 
-    def bundle_ident(self):
+    def bundle_ident(self) -> Tuple:
         ''' Get the bundle identity (source + timestamp) as a tuple.
         '''
         pri = self.bundle.getfieldval('primary')
@@ -91,21 +94,21 @@ class BundleContainer(object):
             ]
         return tuple(ident)
 
-    def _block_types(self, key):
+    def _block_types(self, key: BlockType) -> List[CanonicalBlock]:
         ''' Get or create a block-type array.
         '''
         if key not in self._block_type:
             self._block_type[key] = []
         return self._block_type[key]
 
-    def add_block(self, blk):
+    def add_block(self, blk: CanonicalBlock) -> None:
         ''' Add an extension block.
         The block is added just before the payload.
         :param blk: The existing block to remove (and reindex).
         This block will have its BTSD set if not already.
         '''
         if not isinstance(blk, CanonicalBlock):
-            raise TypeError()
+            raise TypeError('Not a CanonicalBlock')
 
         blk_type = blk.getfieldval('type_code')
         blk_num = self._fix_blk_num(blk)
@@ -120,12 +123,12 @@ class BundleContainer(object):
         self._block_types(blk_type).append(blk)
         self._block_types(pyld_cls).append(blk)
 
-    def remove_block(self, blk):
+    def remove_block(self, blk: CanonicalBlock) -> None:
         ''' Remove an extension block.
         :param blk: The existing block to remove (and reindex).
         '''
         if not isinstance(blk, CanonicalBlock):
-            raise TypeError()
+            raise TypeError('Not a CanonicalBlock')
 
         blk_num = blk.getfieldval('block_num')
         blk_type = blk.getfieldval('type_code')
@@ -144,7 +147,7 @@ class BundleContainer(object):
             self._block_type[blk_type].remove(curblk)
             self._block_type[pyld_cls].remove(curblk)
 
-    def reload(self):
+    def reload(self) -> None:
         ''' Reload derived info from the bundle.
         '''
         if self.bundle is None:
@@ -173,7 +176,7 @@ class BundleContainer(object):
             self._block_type = {}
             raise
 
-    def get_block_num(self):
+    def get_block_num(self) -> int:
         ''' Get the next unused block number.
         :return: An unused number.
         '''
@@ -182,13 +185,13 @@ class BundleContainer(object):
             if self._last_block_num not in self._block_num:
                 return self._last_block_num
 
-    def fix_block_num(self):
+    def fix_block_num(self) -> None:
         ''' Assign unique block numbers where needed.
         '''
         for blk in self.bundle.getfieldval('blocks'):
             self._fix_blk_num(blk)
 
-    def _fix_blk_num(self, blk):
+    def _fix_blk_num(self, blk: CanonicalBlock):
         blk_num = blk.getfieldval('block_num')
         if blk_num is None:
             if blk.getfieldval('type_code') == Bundle.BLOCK_TYPE_PAYLOAD:
@@ -206,7 +209,7 @@ class BundleContainer(object):
             # supersede any earlier reason
             self.status_reason = reason
 
-    def create_report(self):
+    def create_report(self) -> 'BundleContainer':
         # Request for each action status
         FLAGS = {
             'delete': PrimaryBlock.Flag.REQ_DELETION_REPORT,
@@ -275,7 +278,7 @@ class BundleContainer(object):
 
 @dataclass
 @functools.total_ordering
-class ChainStep():
+class ChainStep:
     # Absolute ordering of steps
     order: float = 0
     # Human name of the step
