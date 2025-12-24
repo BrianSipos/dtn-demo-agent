@@ -10,13 +10,14 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
+from pycose import algorithms
 from pycose.keys import keyops, SymmetricKey
 from bp.encoding.admin import StatusReport
 from bp.encoding.blocks import PrimaryBlock, CanonicalBlock
 from bp.encoding.bundle import Bundle
 from bp.util import BundleContainer
 from bp.encoding.bpsec import (TargetResultList, TypeValuePair,
-                               BlockIntegrityBlock, BlockConfidentalityBlock)
+                               BlockIntegrityBlock, BlockConfidentialityBlock)
 from bp.config import Config
 from bp.agent import Agent
 from bp.app.bpsec import CoseContext, BPSEC_COSE_CONTEXT_ID
@@ -27,6 +28,8 @@ SELFDIR = os.path.dirname(os.path.abspath(__file__))
 
 class TestBpsecCose(unittest.TestCase):
     ''' Test cases specific to the COSE Context '''
+
+    maxDiff = None
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -188,6 +191,7 @@ class TestBpsecCose(unittest.TestCase):
         self.assertEqual(0, len(bib_set))
 
         self._ctx.apply_bib(ctr)
+        ctr.sort_block_num()
 
         bib_set = ctr.block_type(BlockIntegrityBlock)
         self.assertEqual(1, len(bib_set))
@@ -219,6 +223,7 @@ class TestBpsecCose(unittest.TestCase):
         self.assertEqual(0, len(bib_set))
 
         self._ctx.apply_bib(ctr)
+        ctr.sort_block_num()
 
         bib_set = ctr.block_type(BlockIntegrityBlock)
         self.assertEqual(1, len(bib_set))
@@ -238,7 +243,13 @@ class TestBpsecCose(unittest.TestCase):
         # MAC with this key
         self._ctx.priv_key_id = cosekey.kid
         # target payload and bundle-age types
-        self._bp._config.integrity_for_blocks = {1, 7}
+        self._ctx._config.node_id = 'ipn:1.0'
+        self._ctx._config.integrity_for_blocks = {1, 7}
+        self._ctx._config.prefer_content_alg = algorithms.HMAC384
+        self._ctx._config.prefer_content_key = [
+            bytes.fromhex('13bf9cead057c0aca2c9e52471ca4b19ddfaf4c0784e3f3e8e3999dbae4ce45c'),
+            bytes.fromhex('13bf9cead057c0aca2c9e52471ca4b19ddfaf4c0784e3f3e8e3999dbae4ce45c'),
+        ]
 
         with open(os.path.join(SELFDIR, 'data', 'interop-integrity-base.cbor'), 'rb') as infile:
             ctr = BundleContainer(bundle=Bundle(infile.read()))
@@ -250,6 +261,7 @@ class TestBpsecCose(unittest.TestCase):
         self.assertSetEqual(set(), set(bib.block_num for bib in bib_set))
 
         self._ctx.apply_bib(ctr)
+        ctr.sort_block_num()
         LOGGER.info('final %s', repr(ctr.bundle))
         LOGGER.info('bytes %s', bytes(ctr.bundle).hex())
 
@@ -263,11 +275,16 @@ class TestBpsecCose(unittest.TestCase):
         result = self._ctx.verify_bib(ctr, bib)
         self.assertIsNone(result)
 
+        # check with reference bundle
+        with open(os.path.join(SELFDIR, 'data', 'interop-integrity-full.cbor'), 'rb') as infile:
+            self.assertEqual(infile.read().hex(), bytes(ctr.bundle).hex())
+
     def test_verify_bib_symmetric_kek_valid(self):
         with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
             cosekey = SymmetricKey.decode(infile.read())
         self._ctx.sym_key_store.clear()
         self._ctx.sym_key_store[cosekey.kid] = cosekey
+        self._ctx._config.accept_after_verify = True
 
         with open(os.path.join(SELFDIR, 'data', 'interop-integrity-full.cbor'), 'rb') as infile:
             ctr = BundleContainer(bundle=Bundle(infile.read()))
@@ -283,7 +300,6 @@ class TestBpsecCose(unittest.TestCase):
         self.assertIsNone(result)
 
         # Check the outcome of accepting the BIB
-        ctr.remove_block(bib)
         with open(os.path.join(SELFDIR, 'data', 'interop-integrity-base.cbor'), 'rb') as infile:
             self.assertEqual(infile.read().hex(), bytes(ctr.bundle).hex())
 
@@ -305,6 +321,10 @@ class TestBpsecCose(unittest.TestCase):
         self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
         result = self._ctx.verify_bib(ctr, bib)
         self.assertIsNone(result)
+
+        # not accepted still there
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertSetEqual({3}, set(bib.block_num for bib in bib_set))
 
     def test_verify_bib_symmetric_direct_invalid_mod_scope(self):
         with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.1.cbor'), 'rb') as infile:
@@ -348,21 +368,74 @@ class TestBpsecCose(unittest.TestCase):
         self.assertIn('Exception during verify of BIB num 5, target block num 1', lcm.output[0])
         self.assertEqual(StatusReport.ReasonCode.FAILED_SEC, result)
 
+    def test_source_bcb_symmetric_kek(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+        # MAC with this key
+        self._ctx.priv_key_id = cosekey.kid
+        # target payload and bundle-age types
+        self._ctx._config.node_id = 'ipn:1.0'
+        self._ctx._config.confidentiality_for_blocks = {1, 7}
+        self._ctx._config.prefer_content_alg = algorithms.A256GCM
+        self._ctx._config.prefer_content_key = [
+            bytes.fromhex('13bf9cead057c0aca2c9e52471ca4b19ddfaf4c0784e3f3e8e3999dbae4ce45c'),
+            bytes.fromhex('13bf9cead057c0aca2c9e52471ca4b19ddfaf4c0784e3f3e8e3999dbae4ce45c'),
+        ]
+        self._ctx._config.prefer_content_iv = [
+            b'Twelve121212',
+            b'Twelve121212',
+        ]
+
+        with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality-base.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
+
+        # initial state
+        bcb_set = ctr.block_type(BlockConfidentialityBlock)
+        self.assertEqual(set(), set(bcb.block_num for bcb in bcb_set))
+
+        self._ctx.apply_bcb(ctr)
+        ctr.sort_block_num()
+        LOGGER.info('final %s', repr(ctr.bundle))
+        LOGGER.info('bytes %s', bytes(ctr.bundle).hex())
+
+        bcb_set = ctr.block_type(BlockConfidentialityBlock)
+        self.assertEqual(1, len(bcb_set))
+        bcb = bcb_set[0]
+        self.assertListEqual([1, 2], bcb.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bcb.payload.context_id)
+
+        # self-verify
+        result = self._ctx.verify_bcb(ctr, bcb)
+        self.assertIsNone(result)
+
+        # check with reference bundle
+        with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality-full.cbor'), 'rb') as infile:
+            self.assertEqual(infile.read().hex(), bytes(ctr.bundle).hex())
+
     def test_verify_bcb_symmetric_kek_valid(self):
         with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
             cosekey = SymmetricKey.decode(infile.read())
         self._ctx.sym_key_store.clear()
         self._ctx.sym_key_store[cosekey.kid] = cosekey
+        self._ctx._config.accept_after_verify = True
 
-        with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality.cbor'), 'rb') as infile:
+        with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality-full.cbor'), 'rb') as infile:
             ctr = BundleContainer(bundle=Bundle(infile.read()))
             self.assertSetEqual(set(), ctr.bundle.check_all_crc())
         LOGGER.info('got %s', repr(ctr.bundle))
 
-        bib_set = ctr.block_type(BlockConfidentalityBlock)
-        self.assertSetEqual({5}, set(bib.block_num for bib in bib_set))
-        bib = bib_set[0]
-        self.assertListEqual([1, 2], bib.payload.targets)
-        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
-        result = self._ctx.verify_bcb(ctr, bib)
+        bcb_set = ctr.block_type(BlockConfidentialityBlock)
+        self.assertSetEqual({5}, set(bcb.block_num for bcb in bcb_set))
+        bcb = bcb_set[0]
+        self.assertListEqual([1, 2], bcb.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bcb.payload.context_id)
+        result = self._ctx.verify_bcb(ctr, bcb)
         self.assertIsNone(result)
+
+        # Check the outcome of accepting the BCB
+        with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality-base.cbor'), 'rb') as infile:
+            self.assertEqual(infile.read().hex(), bytes(ctr.bundle).hex())

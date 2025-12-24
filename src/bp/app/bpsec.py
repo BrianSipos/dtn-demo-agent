@@ -34,7 +34,7 @@ from bp.config import Config
 from bp.encoding import (
     DtnTimeField, Timestamp,
     AbstractBlock, PrimaryBlock, CanonicalBlock, StatusReport,
-    BlockIntegrityBlock, BlockConfidentalityBlock, AbstractSecurityBlock,
+    BlockIntegrityBlock, BlockConfidentialityBlock, AbstractSecurityBlock,
     TypeValuePair, TargetResultList,
 )
 from bp.util import ChainStep, BundleContainer
@@ -65,10 +65,28 @@ class AbstractContext(ABC):
 
     @abstractmethod
     def verify_bib(self, ctr: BundleContainer, bib: CanonicalBlock) -> Optional[int]:
-        ''' Verify a BIB for this context.
+        ''' Verify or accept a BIB for this context.
 
         :param ctr: The entire bundle container.
         :param bib: The specific BIB to verify.
+        :return: A non-None status value if failed.
+        '''
+        raise NotImplementedError()
+
+    @abstractmethod
+    def apply_bcb(self, ctr: BundleContainer) -> None:
+        ''' Attempt to apply a BIB to a bundle.
+
+        :param ctr: The entire bundle container.
+        '''
+        raise NotImplementedError()
+
+    @abstractmethod
+    def verify_bcb(self, ctr: BundleContainer, bcb: CanonicalBlock) -> Optional[int]:
+        ''' Verify or accept a BCB for this context.
+
+        :param ctr: The entire bundle container.
+        :param bcb: The specific BCB to verify.
         :return: A non-None status value if failed.
         '''
         raise NotImplementedError()
@@ -507,7 +525,6 @@ class CoseContext(AbstractContext):
         bib = CanonicalBlock(
             type_code=BlockIntegrityBlock._overload_fields[CanonicalBlock]['type_code'],
             block_num=ctr.get_block_num(),
-            crc_type=AbstractBlock.CrcType.CRC32,
         )
         bib_data = BlockIntegrityBlock(
             targets=target_block_nums,
@@ -583,14 +600,6 @@ class CoseContext(AbstractContext):
                     msg_dec[2] = None
 
                 elif keyops.WrapOp in priv_key.key_ops:
-                    # use equivalent security strength
-                    MAC_ALGS = {
-                        32: algorithms.HMAC256,
-                        48: algorithms.HMAC384,
-                        64: algorithms.HMAC512,
-                    }
-                    mac_alg = MAC_ALGS[len(priv_key.k)]
-
                     recip = KeyWrap(
                         phdr=dict(),
                         uhdr={
@@ -600,9 +609,12 @@ class CoseContext(AbstractContext):
                         # Non-encoded parameters
                         key=priv_key
                     )
+                    if self._config.prefer_content_key:
+                        recip.payload = self._config.prefer_content_key.pop(0)
+
                     msg_obj = MacMessage(
                         phdr={
-                            headers.Algorithm: mac_alg,
+                            headers.Algorithm: self._config.prefer_content_alg,
                         },
                         uhdr=dict(),
                         payload=target_plaintext,
@@ -610,10 +622,10 @@ class CoseContext(AbstractContext):
                         # Non-encoded parameters
                         external_aad=ext_aad_enc
                     )
-                    LOGGER.debug('MAC with COSE KEK %s', repr(priv_key))
                     msg_enc = msg_obj.encode(
                         tag=False
                     )
+                    LOGGER.debug('Used content key %s', msg_obj.key.k.hex())
                     # detach payload
                     msg_dec = cbor2.loads(msg_enc)
                     msg_dec[2] = None
@@ -677,19 +689,30 @@ class CoseContext(AbstractContext):
         secop.extract_secblk()
 
         failure = None
+        accept_ix = []
         for (tgt_ix, tgt_blk_num) in enumerate(bib.payload.targets):
             tgt_blk = ctr.block_num(tgt_blk_num)
             result_list = bib.payload.results[tgt_ix].results
             if len(result_list) != 1:
                 LOGGER.error('Result array in BIB num %d does not have exactly one result', bib.block_num)
                 failure = StatusReport.ReasonCode.FAILED_SEC
-                break
-            result = result_list[0]
+            else:
+                result = result_list[0]
 
-            secop.tgt_blk = tgt_blk
-            one_failure = self.verify_bib_target(secop, result)
-            if one_failure is not None:
-                failure = one_failure
+                secop.tgt_blk = tgt_blk
+                one_failure = self.verify_bib_target(secop, result)
+                if one_failure is not None:
+                    failure = one_failure
+                elif self._config.accept_after_verify:
+                    LOGGER.debug('Accepting target block num %d after verification', tgt_blk_num)
+                    accept_ix.append(tgt_ix)
+
+        for tgt_ix in sorted(accept_ix, reverse=True):
+            bib.payload.targets.pop(tgt_ix)
+            bib.payload.results.pop(tgt_ix)
+        if not bib.payload.targets:
+            LOGGER.debug('Removing empty BIB num %d', bib.block_num)
+            ctr.remove_block(bib)
 
         return failure
 
@@ -710,6 +733,7 @@ class CoseContext(AbstractContext):
                     if not one_valid:
                         LOGGER.warning('Failed to verify COSE_Mac recipient %s with key k=%s', r_ix, msg_obj.key)
                     valid |= one_valid
+                LOGGER.debug('Used content key %s', msg_obj.key.k.hex())
 
             elif isinstance(msg_obj, Sign1Message):
                 valid = self._verify_bib_sign1(secop, msg_obj)
@@ -723,7 +747,7 @@ class CoseContext(AbstractContext):
                     valid |= one_valid
 
             else:
-                raise TypeError(f'Unhandled message class {msg_cls}')
+                raise TypeError(f'Unhandled message in {type(msg_obj)}')
 
         except Exception as err:
             LOGGER.error('Exception during verify of BIB num %d, target block num %d: %s', secop.sec_blk.block_num, secop.tgt_blk.block_num, err)
@@ -789,7 +813,185 @@ class CoseContext(AbstractContext):
             LOGGER.debug('%s', traceback.format_exc())
             return False
 
-    def verify_bcb(self, ctr: BundleContainer, bcb: CanonicalBlock):
+    def apply_bcb(self, ctr: BundleContainer) -> None:
+        if not self.priv_key_id:
+            LOGGER.warning('No private key ID')
+            return
+
+        addl_protected_map = {}
+        addl_unprotected_map = {}
+        aad_scope = {0: 1, -1: 1}  # primary and target metadata
+
+        # arbitrary ordering
+        target_block_nums = sorted([
+            blk.block_num
+            for blk in ctr.bundle.blocks
+            if blk.type_code in self._config.confidentiality_for_blocks
+        ])
+        if not target_block_nums:
+            LOGGER.warning('No target blocks have matching type')
+            return
+
+        if self.priv_key_id in self.sym_key_store:
+            priv_key = self.sym_key_store[self.priv_key_id]
+        else:
+            raise RuntimeError(f'No private key with KID {self.priv_key_id}')
+
+        # A little switcharoo to avoid cached overload_fields on `data`
+        bcb = CanonicalBlock(
+            type_code=BlockConfidentialityBlock._overload_fields[CanonicalBlock]['type_code'],
+            block_num=ctr.get_block_num(),
+            block_flags=CanonicalBlock.Flag.REPLICATE_IN_FRAGMENT,
+        )
+        bcb_data = BlockConfidentialityBlock(
+            targets=target_block_nums,
+            context_id=BPSEC_COSE_CONTEXT_ID,
+            context_flags=(
+                AbstractSecurityBlock.Flag.PARAMETERS_PRESENT
+            ),
+            source=self._config.node_id,
+            parameters=[
+                TypeValuePair(type_code=5, value=aad_scope),
+            ],
+        )
+        # Encoded security source EID
+        ssrc_fld, ssrc_val = bcb_data.getfield_and_val('source')
+        ssrc_enc = cbor2.dumps(ssrc_fld.i2m(bcb_data, ssrc_val))
+
+        # Inject optional additional headers
+        addl_protected = cbor2.dumps(addl_protected_map) if addl_protected_map else b''
+        if addl_protected:
+            bcb_data.parameters.append(
+                TypeValuePair(type_code=3, value=addl_protected)
+            )
+        addl_unprotected = cbor2.dumps(addl_unprotected_map) if addl_unprotected_map else b''
+        if addl_unprotected:
+            bcb_data.parameters.append(
+                TypeValuePair(type_code=4, value=addl_unprotected)
+            )
+
+        secop = CoseSecOpCtx(ctr=ctr, sec_blk=bcb, ssrc_enc=ssrc_enc,
+                             aad_scope=aad_scope, addl_protected=addl_protected)
+
+        # Message for each target with one result per op/target
+        target_result = []
+        for tgt_blk_num in bcb_data.getfieldval('targets'):
+            tgt_blk = ctr.block_num(tgt_blk_num)
+            tgt_blk.ensure_block_type_specific_data()
+            target_plaintext = tgt_blk.getfieldval('btsd')
+
+            secop.tgt_blk = tgt_blk
+            ext_aad_enc = secop.get_external_aad()
+            LOGGER.debug('Integrity protecting target %d AAD %s payload %s',
+                         tgt_blk_num, encode_diagnostic(ext_aad_enc),
+                         encode_diagnostic(target_plaintext))
+
+            if isinstance(priv_key, SymmetricKey):
+                if keyops.EncryptOp in priv_key.key_ops:
+                    # direct key
+                    msg_obj = Enc0Message(
+                        phdr={
+                            headers.Algorithm: priv_key.alg,
+                        },
+                        uhdr={
+                            headers.KID: priv_key.kid,
+                        },
+                        payload=target_plaintext,
+                        # Non-encoded parameters
+                        external_aad=ext_aad_enc,
+                        key=priv_key
+                    )
+                    msg_enc = msg_obj.encode(
+                        tag=False
+                    )
+                    # detach payload
+                    msg_dec = cbor2.loads(msg_enc)
+                    tgt_blk.setfieldval('btsd', msg_dec[2])
+                    msg_dec[2] = None
+
+                elif keyops.WrapOp in priv_key.key_ops:
+                    recip = KeyWrap(
+                        phdr=dict(),
+                        uhdr={
+                            headers.Algorithm: priv_key.alg,
+                            headers.KID: priv_key.kid,
+                        },
+                        # Non-encoded parameters
+                        key=priv_key
+                    )
+                    if self._config.prefer_content_key:
+                        recip.payload = self._config.prefer_content_key.pop(0)
+
+                    msg_obj = EncMessage(
+                        phdr={
+                            headers.Algorithm: self._config.prefer_content_alg,
+                        },
+                        uhdr={
+                            headers.IV: self._config.prefer_content_iv.pop(0),
+                        },
+                        payload=target_plaintext,
+                        recipients=[recip],
+                        # Non-encoded parameters
+                        external_aad=ext_aad_enc
+                    )
+                    msg_enc = msg_obj.encode(
+                        tag=False
+                    )
+                    LOGGER.debug('Used content key %s', msg_obj.key.k.hex())
+                    # detach payload
+                    msg_dec = cbor2.loads(msg_enc)
+                    tgt_blk.setfieldval('btsd', msg_dec[2])
+                    msg_dec[2] = None
+
+                else:
+                    raise ValueError(f'Cannot MAC with key having {priv_key.key_ops}')
+
+            else:
+                phdr = {
+                    headers.Algorithm: priv_key.alg,
+                }
+                uhdr = dict()
+
+                if keyops.SignOp in priv_key.key_ops:
+                    # Direct signing
+                    msg_obj = Sign1Message(
+                        phdr=phdr,
+                        uhdr=uhdr,
+                        payload=target_plaintext,
+                        # Non-encoded parameters
+                        external_aad=ext_aad_enc,
+                        key=priv_key
+                    )
+                    LOGGER.debug('Signing with COSE key %s', repr(priv_key))
+                    msg_enc = msg_obj.encode(
+                        tag=False
+                    )
+                    # detach payload
+                    msg_dec = cbor2.loads(msg_enc)
+                    msg_dec[2] = None
+
+                else:
+                    raise ValueError(f'Cannot sign with key having {priv_key.key_ops}')
+
+            msg_enc = cbor2.dumps(msg_dec)
+            LOGGER.debug('Sending COSE message %s', encode_diagnostic(msg_dec))
+
+            target_result.append(
+                TypeValuePair(
+                    type_code=msg_obj.cbor_tag,
+                    value=msg_enc
+                )
+            )
+
+        # One result per target
+        bcb_data.setfieldval('results', [
+            TargetResultList(results=[result])
+            for result in target_result
+        ])
+        bcb.add_payload(bcb_data)
+        ctr.add_block(bcb)
+
+    def verify_bcb(self, ctr: BundleContainer, bcb: CanonicalBlock) -> Optional[int]:
         ''' Verify all targets in a single BCB based on local policy config.
 
         :return: An error code, or None if successful.
@@ -800,71 +1002,86 @@ class CoseContext(AbstractContext):
         secop.extract_secblk()
 
         failure = None
+        accept_ix = []
         for (tgt_ix, tgt_blk_num) in enumerate(bcb.payload.targets):
             tgt_blk = ctr.block_num(tgt_blk_num)
             result_list = bcb.payload.results[tgt_ix].results
             if len(result_list) != 1:
                 LOGGER.error('Result array in BCB num %d does not have exactly one result', bcb.block_num)
                 failure = StatusReport.ReasonCode.FAILED_SEC
-                break
-            result = result_list[0]
+            else:
+                result = result_list[0]
 
-            secop.tgt_blk = tgt_blk
-            one_failure = self.verify_bcb_target(secop, result)
-            if one_failure is not None:
-                failure = one_failure
+                secop.tgt_blk = tgt_blk
+                one_failure = self.verify_bcb_target(secop, result)
+                if one_failure is not None:
+                    failure = one_failure
+                elif self._config.accept_after_verify:
+                    LOGGER.debug('Accepting target block num %d after verification', tgt_blk_num)
+                    accept_ix.append(tgt_ix)
+
+        for tgt_ix in sorted(accept_ix, reverse=True):
+            bcb.payload.targets.pop(tgt_ix)
+            bcb.payload.results.pop(tgt_ix)
+        if not bcb.payload.targets:
+            LOGGER.debug('Removing empty BCB num %d', bcb.block_num)
+            ctr.remove_block(bcb)
 
         return failure
 
     def verify_bcb_target(self, secop: CoseSecOpCtx, result: TypeValuePair) -> Optional[int]:
         ''' Verify a single BCB security operation on a single target.
         '''
-        valid = False
+        plaintext = None
         try:
             msg_obj = secop.decode_msg(result)
 
             if isinstance(msg_obj, Enc0Message):
-                valid = self._verify_bcb_enc0(secop, msg_obj)
+                plaintext = self._verify_bcb_enc0(secop, msg_obj)
 
             elif isinstance(msg_obj, EncMessage):
                 # Any one must be valid, but not all
                 for r_ix, recip in enumerate(msg_obj.recipients):
-                    one_valid = self._verify_bcb_enc(secop, msg_obj, recip)
-                    if not one_valid:
+                    plaintext = self._verify_bcb_enc(secop, msg_obj, recip)
+                    if plaintext is None:
                         LOGGER.warning('Failed to verify COSE_Enc recipient %s with key k=%s', r_ix, msg_obj.key)
-                    valid |= one_valid
+                    else:
+                        # stop on first success
+                        break
 
             else:
-                raise TypeError(f'Unhandled message class {msg_cls}')
+                raise TypeError(f'Unhandled message in {type(msg_obj)}')
 
         except Exception as err:
             LOGGER.error('Exception during verify of BCB num %d, target block num %d: %s', secop.sec_blk.block_num, secop.tgt_blk.block_num, err)
             LOGGER.debug('%s', traceback.format_exc())
-            valid = False
+            plaintext = None
 
-        if valid:
+        if plaintext is not None:
             LOGGER.info('Verified BCB num %d, target block num %d', secop.sec_blk.block_num, secop.tgt_blk.block_num)
+            if self._config.accept_after_verify:
+                secop.tgt_blk.setfieldval('btsd', plaintext)
             return None
         else:
             LOGGER.error('Failed to verify BCB num %d, target block num %d', secop.sec_blk.block_num, secop.tgt_blk.block_num)
             return StatusReport.ReasonCode.FAILED_SEC
 
-    def _verify_bcb_enc0(self, secop: CoseSecOpCtx, msg_obj: Enc0Message) -> bool:
+    def _verify_bcb_enc0(self, secop: CoseSecOpCtx, msg_obj: Enc0Message) -> Optional[bytes]:
         ''' Verify a single result with a COSE_Enc0 '''
         for (key, val) in secop.addl_parsed.items():
             msg_obj.uhdr.setdefault(key, val)
 
         try:
             msg_obj.key = self._get_cose_key(secop.ctr, msg_obj, secop.sec_blk.payload.source)
-            # ignore the plaintext
-            msg_obj.decrypt()
-            return True
+            plaintext = msg_obj.decrypt()
+            LOGGER.debug('Got plaintext %s', plaintext.hex())
+            return plaintext
         except Exception as err:
             LOGGER.error('Failed to verify COSE_Enc0: %s', err)
             LOGGER.debug('%s', traceback.format_exc())
-            return False
+            return None
 
-    def _verify_bcb_enc(self, secop: CoseSecOpCtx, msg_obj: EncMessage, recip: CoseRecipient) -> bool:
+    def _verify_bcb_enc(self, secop: CoseSecOpCtx, msg_obj: EncMessage, recip: CoseRecipient) -> Optional[bytes]:
         ''' Verify a single result with a COSE_Mac '''
         for (key, val) in secop.addl_parsed.items():
             recip.uhdr.setdefault(key, val)
@@ -872,12 +1089,13 @@ class CoseContext(AbstractContext):
         try:
             recip.key = self._get_cose_key(secop.ctr, recip, secop.sec_blk.payload.source)
             # ignore the plaintext
-            msg_obj.decrypt(recip)
-            return True
+            plaintext = msg_obj.decrypt(recip)
+            LOGGER.debug('Got plaintext %s', plaintext.hex())
+            return plaintext
         except Exception as err:
             LOGGER.error('Failed to verify COSE_Enc recipient %s: %s', recip, err)
             LOGGER.debug('%s', traceback.format_exc())
-            return False
+            return None
 
     def _get_cose_key(self, ctr: BundleContainer, hdr_src: Union[CoseMessage, CoseRecipient, CoseSignature],
                       secsrc_eid: str) -> CoseKey:
@@ -955,8 +1173,8 @@ class Bpsec(AbstractApplication):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self._config = None
-        self._contexts = {
+        self._config: Optional[Config] = None
+        self._contexts: Dict[int, AbstractContext] = {
             BPSEC_COSE_CONTEXT_ID: CoseContext(),
         }
 
@@ -975,7 +1193,7 @@ class Bpsec(AbstractApplication):
         for ctx in self._contexts.values():
             ctx.load_config(config)
 
-    def add_chains(self, rx_chain, tx_chain):
+    def add_chains(self, rx_chain: List[ChainStep], tx_chain: List[ChainStep]):
         rx_chain.append(ChainStep(
             order=19,
             name='BPSec accept confidentiality',
@@ -986,13 +1204,19 @@ class Bpsec(AbstractApplication):
             name='BPSec verify integrity',
             action=self._verify_bib
         ))
+
         tx_chain.append(ChainStep(
             order=10,
             name='BPSec apply integrity',
             action=self._apply_bib
         ))
+        tx_chain.append(ChainStep(
+            order=11,
+            name='BPSec apply confidentiality',
+            action=self._apply_bcb
+        ))
 
-    def _apply_bib(self, ctr):
+    def _apply_bib(self, ctr: BundleContainer):
         ''' If configured add a BIB.
         The container must be reloaded beforehand.
         '''
@@ -1000,6 +1224,15 @@ class Bpsec(AbstractApplication):
         # No configuration here yet
         for ctx in self._contexts.values():
             ctx.apply_bib(ctr)
+
+    def _apply_bcb(self, ctr: BundleContainer):
+        ''' If configured add a BCB.
+        The container must be reloaded beforehand.
+        '''
+
+        # No configuration here yet
+        for ctx in self._contexts.values():
+            ctx.apply_bcb(ctr)
 
     def _verify_bcb(self, ctr):
         ''' Check for and verify an BCBs.
@@ -1010,7 +1243,7 @@ class Bpsec(AbstractApplication):
         # Report status reason
         failure = []
 
-        confidential_blocks = ctr.block_type(BlockConfidentalityBlock)
+        confidential_blocks = ctr.block_type(BlockConfidentialityBlock)
         for bcb in confidential_blocks:
             LOGGER.debug('Verifying BCB in %d with context %s, targets %s',
                          bcb.block_num, bcb.payload.context_id, bcb.payload.targets)

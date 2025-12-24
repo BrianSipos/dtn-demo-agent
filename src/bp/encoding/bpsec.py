@@ -67,6 +67,6 @@ class BlockIntegrityBlock(AbstractSecurityBlock):
 
 
 @CanonicalBlock.bind_type(12)
-class BlockConfidentalityBlock(AbstractSecurityBlock):
+class BlockConfidentialityBlock(AbstractSecurityBlock):
     ''' Block data from RFC 9172
     '''

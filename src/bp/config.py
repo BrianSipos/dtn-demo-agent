@@ -3,8 +3,9 @@
 from dataclasses import dataclass, field, fields
 from typing import Optional, Set, Dict, List
 import logging
-import dbus.bus
 import re
+from pycose import algorithms
+import dbus.bus
 import yaml
 
 LOGGER = logging.getLogger(__name__)
@@ -70,10 +71,22 @@ class Config(object):
     encr_cert_file: Optional[str] = None
     # Local private key PEM file
     encr_key_file: Optional[str] = None
-    # BIB target outgoing blocks of this type
+
     integrity_for_blocks: Set[int] = field(default_factory=lambda: {1})
-    # Include certificate chain in integrity parameters
+    ''' BIB target outgoing blocks of this type '''
     integrity_include_chain: bool = True
+    ''' Include certificate chain in integrity parameters '''
+
+    confidentiality_for_blocks: Set[int] = field(default_factory=set)
+    ''' BCB target outgoing blocks of this type '''
+    accept_after_verify: bool = False
+    ''' Are security operations accepted after successful verification '''
+
+    prefer_content_alg: Optional[algorithms.CoseAlgorithm] = None
+    ''' Preferred content algorithm when key is for wrapping '''
+    prefer_content_key: List[bytes] = field(default_factory=list)
+    ''' Preferred content key when wrapping, left as None to use random key '''
+    prefer_content_iv: List[bytes] = field(default_factory=list)
 
     # The bus service names of CLs to attach to
     cl_attach: Dict[str, str] = field(default_factory=dict)

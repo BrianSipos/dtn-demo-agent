@@ -33,7 +33,7 @@ class BundleContainer(object):
     def __init__(self, bundle=None):
         if bundle is None:
             bundle = Bundle()
-        self.bundle = bundle
+        self.bundle: Bundle = bundle
         # Block number generator
         self._last_block_num: int = 1
         # Map from block number to single Block
@@ -191,7 +191,7 @@ class BundleContainer(object):
         for blk in self.bundle.getfieldval('blocks'):
             self._fix_blk_num(blk)
 
-    def _fix_blk_num(self, blk: CanonicalBlock):
+    def _fix_blk_num(self, blk: CanonicalBlock) -> None:
         blk_num = blk.getfieldval('block_num')
         if blk_num is None:
             if blk.getfieldval('type_code') == Bundle.BLOCK_TYPE_PAYLOAD:
@@ -200,6 +200,12 @@ class BundleContainer(object):
                 blk_num = self.get_block_num()
             blk.overloaded_fields['block_num'] = blk_num
         return blk_num
+
+    def sort_block_num(self) -> None:
+        ''' Sort canonical blocks in reverse number order. '''
+        blklist = self.bundle.getfieldval('blocks')
+        blklist.sort(key=lambda blk: blk.block_num, reverse=True)
+        self.bundle.setfieldval('blocks', blklist)
 
     def record_action(self, action: str, reason: Optional[int] = None):
         ''' Mark an action on this bundle.
