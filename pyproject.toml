@@ -71,9 +71,10 @@ container = [
 
 [tool.pytest.ini_options]
 addopts = [
-    "--log-cli-level=warning",
     "--import-mode=importlib",
 ]
+log_level="debug"
+log_cli_level="warning"
 
 [tool.pylint.MAIN]
 load-plugins="pylint_junit"
