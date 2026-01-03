@@ -58,6 +58,10 @@ class TestPatternText(unittest.TestCase):
             'hi',
             '|',
             'hi|',
+            'ipn:*.*.[',
+            'ipn:*.*.[]',
+            'ipn:*.*.[,3]',
+            'ipn:*.*.[+]',
         ]
         for text in CASES:
             with self.subTest(text):
@@ -128,18 +132,16 @@ class TestPatternCbor(unittest.TestCase):
         pat = EidPattern()
 
         CASES = [
-            'hi',
-            '|',
-            'hi|',
+            '',
         ]
-        for text in CASES:
-            with self.subTest(text):
+        for in_hex in CASES:
+            with self.subTest(in_hex):
                 with self.assertRaises(ValueError):
-                    pat.from_text(text)
+                    pat.from_cbor(bytes.fromhex(in_hex))
 
 
 class TestRoundtrips(unittest.TestCase):
-    # No state checks, just decode and re-encode
+    # No state checks, just decode and re-encode with canonical forms
 
     CASES = [
         ('', '80'),
@@ -150,6 +152,7 @@ class TestRoundtrips(unittest.TestCase):
         ('ipn:0.1.2', '81820283000102'),
         ('ipn:1.2', '818202820102'),
         ('ipn:0.*.*', '8182028300F5F5'),
+        ('ipn:0.*.[10]', '8182028300F5820A00'),  # not simplified
         ('ipn:0.[1-10,50-100].*', '818202830084010918261832F5'),
         ('ipn:0.[1-10].[50+]', '8182028300820109811832'),
     ]
@@ -191,6 +194,53 @@ class TestRoundtrips(unittest.TestCase):
                 pat.from_cbor(bytes.fromhex(orig_hex))
                 out_text = pat.to_text()
                 self.assertEqual(expect_text, out_text)
+
+
+class TestNormalCanonical(unittest.TestCase):
+    # No state checks, just decode and re-encode
+
+    def test_text_range(self):
+        CASES = [
+            # normalization
+            ('ipn:*.*.[10,10]', 'ipn:*.*.[10]'),  # duplicate elided
+            ('ipn:*.*.[10,11,12]', 'ipn:*.*.[10-12]'),  # adjacency coalesced
+            ('ipn:*.*.[10-45,40-50]', 'ipn:*.*.[10-50]'),  # finite overlap
+            ('ipn:*.*.[10+,40-50]', 'ipn:*.*.[10+]'),  # infinite overlap
+            ('ipn:[10-4294967296].*.0', 'ipn:[10+].*.0'),  # clamped domain maximum
+            ('ipn:0.[10-4294967296].0', 'ipn:0.[10+].0'),  # clamped domain maximum
+            ('ipn:*.*.[10-18446744073709551616]', 'ipn:*.*.[10+]'),  # clamped domain maximum
+            # canonicalization
+            ('ipn:*.*.[10-10]', 'ipn:*.*.[10]'),  # singleton elided
+            ('ipn:*.*.[20-10]', 'ipn:*.*.[10-20]'),  # bounds ordering
+            ('ipn:*.*.[10-20,1-5]', 'ipn:*.*.[1-5,10-20]'),  # interval ordering
+            ('ipn:[10-4294967295].*.0', 'ipn:[10+].*.0'),  # domain maximum
+            ('ipn:0.[10-4294967295].0', 'ipn:0.[10+].0'),  # domain maximum
+            ('ipn:*.*.[10-18446744073709551615]', 'ipn:*.*.[10+]'),  # domain maximum
+            ('ipn:0.[4294967295].0', 'ipn:0.[4294967295].0'),  # not special value
+            ('ipn:0.4294967295.0', 'ipn:0.!.0'),  # special value
+            ('ipn:4294967295.0', 'ipn:!.0'),  # special value
+            ('ipn:977000.4294967295.0', 'ipn:977000.4294967295.0'),  # not special value
+        ]
+        for orig_text, expect_text in CASES:
+            with self.subTest(orig_text):
+                pat = EidPattern()
+                pat.from_text(orig_text)
+                out_text = pat.to_text()
+                self.assertEqual(expect_text, out_text)
+
+    def test_cbor_range(self):
+        CASES = [
+            # canonicalization
+            ('81820283820A1AFFFFFFFFF5F5', '81820283810AF5F5'),  # domain maximum
+            ('8182028300820A1AFFFFFFFFF5', '8182028300810AF5'),  # domain maximum
+            ('8182028300F5820A1BFFFFFFFFFFFFFFFF', '8182028300F5810A'),  # domain maximum
+        ]
+        for orig_hex, expect_hex in CASES:
+            with self.subTest(orig_hex):
+                pat = EidPattern()
+                pat.from_cbor(bytes.fromhex(orig_hex))
+                out_hex = pat.to_cbor().hex().upper()
+                self.assertEqual(expect_hex, out_hex)
 
 
 class TestPatternMatch(unittest.TestCase):

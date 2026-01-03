@@ -7,6 +7,7 @@ from typing import Any, ClassVar, List, Optional, Tuple, Type, Union
 import cbor2
 import portion
 
+
 Scheme = Union[str, int]
 ''' Possible values for the scheme part of a pattern item '''
 
@@ -101,11 +102,23 @@ class AnySspItem(PatternItem):
         return self.pref_scheme(int)
 
 
+class IntInterval(portion.AbstractDiscreteInterval):
+    ''' An integer-domain interval class '''
+    _step = 1
+
+
+apiIntInterval = portion.create_api(IntInterval)
+''' Utility functions for :py:cls:`IntInterval` '''
+
+
+@dataclass
 class UnsignedElement:
     ''' The type of each element for the IPN scheme pattern '''
 
-    def __init__(self):
-        self.val: Union[None, True, int, portion.Interval] = None
+    domain_max: Optional[int] = None
+    ''' Maximum value within the element domain '''
+    val: Union[None, True, int, IntInterval] = None
+    ''' The element pattern form: wildcard True, single value int, range IntInterval '''
 
     def __repr__(self):
         return repr(self.val)
@@ -113,7 +126,7 @@ class UnsignedElement:
     def is_match(self, elem: int) -> bool:
         if self.val is True:
             return True
-        elif isinstance(self.val, portion.Interval):
+        elif isinstance(self.val, IntInterval):
             return elem in self.val
         else:
             return self.val == elem
@@ -126,14 +139,23 @@ class UnsignedElement:
                 raise ValueError(f'Mismatched range bracket in: {part}')
             intvls = part[1:-1].split(',')
 
-            self.val = portion.Interval()
+            self.val = IntInterval()
             for intvl in intvls:
+                if not intvl:
+                    raise ValueError('Empty range is invalid')
                 if intvl[-1] == '+':
                     # case for non-finite representation
-                    self.val |= portion.closedopen(int(intvl[:-1]), portion.inf)
+                    self.val |= apiIntInterval.closedopen(int(intvl[:-1]), portion.inf)
                 elif '-' in intvl:
-                    low, high = intvl.split('-')
-                    self.val |= portion.closed(int(low), int(high))
+                    low, high = map(int, intvl.split('-'))
+                    # swap to satisfy parsing requirement
+                    if low > high:
+                        low, high = high, low
+
+                    if high < self.domain_max:
+                        self.val |= apiIntInterval.closed(low, high)
+                    else:
+                        self.val |= apiIntInterval.closedopen(low, portion.inf)
                 else:
                     self.val |= portion.singleton(int(intvl))
         else:
@@ -144,7 +166,7 @@ class UnsignedElement:
             return ''
         elif self.val is True:
             return '*'
-        elif isinstance(self.val, portion.Interval):
+        elif isinstance(self.val, IntInterval):
             parts = []
             for intvl in self.val:
                 if intvl.lower == intvl.upper:
@@ -161,7 +183,7 @@ class UnsignedElement:
         if isinstance(ssp, list):
             mut = copy.copy(ssp)
 
-            self.val = portion.Interval()
+            self.val = IntInterval()
             ref = None
             closed = True
             while mut:
@@ -180,19 +202,22 @@ class UnsignedElement:
                 # included width
                 width = mut.pop(0)
                 high = ref + width
-                self.val |= portion.closed(int(ref), int(high))
+                if high < self.domain_max:
+                    self.val |= apiIntInterval.closed(ref, high)
+                else:
+                    self.val |= apiIntInterval.closedopen(ref, portion.inf)
                 ref += width + 1
 
             if not closed:
                 # last included width
-                self.val |= portion.closedopen(int(ref), portion.inf)
+                self.val |= apiIntInterval.closedopen(int(ref), portion.inf)
 
         else:
             # either int or True
             self.val = ssp
 
     def to_dec_cbor(self) -> object:
-        if isinstance(self.val, portion.Interval):
+        if isinstance(self.val, IntInterval):
             ref = None
             parts = []
             for intvl in self.val:
@@ -205,7 +230,7 @@ class UnsignedElement:
                     parts.append(width)
                 ref = intvl.lower
 
-                if intvl.right is portion.CLOSED:
+                if intvl.right is apiIntInterval.CLOSED:
                     # finite
                     width = intvl.upper - ref
                     parts.append(width)
@@ -218,6 +243,10 @@ class UnsignedElement:
         else:
             # either int or True
             return self.val
+
+
+UINT32_MAX = int(2**32) - 1
+UINT64_MAX = int(2**64) - 1
 
 
 @dataclass
@@ -240,7 +269,7 @@ class IpnSchemeItem(PatternItem):
         # normalize the EID value
         if len(eid.ssp) == 2:
             anum = eid.ssp[0] >> 32
-            qnum = eid.ssp[0] & 0xFFFFFFFF
+            qnum = eid.ssp[0] & UINT32_MAX
             snum = eid.ssp[1]
         elif len(eid.ssp) == 3:
             anum = eid.ssp[0]
@@ -267,20 +296,28 @@ class IpnSchemeItem(PatternItem):
         if len(parts) == 2:
             self.alloc = None
             # split off the FQNN part
+            self.node.domain_max = UINT64_MAX
             self.node.from_text(parts[0])
+            self.serv.domain_max = UINT64_MAX
             self.serv.from_text(parts[1])
         elif len(parts) == 3:
+            self.alloc = UnsignedElement(domain_max=UINT32_MAX)
             self.alloc.from_text(parts[0])
+            self.node.domain_max = UINT32_MAX
             self.node.from_text(parts[1])
+            self.serv.domain_max = UINT64_MAX
             self.serv.from_text(parts[2])
         else:
             raise ValueError('IPN SSP does not have 2 or 3 elements')
 
     def to_ssp_text(self) -> str:
         parts = []
-        if self.alloc:
+        if self.alloc is not None:
             parts.append(self.alloc.to_text())
-        parts.append(self.node.to_text())
+        if (self.alloc is None or self.alloc.val == 0) and self.node.val == UINT32_MAX:
+            parts.append('!')
+        else:
+            parts.append(self.node.to_text())
         parts.append(self.serv.to_text())
         return '.'.join(parts)
 
@@ -288,11 +325,16 @@ class IpnSchemeItem(PatternItem):
         if len(ssp) == 2:
             self.alloc = None
             # split off the FQNN part
+            self.node.domain_max = UINT64_MAX
             self.node.from_ssp_cbor(ssp[0])
+            self.serv.domain_max = UINT64_MAX
             self.serv.from_ssp_cbor(ssp[1])
         elif len(ssp) == 3:
+            self.alloc = UnsignedElement(domain_max=UINT32_MAX)
             self.alloc.from_ssp_cbor(ssp[0])
+            self.node.domain_max = UINT32_MAX
             self.node.from_ssp_cbor(ssp[1])
+            self.serv.domain_max = UINT64_MAX
             self.serv.from_ssp_cbor(ssp[2])
         else:
             raise ValueError('IPN SSP does not have 2 or 3 elements')
@@ -405,7 +447,11 @@ class EidPattern:
             return '|'.join(accum)
 
     def from_cbor(self, data: bytes) -> 'EidPattern':
-        obj = cbor2.loads(data)
+        try:
+            obj = cbor2.loads(data)
+        except cbor2.CBORDecodeError:
+            raise ValueError('Not well formed CBOR')
+
         if obj is True:
             self.items = None
         else:
