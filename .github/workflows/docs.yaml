@@ -25,7 +25,12 @@ jobs:
         with:
           python-version: '3.12'
       - name: Dependencies
-        run: pip3 install .[docs]
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential dbus \
+            python3-dev python3-wheel libcairo2-dev libdbus-glib-1-dev libgirepository-2.0-dev
+          pip3 install .[docs]
       - name: Build
         run: |
           sphinx-apidoc -o docs/_api/ src/ --force --remove-old --module-first --no-headings
