@@ -47,6 +47,7 @@ class TestEdhoc(unittest.TestCase):
     def _check_msg1(self, msg, method: Method, suite: CipherSuite, conn_id: bytes):
         self.assertIsInstance(msg, bytes)
         items = list(seq_decoder(msg))
+        LOGGER.debug('Got msg: %s', items)
         self.assertIsInstance(items, list)
         self.assertLessEqual(4, len(items))
 
@@ -59,6 +60,7 @@ class TestEdhoc(unittest.TestCase):
     def _check_msg234(self, msg):
         self.assertIsInstance(msg, bytes)
         items = list(seq_decoder(msg))
+        LOGGER.debug('Got msg: %s', items)
         self.assertIsInstance(items, list)
         self.assertEqual(1, len(items))
         self.assertIsInstance(items[0], bytes)
