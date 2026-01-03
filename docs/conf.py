@@ -12,6 +12,7 @@
 
 import os
 import sys
+from importlib.metadata import version, PackageNotFoundError
 
 sys.path.insert(0, os.path.abspath('..'))
 
@@ -22,7 +23,10 @@ copyright = '2016-2026, Brian Sipos'
 author = 'Brian Sipos'
 
 # The full version, including alpha/beta/rc tags
-release = '0.0'
+try:
+    release = version('ietf-dtn-demo-agent')
+except PackageNotFoundError:
+    release = '0.0'
 
 # -- General configuration ---------------------------------------------------
 
