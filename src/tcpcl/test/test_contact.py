@@ -1,7 +1,7 @@
 import binascii
 import unittest
 
-from .. import contact
+from tcpcl import contact
 
 
 MAGIC_HEX = b'64746e21'
