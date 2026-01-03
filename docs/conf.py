@@ -12,7 +12,6 @@
 
 import os
 import sys
-from pkg_resources import get_distribution
 
 sys.path.insert(0, os.path.abspath('..'))
 
@@ -23,7 +22,7 @@ copyright = '2016-2026, Brian Sipos'
 author = 'Brian Sipos'
 
 # The full version, including alpha/beta/rc tags
-release = get_distribution('ietf-dtn-demo-agent').version or '0.0'
+release = '0.0'
 
 # -- General configuration ---------------------------------------------------
 
