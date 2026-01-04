@@ -408,9 +408,9 @@ class CoseContext(AbstractContext):
             target_plaintext = target_blk.getfieldval('btsd')
 
             ext_aad_enc = CoseContext.get_bpsec_cose_aad(ctr, target_blk, bib, aad_scope, addl_protected)
-            LOGGER.debug('Signing target %d AAD %s payload %s',
-                         blk_num, encode_diagnostic(ext_aad_enc),
-                         encode_diagnostic(target_plaintext))
+            # LOGGER.debug('Signing target %d AAD %s payload %s',
+            #              blk_num, encode_diagnostic(ext_aad_enc),
+            #              encode_diagnostic(target_plaintext))
             msg_obj = Sign1Message(
                 phdr=phdr,
                 uhdr=uhdr,

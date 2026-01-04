@@ -121,6 +121,7 @@ To call DBus methods in one of the nodes:
 ## ACME Validation Prototype
 
 To perform an ACME validation exchange between two nodes run the script:
+
 ```
  node000 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.start_expect_acme_request string:"dDtaviYTPUWFS3NK37YWfQ" string:"tPUZNY4ONIk6LxErRFEjVw" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
 docker container exec -it node001 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.send_acme_request string:"dtn://node000/" string:"dDtaviYTPUWFS3NK37YWfQ" string:"tPUZNY4ONIk6LxErRFEjVw" string:"p3yRYFU4KxwQaHQjJ2RdiQ" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
@@ -130,9 +131,19 @@ docker container exec -it node000 dbus-send --system --print-reply --dest=org.ie
 ## SAFE Prototype
 
 To initiate a primary SA with another SAFE endpoint run:
+
 ```
 ./container/run.py --config container/example-safe.yaml exec node000 -- dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/safe org.ietf.dtn.bp.safe.start string:dtn://node001/safe
+```
 
+## UDPCLv2 Prototype
+
+A demonstration of active queue management (AQM) with a variation of the Prague congestion control algorithm (CCA) can be run with the following, which will configure container interfaces to use HTB rate control down to 100kBps with a CoDEL queue for ECN marking and then transfer an 8MB ADU which takes more than a minute at that rate.
+
+```sh
+./container/run.py --config container/example-sand.yaml act pkigen build create start ready rate_ctrl && \
+sleep 9 && \
+docker container exec node001 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/Agent org.ietf.dtn.bp.Agent.ping string:"dtn://node002/sand" int32:8000000
 ```
 
 # Wireshark Protocols and Dissectors
