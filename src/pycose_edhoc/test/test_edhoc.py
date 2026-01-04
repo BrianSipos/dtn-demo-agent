@@ -20,11 +20,15 @@ from pycose_edhoc import (
 LOGGER = logging.getLogger(__name__)
 
 
-def seq_decoder(data):
+def seq_decoder(data: bytes):
     with io.BytesIO(data) as buf:
         dec = cbor2.CBORDecoder(buf)
-        while buf.tell() < len(data):
-            yield dec.decode()
+        while True:
+            try:
+                yield dec.decode()
+            except cbor2.CBORDecodeEOF:
+                # cannot detect pre-EOF so will not catch not-well-formed data
+                break
 
 
 class TestUtils(unittest.TestCase):
@@ -45,8 +49,10 @@ class TestEdhoc(unittest.TestCase):
         ]
 
     def _check_msg1(self, msg, method: Method, suite: CipherSuite, conn_id: bytes):
+        LOGGER.debug('Got msg data: %s', msg.hex())
         self.assertIsInstance(msg, bytes)
         items = list(seq_decoder(msg))
+        LOGGER.debug('Got msg items: %s', items)
         self.assertIsInstance(items, list)
         self.assertLessEqual(4, len(items))
 
@@ -57,8 +63,10 @@ class TestEdhoc(unittest.TestCase):
         self.assertEqual(conn_id, items[3])
 
     def _check_msg234(self, msg):
+        LOGGER.debug('Got msg data: %s', msg.hex())
         self.assertIsInstance(msg, bytes)
         items = list(seq_decoder(msg))
+        LOGGER.debug('Got msg items: %s', items)
         self.assertIsInstance(items, list)
         self.assertEqual(1, len(items))
         self.assertIsInstance(items[0], bytes)

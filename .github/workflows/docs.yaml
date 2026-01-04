@@ -1,0 +1,79 @@
+name: API documentation
+
+on:
+  push:
+    branches:
+      - main
+      - 'apl-fy[0-9][0-9]'
+  pull_request: {} # any target
+  schedule:
+    - cron: '0 0 * * 0'
+
+jobs:
+  apidoc:
+    name: Build Docs
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential dbus \
+            python3-dev python3-wheel libcairo2-dev libdbus-glib-1-dev libgirepository-2.0-dev
+          pip3 install .[docs]
+      - name: Build
+        run: |
+          sphinx-apidoc -o docs/_api/ src/ --force --remove-old --module-first --no-headings
+          PYTHONPATH=src sphinx-build docs docs/_build/html -d docs/_build/doctrees
+      - name: Compress
+        run: cd docs/_build && tar -cf html.tar html
+      - name: Archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs
+          path: docs/_build/html.tar
+
+  deploy:
+    name: Deploy Pages
+    needs: apidoc
+    if: ${{ github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    # Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
+    # However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
+    concurrency:
+      group: "pages"
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: docs
+          path: docs/_build/
+      - name: Decompress
+        run: cd docs/_build && tar -xf html.tar
+      - name: Setup Pages
+        uses: actions/configure-pages@v3
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # Just the HTML
+          path: docs/_build/html/
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -881,6 +881,7 @@ class EdhocInitiator(CommonState):
         return buf.getvalue()
 
     def process_message_2(self, msg: bytes) -> EadList:
+        self._logger.debug('Got message_2 data %s', msg.hex())
         dec = cbor2.CBORDecoder(io.BytesIO(msg))
         # message is a single bstr
         buf = io.BytesIO(dec.decode())
@@ -1000,6 +1001,7 @@ class EdhocInitiator(CommonState):
         return cbor2.dumps(ciphertext_3)
 
     def process_message_4(self, msg: bytes) -> EadList:
+        self._logger.debug('Got message_4 data %s', msg.hex())
         # message is a single bstr with no structure
         ciphertext_4 = cbor2.loads(msg)
 
@@ -1041,6 +1043,7 @@ class EdhocResponder(CommonState):
         ])
 
     def process_message_1(self, msg: bytes) -> EadList:
+        self._logger.debug('Got message_1 data %s', msg.hex())
         buf = io.BytesIO(msg)
         dec = cbor2.CBORDecoder(buf)
 
@@ -1120,6 +1123,7 @@ class EdhocResponder(CommonState):
         return cbor2.dumps(data)
 
     def process_message_3(self, msg: bytes) -> EadList:
+        self._logger.debug('Got message_3 data %s', msg.hex())
         # message is a single bstr
         ciphertext_3 = cbor2.loads(msg)
 
