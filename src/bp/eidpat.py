@@ -3,7 +3,7 @@
 from abc import abstractmethod, ABCMeta
 import copy
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, List, Optional, Tuple, Type, Union
+from typing import Any, ClassVar, List, Literal, Optional, Tuple, Type, Union
 import cbor2
 import portion
 
@@ -117,7 +117,7 @@ class UnsignedElement:
 
     domain_max: Optional[int] = None
     ''' Maximum value within the element domain '''
-    val: Union[None, True, int, IntInterval] = None
+    val: Union[None, Literal[True], int, IntInterval] = None
     ''' The element pattern form: wildcard True, single value int, range IntInterval '''
 
     def __repr__(self):
