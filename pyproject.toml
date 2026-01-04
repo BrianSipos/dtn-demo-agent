@@ -22,7 +22,7 @@ classifiers = [
 
 dependencies = [
   "asn1",
-  "cbor2 ~=5.6",
+  "cbor2 <5.8", # work around cbor2 issue 272
   "pycose ~=1.0",
   "crcmod ~=1.7",
   "cryptography >=41",
@@ -60,7 +60,7 @@ flake8 = [
   "flake8_pyproject",
 ]
 docs = [
-  "sphinx <6",
+  "sphinx ~=8.2",
   "sphinx_rtd_theme",
   "sphinx-argparse",
 ]
@@ -74,9 +74,9 @@ container = [
 addopts = [
     "--import-mode=importlib",
 ]
-log_level="DEBUG"
+log_level="debug"
 log_cli="True"
-log_cli_level="INFO"
+log_cli_level="warning"
 
 [tool.pylint.MAIN]
 load-plugins="pylint_junit"
