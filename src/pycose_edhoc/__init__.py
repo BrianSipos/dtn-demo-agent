@@ -16,7 +16,7 @@ from pycose.keys import curves, keytype, CoseKey, EC2Key, OKPKey, SymmetricKey
 from pycose.messages import Sign1Message, Enc0Message
 from pycose import headers
 import random
-from typing import ClassVar, List, Optional, Type, TypeAlias, Union
+from typing import ClassVar, List, Optional, Type, Union
 
 
 LOGGER = logging.getLogger(__name__)
@@ -248,7 +248,7 @@ class ConnectionId:
     value: bytes = b''
     ''' Native simple value '''
 
-    EncodedType: ClassVar[TypeAlias] = Union[bytes, int]
+    EncodedType: ClassVar = Union[bytes, int]
     ''' Encoded value type '''
 
     @staticmethod
