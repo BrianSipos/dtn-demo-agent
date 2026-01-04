@@ -647,10 +647,9 @@ class SafeEntity:
         self._sec_sai: Dict[str, SecondarySecAssn] = dict()
 
     def recv_pdu(self, pdu: bytes, peer_eid: str):
-        pdu = io.BytesIO(pdu)
         peer_state = self._peer_state(peer_eid)
-        self._logger.debug('PDU RX from %s data %s', peer_eid, pdu.getvalue().hex())
-        dec_pdu = cbor2.CBORDecoder(pdu)
+        self._logger.debug('PDU RX from %s data %s', peer_eid, pdu.hex())
+        dec_pdu = cbor2.CBORDecoder(io.BytesIO(pdu))
 
         # pdu contents
         version = dec_pdu.decode()
@@ -662,8 +661,11 @@ class SafeEntity:
         pri_sa_id.decode(dec_pdu)
 
         if partial_iv is None:
+            self._logger.debug('EDHOC reading at offset %s', dec_pdu.fp.tell())
             # expect only one EDHOC message in remainder of PDU
-            seqdata = pdu.read()
+            seqdata = dec_pdu.fp.read()
+            if not seqdata:
+                raise ValueError('No EDHOC bytes present')
 
             ead = None
             if pri_sa_id.value is True:
@@ -968,6 +970,7 @@ class SafeEntity:
     def _queue_process_tx(self):
         ''' Queue a call to :fun:`_process_tx` in the event loop.
         '''
+        self._logger.debug('Queue process TX')
         glib.idle_add(self._process_tx)
 
     def _process_tx(self) -> bool:
