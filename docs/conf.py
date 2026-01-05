@@ -61,8 +61,8 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # (value 'bysource'). The default is alphabetical.
 autodoc_member_order = 'bysource'
 
+autodoc_inherit_docstrings = False
 autodoc_typehints = 'none'
-
 autoclass_content = 'both'
 
 # -- Options for HTML output -------------------------------------------------

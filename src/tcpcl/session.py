@@ -10,6 +10,7 @@ import socket
 import ssl
 import ipaddress
 import asn1
+from typing import Optional
 from cryptography.hazmat.backends import default_backend
 from cryptography import x509
 
@@ -412,11 +413,10 @@ class RejectError(Exception):
     ''' Allow recv_* handlers to reject the message.
 
     :param reason: The rejection reason.
-    Should be one of the :py:class:`messages.RejectMsg.Reason` values.
-    :type reason: int
+        Should be one of the :py:class:`messages.RejectMsg.Reason` values.
     '''
 
-    def __init__(self, reason=None):
+    def __init__(self, reason: Optional[int]=None):
         Exception.__init__(self, 'rejected message')
         self.reason = reason
 
@@ -425,11 +425,10 @@ class TerminateError(Exception):
     ''' Allow recv_* handlers to terminate a session.
 
     :param reason: The termination reason.
-    Should be one of the :py:class:`messages.SessionTerm.Reason` values.
-    :type reason: int
+        Should be one of the :py:class:`messages.SessionTerm.Reason` values.
     '''
 
-    def __init__(self, reason=None):
+    def __init__(self, reason: Optional[int]=None):
         Exception.__init__(self, 'terminated session')
         self.reason = reason
 
@@ -809,7 +808,7 @@ class Messenger(Connection):
 
     def merge_session_params(self):
         ''' Combine local and peer SESS_INIT parameters.
-        The result is kept in :ivar:`_sess_parameters`.
+        The result is kept in :py:attr:`_sess_parameters`.
 
         :raise TerminateError: If there is some failure to negotiate.
         '''
@@ -1346,12 +1345,11 @@ class ContactHandler(Messenger, dbus.service.Object):
         )
 
     @dbus.service.method(DBUS_IFACE, in_signature='y', out_signature='')
-    def terminate(self, reason_code=None):
+    def terminate(self, reason_code: Optional[int]=None):
         ''' Perform the termination procedure.
 
         :param reason_code: The termination reason.
-        Should be one of the :py:class:`messages.SessionTerm.Reason` values.
-        :type reason_code: int or None
+            Should be one of the :py:class:`messages.SessionTerm.Reason` values.
         '''
         if reason_code is None:
             reason_code = messages.SessionTerm.Reason.UNKNOWN

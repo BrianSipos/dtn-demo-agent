@@ -49,7 +49,7 @@ class AbstractContext(ABC):
         ''' Attempt to apply a BIB to a bundle.
 
         :param ctr: The entire bundle container.
-        :type ctr: :py:cls:`BundleContainer`
+        :type ctr: :py:class:`BundleContainer`
         '''
         raise NotImplementedError()
 
@@ -58,9 +58,9 @@ class AbstractContext(ABC):
         ''' Verify a BIB for this context.
 
         :param ctr: The entire bundle container.
-        :type ctr: :py:cls:`BundleContainer`
+        :type ctr: :py:class:`BundleContainer`
         :param bib: The specific BIB to verify.
-        :type bib: :py:cls:`CanonicalBlock`
+        :type bib: :py:class:`CanonicalBlock`
         :return: A non-None status value if failed.
         '''
         raise NotImplementedError()
@@ -206,7 +206,7 @@ class CoseContext(AbstractContext):
         ''' Get a COSE version of the local private key.
         :param keyobj: The cryptography key object.
         :return: The associated COSE key.
-        :rtype: :py:cls:`CoseKey`
+        :rtype: :py:class:`CoseKey`
         '''
         if isinstance(keyobj, (rsa.RSAPrivateKey, rsa.RSAPublicKey)):
             if hasattr(keyobj, 'private_numbers'):
