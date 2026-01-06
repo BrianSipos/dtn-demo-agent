@@ -416,7 +416,7 @@ class RejectError(Exception):
         Should be one of the :py:class:`messages.RejectMsg.Reason` values.
     '''
 
-    def __init__(self, reason: Optional[int]=None):
+    def __init__(self, reason: Optional[int] = None):
         Exception.__init__(self, 'rejected message')
         self.reason = reason
 
@@ -428,7 +428,7 @@ class TerminateError(Exception):
         Should be one of the :py:class:`messages.SessionTerm.Reason` values.
     '''
 
-    def __init__(self, reason: Optional[int]=None):
+    def __init__(self, reason: Optional[int] = None):
         Exception.__init__(self, 'terminated session')
         self.reason = reason
 
@@ -1345,7 +1345,7 @@ class ContactHandler(Messenger, dbus.service.Object):
         )
 
     @dbus.service.method(DBUS_IFACE, in_signature='y', out_signature='')
-    def terminate(self, reason_code: Optional[int]=None):
+    def terminate(self, reason_code: Optional[int] = None):
         ''' Perform the termination procedure.
 
         :param reason_code: The termination reason.
