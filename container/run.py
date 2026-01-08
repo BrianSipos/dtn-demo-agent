@@ -554,7 +554,7 @@ class Runner:
             least = None
             for node_name in self._config['nodes'].keys():
                 comp = self._docker.run_exec(['-T', node_name, 'journalctl', '--unit=dtn-bp-agent@node'], capture_output=True, text=True)
-                got = comp.stdout.count('Verified BIB target block num 1')
+                got = comp.stdout.count('Verified BIB num 3, target block num 1')
                 if least is None or got < least:
                     least = got
             LOGGER.info('Least number of verified BIBs: %s', least)
