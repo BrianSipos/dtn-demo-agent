@@ -16,13 +16,13 @@ LOGGER = logging.getLogger(__name__)
 
 class BundleContainer(object):
     ''' A high-level representation of a bundle.
-    This includes logical constraints not present in :py:cls:`encoding.Bundle`
+    This includes logical constraints not present in :py:class:`encoding.Bundle`
     data handling class.
 
     :ivar bundle: The decoded bundle itself.
     :ivar actions: Processing recorded on this bundle.
     :ivar status_reason: The last status reason.
-    :ivar route: The transmit route (type :py:cls:`TxRouteItem`) chosen for this bundle.
+    :ivar route: The transmit route (type :py:class:`TxRouteItem`) chosen for this bundle.
     :ivar sender: The transmit function to send this bundle.
     '''
 

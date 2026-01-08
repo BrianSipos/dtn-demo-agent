@@ -94,7 +94,7 @@ class EidField(CborField):
 class DtnTimeField(UintField):
     ''' A DTN time value.
     This value is automatically converted from a
-    :py:cls:`datetime.datetime` object and text.
+    :py:class:`datetime.datetime` object and text.
     '''
 
     # Epoch reference for DTN Time
