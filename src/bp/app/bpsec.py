@@ -417,9 +417,9 @@ class CoseContext(AbstractContext):
 
             # Sign self-sourced payload only
             if self._config.node_id.startswith('ipn:'):
-                own_pat = re.escape(self._config.node_id.removesuffix('.0')) + '\..*'
+                own_pat = re.escape(self._config.node_id.removesuffix('.0') + '.') + '.*'
             elif self._config.node_id.startswith('dtn:'):
-                own_pat = re.escape(self._config.node_id.removesuffix('/')) + '/.*'
+                own_pat = re.escape(self._config.node_id.removesuffix('/') + '/') + '.*'
             LOGGER.debug('Signing from source pattern %s', own_pat)
             self.sec_assoc.append(SecAssociation(
                 src_pat=re.compile(own_pat),
