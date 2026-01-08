@@ -365,7 +365,7 @@ class CoseContext(AbstractContext):
         ''' Get a COSE version of the local private key.
         :param keyobj: The cryptography key object.
         :return: The associated COSE key.
-        :rtype: :py:cls:`CoseKey`
+        :rtype: :py:class:`CoseKey`
         '''
         if isinstance(keyobj, (rsa.RSAPrivateKey, rsa.RSAPublicKey)):
             if hasattr(keyobj, 'private_numbers'):

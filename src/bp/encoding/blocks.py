@@ -21,7 +21,7 @@ class Timestamp(CborArray):
     ''' A structured representation of an DTN Timestamp.
     The timestamp is a two-tuple of (time, sequence number)
     The creation time portion is automatically converted from a
-    :py:cls:`datetime.datetime` object and text.
+    :py:class:`datetime.datetime` object and text.
     '''
     fields_desc = (
         DtnTimeField('dtntime', default=0),

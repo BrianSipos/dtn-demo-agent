@@ -23,12 +23,15 @@ classifiers = [
 dependencies = [
   "asn1",
   "cbor2 <5.8", # work around cbor2 issue 272
-  "pycose ~=1.0",
+  "pycose @git+https://github.com/BrianSipos/pycose.git@sipos-combined-patches",
   "crcmod ~=1.7",
   "cryptography >=41",
   "certvalidator",
   "dbus-python",
   "ifaddr ~=0.2",
+  # work around lack of release version fix for oscrypto issue #75
+  # https://github.com/wbond/oscrypto/pull/76
+  "oscrypto @git+https://github.com/wbond/oscrypto.git@master",
   "portion ~=2.1",
   "psutil",
   "pycryptodome ~=3.21",

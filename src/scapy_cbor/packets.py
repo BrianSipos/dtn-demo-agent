@@ -143,7 +143,7 @@ class TypeValueHead(CborArray):
     This is analogous to a type-length-value (TLV) encoding for CBOR.
     The type is a field and the value is captured in the payload of this
     packet.
-    The default payload for unknown types is a :py:cls:`CborItem`.
+    The default payload for unknown types is a :py:class:`CborItem`.
     '''
 
     fields_desc = (

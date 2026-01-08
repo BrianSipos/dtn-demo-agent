@@ -38,7 +38,7 @@ class TestBpSafe(unittest.TestCase):
         self._eloop = GLib.MainLoop()
         self._endpoints = {}
         self._pdu_ix = 0
-        # log, in order, of all seen :py:cls:`Transfer`
+        # log, in order, of all seen :py:class:`Transfer`
         self._log = queue.Queue()
 
         random.seed(b'TestBpSafe')
