@@ -3,7 +3,6 @@
 import datetime
 import logging
 import os
-import re
 import unittest
 import asn1
 from cryptography import x509
@@ -16,7 +15,7 @@ from bp.encoding.admin import StatusReport
 from bp.encoding.blocks import PrimaryBlock, CanonicalBlock
 from bp.encoding.bundle import Bundle
 from bp.util import BundleContainer
-from bp.encoding.bpsec import (TargetResultList, TypeValuePair,
+from bp.encoding.bpsec import (TargetResultList,
                                BlockIntegrityBlock, BlockConfidentialityBlock)
 from bp.config import Config
 from bp.agent import Agent
@@ -247,8 +246,8 @@ class TestBpsecCose(unittest.TestCase):
         self._ctx._config.integrity_for_blocks = {1, 7}
         self._ctx._config.prefer_content_alg = algorithms.HMAC384
         self._ctx._config.prefer_content_key = [
-            bytes.fromhex('13bf9cead057c0aca2c9e52471ca4b19ddfaf4c0784e3f3e8e3999dbae4ce45c'),
-            bytes.fromhex('13bf9cead057c0aca2c9e52471ca4b19ddfaf4c0784e3f3e8e3999dbae4ce45c'),
+            bytes.fromhex('71776572747975696f7061736466676871776572747975696f7061736466676864456712646567f4646a3368106667bb'),
+            bytes.fromhex('71776572747975696f7061736466676871776572747975696f7061736466676864456712646567f4646a3368106667bb'),
         ]
 
         with open(os.path.join(SELFDIR, 'data', 'interop-integrity-base.cbor'), 'rb') as infile:
@@ -385,7 +384,7 @@ class TestBpsecCose(unittest.TestCase):
         ]
         self._ctx._config.prefer_content_iv = [
             b'Twelve121212',
-            b'Twelve121212',
+            b'Twelve121213',
         ]
 
         with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality-base.cbor'), 'rb') as infile:
