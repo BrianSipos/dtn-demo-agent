@@ -36,6 +36,7 @@ except PackageNotFoundError:
 extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.doctest',
+    'sphinx_autodoc_typehints',
     'sphinxarg.ext',
 ]
 
@@ -60,9 +61,8 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # (value 'alphabetical'), by member type (value 'groupwise') or by source order
 # (value 'bysource'). The default is alphabetical.
 autodoc_member_order = 'bysource'
-
-autodoc_typehints = 'none'
-autoclass_content = 'both'
+autodoc_typehints = 'signature'
+autoclass_content = 'class'
 
 # -- Options for HTML output -------------------------------------------------
 
