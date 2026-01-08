@@ -21,7 +21,7 @@ class Timestamp(CborArray):
     ''' A structured representation of an DTN Timestamp.
     The timestamp is a two-tuple of (time, sequence number)
     The creation time portion is automatically converted from a
-    :py:cls:`datetime.datetime` object and text.
+    :py:class:`datetime.datetime` object and text.
     '''
     fields_desc = (
         DtnTimeField('dtntime', default=0),
@@ -245,9 +245,9 @@ class CanonicalBlock(AbstractBlock):
                     pay = cls(pay_data)
                     self.add_payload(pay)
                 except Exception as err:
-                    if conf.debug_dissector:
-                        raise
-                    LOGGER.warning('CanonicalBlock failed to dissect payload: %s', err)
+                    LOGGER.warning('CanonicalBlock failed to dissect BTSD (maybe encrypted?): %s', err)
+                    # if conf.debug_dissector:
+                    #     raise
 
         return super().post_dissect(s)
 

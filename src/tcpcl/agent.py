@@ -133,7 +133,7 @@ class Agent(dbus.service.Object):
 
         :param kwargs: The `hdl_kwargs` given to the handler.
         :return: The handler.
-        :rtype: :py:cls:`ContactHandler`
+        :rtype: :py:class:`ContactHandler`
         '''
         path = self._get_obj_path()
         hdl = ContactHandler(

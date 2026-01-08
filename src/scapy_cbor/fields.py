@@ -127,7 +127,7 @@ class ArrayWrapField(CborField):
 
 
 class FieldListField(CborField):
-    ''' Similar to :py:cls:`scapy.fields.FieldListField`.
+    ''' Similar to :py:class:`scapy.fields.FieldListField`.
     '''
     __slots__ = (
         'fld',
@@ -169,7 +169,7 @@ class FieldListField(CborField):
 
 
 class PacketField(CborField):
-    ''' Similar to :py:cls:`scapy.fields.PacketField` but
+    ''' Similar to :py:class:`scapy.fields.PacketField` but
     for CBOR encoding.
     '''
     __slots__ = ["cls"]
@@ -196,7 +196,7 @@ class PacketField(CborField):
 
 
 class PacketListField(PacketField):
-    ''' Similar to :py:cls:`scapy.fields.PacketListField` but
+    ''' Similar to :py:class:`scapy.fields.PacketListField` but
     for CBOR encoding.
     '''
     islist = 1
@@ -285,7 +285,7 @@ class EnumField(UintField):
     ''' An integer containing an enumerated value.
 
     :param enum: Available values for the field.
-    :type enum: :py:cls:`enum.IntEnum`
+    :type enum: :py:class:`enum.IntEnum`
     '''
     __slots__ = (
         'enum',
@@ -310,7 +310,7 @@ class FlagsField(UintField):
     ''' An integer containing enumerated flags.
 
     :param flags: Available flags for the field.
-    :type flags: :py:cls:`enum.IntFlag`
+    :type flags: :py:class:`enum.IntFlag`
     '''
     __slots__ = (
         'flags',

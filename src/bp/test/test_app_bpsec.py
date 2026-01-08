@@ -1,31 +1,48 @@
-''' Test the module :py:mod:`bp.blocks`.
+''' Test the module :py:mod:`bp.app.bpsec`.
 '''
 import datetime
+import logging
+import os
 import unittest
 import asn1
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
-from bp.encoding.fields import (EidField)
+from pycose import algorithms
+from pycose.keys import keyops, SymmetricKey
+from bp.encoding.admin import StatusReport
 from bp.encoding.blocks import PrimaryBlock, CanonicalBlock
+from bp.encoding.bundle import Bundle
 from bp.util import BundleContainer
-from bp.encoding.bpsec import (TargetResultList, TypeValuePair,
-                               BlockIntegrityBlock)
+from bp.encoding.bpsec import (TargetResultList,
+                               BlockIntegrityBlock, BlockConfidentialityBlock)
 from bp.config import Config
 from bp.agent import Agent
-from bp.app.bpsec import Bpsec, BPSEC_COSE_CONTEXT_ID
+from bp.app.bpsec import CoseContext, BPSEC_COSE_CONTEXT_ID
+
+LOGGER = logging.getLogger()
+SELFDIR = os.path.dirname(os.path.abspath(__file__))
 
 
-class TestBpsecCoseSign(unittest.TestCase):
+class TestBpsecCose(unittest.TestCase):
+    ''' Test cases specific to the COSE Context '''
+
+    maxDiff = None
 
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         super().setUpClass()
 
         from dbus.mainloop.glib import DBusGMainLoop
         # Must run before connection or real main loop is constructed
-        DBusGMainLoop(set_as_default=True)
+        cls.eloop = DBusGMainLoop(set_as_default=True)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.eloop = None
+
+        super().tearDownClass()
 
     def setUp(self):
         super().setUp()
@@ -34,6 +51,10 @@ class TestBpsecCoseSign(unittest.TestCase):
         config.node_id = 'dtn://node/'
         self._bp = Agent(config)
         self._app = self._bp._app['bpsec']
+        self.assertIsNotNone(self._app)
+
+        self._ctx: CoseContext = self._app._contexts[BPSEC_COSE_CONTEXT_ID]
+        self.assertIsNotNone(self._ctx)
 
     def _dummy_ca_cert(self, ca_key):
         ca_name = x509.Name([
@@ -149,48 +170,271 @@ class TestBpsecCoseSign(unittest.TestCase):
         self._bp._apply_primary(ctr)
         return ctr
 
-    def test_apply_bib_ec2(self):
+    def test_source_bib_ec2(self):
         ca_key = ec.generate_private_key(ec.SECP256R1(), backend=default_backend())
         ca_cert = self._dummy_ca_cert(ca_key)
         end_key = ec.generate_private_key(ec.SECP256R1(), backend=default_backend())  # Curve for COSE ES256
         end_cert = self._dummy_end_cert(ca_key, ca_cert, end_key)
 
-        ctx = self._app._contexts[BPSEC_COSE_CONTEXT_ID]
-        ctx._ca_certs = [ca_cert]
-        ctx._cert_chain = [end_cert]
-        ctx._priv_key = end_key
+        self._ctx._ca_certs = [ca_cert]
+        self._ctx._cert_chain = [end_cert]
+
+        priv_key = self._ctx.extract_cose_key(end_key)
+        priv_key.kid = b'test'
+        priv_key.key_ops = [keyops.SignOp]
+        self._ctx.asym_key_store[priv_key.kid] = priv_key
+        self._ctx.priv_key_id = priv_key.kid
 
         ctr = self._dummy_ctr()
-        self._app._apply_bib(ctr)
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertEqual(0, len(bib_set))
 
-        bibs = ctr.block_type(BlockIntegrityBlock)
-        self.assertNotEqual([], bibs)
-        bib = bibs[0]
-        self.assertEqual([1], bib.payload.targets)
+        self._ctx.apply_bib(ctr)
+        ctr.sort_block_num()
 
-        ctr.record_action('deliver')
-        self.assertFalse(self._app._verify_bib(ctr))
-        self.assertEqual({'deliver'}, ctr.actions.keys())
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertEqual(1, len(bib_set))
+        bib = bib_set[0]
+        self.assertListEqual([1], bib.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
 
-    def test_apply_bib_rsa(self):
+        # self-verify
+        result = self._ctx.verify_bib(ctr, bib)
+        self.assertIsNone(result)
+
+    def test_source_bib_rsa(self):
         ca_key = rsa.generate_private_key(0x10001, 1024, backend=default_backend())
         ca_cert = self._dummy_ca_cert(ca_key)
         end_key = rsa.generate_private_key(0x10001, 1024, backend=default_backend())
         end_cert = self._dummy_end_cert(ca_key, ca_cert, end_key)
 
-        ctx = self._app._contexts[BPSEC_COSE_CONTEXT_ID]
-        ctx._ca_certs = [ca_cert]
-        ctx._cert_chain = [end_cert]
-        ctx._priv_key = end_key
+        self._ctx._ca_certs = [ca_cert]
+        self._ctx._cert_chain = [end_cert]
+
+        priv_key = self._ctx.extract_cose_key(end_key)
+        priv_key.kid = b'test'
+        priv_key.key_ops = [keyops.SignOp]
+        self._ctx.asym_key_store[priv_key.kid] = priv_key
+        self._ctx.priv_key_id = priv_key.kid
 
         ctr = self._dummy_ctr()
-        self._app._apply_bib(ctr)
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertEqual(0, len(bib_set))
 
-        bibs = ctr.block_type(BlockIntegrityBlock)
-        self.assertNotEqual([], bibs)
-        bib = bibs[0]
-        self.assertEqual([1], bib.payload.targets)
+        self._ctx.apply_bib(ctr)
+        ctr.sort_block_num()
 
-        ctr.record_action('deliver')
-        self.assertFalse(self._app._verify_bib(ctr))
-        self.assertEqual({'deliver'}, ctr.actions.keys())
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertEqual(1, len(bib_set))
+        bib = bib_set[0]
+        self.assertListEqual([1], bib.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
+
+        # self-verify
+        result = self._ctx.verify_bib(ctr, bib)
+        self.assertIsNone(result)
+
+    def test_source_bib_symmetric_kek(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+        # MAC with this key
+        self._ctx.priv_key_id = cosekey.kid
+        # target payload and bundle-age types
+        self._ctx._config.node_id = 'ipn:1.0'
+        self._ctx._config.integrity_for_blocks = {1, 7}
+        self._ctx._config.prefer_content_alg = algorithms.HMAC384
+        self._ctx._config.prefer_content_key = [
+            bytes.fromhex('71776572747975696f7061736466676871776572747975696f7061736466676864456712646567f4646a3368106667bb'),
+            bytes.fromhex('71776572747975696f7061736466676871776572747975696f7061736466676864456712646567f4646a3368106667bb'),
+        ]
+
+        with open(os.path.join(SELFDIR, 'data', 'interop-integrity-base.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
+
+        # initial state
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertSetEqual(set(), set(bib.block_num for bib in bib_set))
+
+        self._ctx.apply_bib(ctr)
+        ctr.sort_block_num()
+        LOGGER.info('final %s', repr(ctr.bundle))
+        LOGGER.info('bytes %s', bytes(ctr.bundle).hex())
+
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertEqual(1, len(bib_set))
+        bib = bib_set[0]
+        self.assertListEqual([1, 2], bib.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
+
+        # self-verify
+        result = self._ctx.verify_bib(ctr, bib)
+        self.assertIsNone(result)
+
+        # check with reference bundle
+        with open(os.path.join(SELFDIR, 'data', 'interop-integrity-full.cbor'), 'rb') as infile:
+            self.assertEqual(infile.read().hex(), bytes(ctr.bundle).hex())
+
+    def test_verify_bib_symmetric_kek_valid(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+        self._ctx._config.accept_after_verify = True
+
+        with open(os.path.join(SELFDIR, 'data', 'interop-integrity-full.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
+
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertSetEqual({5}, set(bib.block_num for bib in bib_set))
+        bib = bib_set[0]
+        self.assertListEqual([1, 2], bib.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
+        result = self._ctx.verify_bib(ctr, bib)
+        self.assertIsNone(result)
+
+        # Check the outcome of accepting the BIB
+        with open(os.path.join(SELFDIR, 'data', 'interop-integrity-base.cbor'), 'rb') as infile:
+            self.assertEqual(infile.read().hex(), bytes(ctr.bundle).hex())
+
+    def test_verify_bib_symmetric_direct_valid(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.1.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+
+        with open(os.path.join(SELFDIR, 'data', 'exampleA.1.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
+
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertSetEqual({3}, set(bib.block_num for bib in bib_set))
+        bib = bib_set[0]
+        self.assertListEqual([1], bib.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
+        result = self._ctx.verify_bib(ctr, bib)
+        self.assertIsNone(result)
+
+        # not accepted still there
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertSetEqual({3}, set(bib.block_num for bib in bib_set))
+
+    def test_verify_bib_symmetric_direct_invalid_mod_scope(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.1.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+
+        with open(os.path.join(SELFDIR, 'data', 'interop-altered-aad.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
+
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertSetEqual({5}, set(bib.block_num for bib in bib_set))
+        bib = bib_set[0]
+        self.assertListEqual([1], bib.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
+        with self.assertLogs('bp.app.bpsec', level=logging.ERROR) as lcm:
+            result = self._ctx.verify_bib(ctr, bib)
+        self.assertIn('Failed to verify BIB num 5, target block num 1', lcm.output[0])
+        self.assertEqual(StatusReport.ReasonCode.FAILED_SEC, result)
+
+    def test_verify_bib_symmetric_direct_unknown_critical_header(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.1.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+
+        with open(os.path.join(SELFDIR, 'data', 'interop-critical-header.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
+
+        bib_set = ctr.block_type(BlockIntegrityBlock)
+        self.assertSetEqual({5}, set(bib.block_num for bib in bib_set))
+        bib = bib_set[0]
+        self.assertListEqual([1], bib.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bib.payload.context_id)
+        with self.assertLogs('bp.app.bpsec', level=logging.ERROR) as lcm:
+            result = self._ctx.verify_bib(ctr, bib)
+        self.assertIn('Exception during verify of BIB num 5, target block num 1', lcm.output[0])
+        self.assertEqual(StatusReport.ReasonCode.FAILED_SEC, result)
+
+    def test_source_bcb_symmetric_kek(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+        # MAC with this key
+        self._ctx.priv_key_id = cosekey.kid
+        # target payload and bundle-age types
+        self._ctx._config.node_id = 'ipn:1.0'
+        self._ctx._config.confidentiality_for_blocks = {1, 7}
+        self._ctx._config.prefer_content_alg = algorithms.A256GCM
+        self._ctx._config.prefer_content_key = [
+            bytes.fromhex('13bf9cead057c0aca2c9e52471ca4b19ddfaf4c0784e3f3e8e3999dbae4ce45c'),
+            bytes.fromhex('13bf9cead057c0aca2c9e52471ca4b19ddfaf4c0784e3f3e8e3999dbae4ce45c'),
+        ]
+        self._ctx._config.prefer_content_iv = [
+            b'Twelve121212',
+            b'Twelve121213',
+        ]
+
+        with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality-base.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
+
+        # initial state
+        bcb_set = ctr.block_type(BlockConfidentialityBlock)
+        self.assertEqual(set(), set(bcb.block_num for bcb in bcb_set))
+
+        self._ctx.apply_bcb(ctr)
+        ctr.sort_block_num()
+        LOGGER.info('final %s', repr(ctr.bundle))
+        LOGGER.info('bytes %s', bytes(ctr.bundle).hex())
+
+        bcb_set = ctr.block_type(BlockConfidentialityBlock)
+        self.assertEqual(1, len(bcb_set))
+        bcb = bcb_set[0]
+        self.assertListEqual([1, 2], bcb.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bcb.payload.context_id)
+
+        # self-verify
+        result = self._ctx.verify_bcb(ctr, bcb)
+        self.assertIsNone(result)
+
+        # check with reference bundle
+        with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality-full.cbor'), 'rb') as infile:
+            self.assertEqual(infile.read().hex(), bytes(ctr.bundle).hex())
+
+    def test_verify_bcb_symmetric_kek_valid(self):
+        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+        self._ctx.sym_key_store.clear()
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+        self._ctx._config.accept_after_verify = True
+
+        with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality-full.cbor'), 'rb') as infile:
+            ctr = BundleContainer(bundle=Bundle(infile.read()))
+            self.assertSetEqual(set(), ctr.bundle.check_all_crc())
+        LOGGER.info('got %s', repr(ctr.bundle))
+
+        bcb_set = ctr.block_type(BlockConfidentialityBlock)
+        self.assertSetEqual({5}, set(bcb.block_num for bcb in bcb_set))
+        bcb = bcb_set[0]
+        self.assertListEqual([1, 2], bcb.payload.targets)
+        self.assertEqual(BPSEC_COSE_CONTEXT_ID, bcb.payload.context_id)
+        result = self._ctx.verify_bcb(ctr, bcb)
+        self.assertIsNone(result)
+
+        # Check the outcome of accepting the BCB
+        with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality-base.cbor'), 'rb') as infile:
+            self.assertEqual(infile.read().hex(), bytes(ctr.bundle).hex())

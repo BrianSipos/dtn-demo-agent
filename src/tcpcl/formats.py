@@ -126,7 +126,7 @@ class NoPayloadPacket(packet.Packet):
         return (None, s)
 
 
-def remove_padding(pkt):
+def remove_padding(pkt: packet.Packet):
     ''' Traverse a packet and remove any trailing padding payload.
 
     :param pkt: The root packet to traverse.
