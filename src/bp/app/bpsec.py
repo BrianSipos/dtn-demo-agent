@@ -115,8 +115,13 @@ class SecOperation:
     content_alg: Optional[algorithms.CoseAlgorithm] = None
     ''' Authorized layer 0 algorithm to source or validate '''
     content_key: Optional[bytes] = None
-    ''' Content IV for encryption, left as None to use random or when not encrypting '''
-    content_iv: Optional[bytes] = None
+    ''' Optional fixed layer 0 content key.
+    Leave as None for random content key when wrapping. 
+    '''
+    content_iv: List[bytes] = field(default_factory=list)
+    ''' Sequence of content IV for encryption.
+    Leave empty to use random or when not encrypting.
+    '''
 
     priv_key: Optional[CoseKey] = None
     ''' Derived reference to a key '''
@@ -544,15 +549,11 @@ class CoseContext(AbstractContext):
         return validate
 
     def apply_bib(self, ctr: BundleContainer) -> None:
-        secops = [assoc.is_match(ctr, 'bib') for assoc in self.sec_assoc]
-        secops: List[SecOperation] = [item for sublist in secops for item in sublist]
+        secop_lists = [assoc.is_match(ctr, 'bib') for assoc in self.sec_assoc]
+        secops: List[SecOperation] = [item for sublist in secop_lists for item in sublist]
         if not secops:
             LOGGER.warning('No BIB operations')
             return
-
-        addl_protected_map = {}
-        addl_unprotected_map = {}
-        aad_scope = {0: 1, -1: 1}  # primary and target metadata
 
         # Pre-populate derived attributes of all operations
         common_x5chain = None
@@ -571,6 +572,10 @@ class CoseContext(AbstractContext):
             else:
                 LOGGER.error(f'No private key with KID {sop.priv_key_id}')
                 return
+
+        addl_protected_map = {}
+        addl_unprotected_map = {}
+        aad_scope = {0: 1, -1: 1}  # primary and target metadata
 
         # A little switcharoo to avoid cached overload_fields on `data`
         bib = CanonicalBlock(
@@ -865,28 +870,26 @@ class CoseContext(AbstractContext):
             return False
 
     def apply_bcb(self, ctr: BundleContainer) -> None:
-        if not self.priv_key_id:
-            LOGGER.warning('No private key ID')
+        secop_lists = [assoc.is_match(ctr, 'bcb') for assoc in self.sec_assoc]
+        secops: List[SecOperation] = [item for sublist in secop_lists for item in sublist]
+        if not secops:
+            LOGGER.warning('No BCB operations')
             return
+
+        # Pre-populate derived attributes of all operations
+        for sop in secops:
+            if sop.priv_key_id in self.sym_key_store:
+                sop.priv_key = self.sym_key_store[sop.priv_key_id]
+            elif sop.priv_key_id in self.asym_key_store:
+                # any asymmetric key associated with a cert
+                sop.priv_key = self.asym_key_store[sop.priv_key_id]
+            else:
+                LOGGER.error(f'No private key with KID {sop.priv_key_id}')
+                return
 
         addl_protected_map = {}
         addl_unprotected_map = {}
         aad_scope = {0: 1, -1: 1}  # primary and target metadata
-
-        # arbitrary ordering
-        target_block_nums = sorted([
-            blk.block_num
-            for blk in ctr.bundle.blocks
-            if blk.type_code in self._config.confidentiality_for_blocks
-        ])
-        if not target_block_nums:
-            LOGGER.warning('No target blocks have matching type')
-            return
-
-        if self.priv_key_id in self.sym_key_store:
-            priv_key = self.sym_key_store[self.priv_key_id]
-        else:
-            raise RuntimeError(f'No private key with KID {self.priv_key_id}')
 
         # A little switcharoo to avoid cached overload_fields on `data`
         bcb = CanonicalBlock(
@@ -895,7 +898,7 @@ class CoseContext(AbstractContext):
             block_flags=CanonicalBlock.Flag.REPLICATE_IN_FRAGMENT,
         )
         bcb_data = BlockConfidentialityBlock(
-            targets=target_block_nums,
+            targets=[sop.tgt_blk_num for sop in secops],
             context_id=BPSEC_COSE_CONTEXT_ID,
             context_flags=(
                 AbstractSecurityBlock.Flag.PARAMETERS_PRESENT
@@ -926,31 +929,32 @@ class CoseContext(AbstractContext):
 
         # Message for each target with one result per op/target
         target_result = []
-        for tgt_blk_num in bcb_data.getfieldval('targets'):
-            tgt_blk = ctr.block_num(tgt_blk_num)
+        for sop in secops:
+            tgt_blk = ctr.block_num(sop.tgt_blk_num)
             tgt_blk.ensure_block_type_specific_data()
             target_plaintext = tgt_blk.getfieldval('btsd')
 
             secop.tgt_blk = tgt_blk
             ext_aad_enc = secop.get_external_aad()
             LOGGER.debug('Integrity protecting target %d AAD %s payload %s',
-                         tgt_blk_num, encode_diagnostic(ext_aad_enc),
+                         sop.tgt_blk_num, encode_diagnostic(ext_aad_enc),
                          encode_diagnostic(target_plaintext))
 
-            if isinstance(priv_key, SymmetricKey):
-                if keyops.EncryptOp in priv_key.key_ops:
+            if isinstance(sop.priv_key, SymmetricKey):
+                if keyops.EncryptOp in sop.priv_key.key_ops:
                     # direct key
                     msg_obj = Enc0Message(
                         phdr={
-                            headers.Algorithm: priv_key.alg,
+                            headers.Algorithm: sop.priv_key.alg,
                         },
                         uhdr={
-                            headers.KID: priv_key.kid,
+                            headers.KID: sop.priv_key.kid,
+                            headers.IV: sop.content_iv.pop(0),
                         },
                         payload=target_plaintext,
                         # Non-encoded parameters
                         external_aad=ext_aad_enc,
-                        key=priv_key
+                        key=sop.priv_key
                     )
                     msg_enc = msg_obj.encode(
                         tag=False
@@ -960,25 +964,25 @@ class CoseContext(AbstractContext):
                     tgt_blk.setfieldval('btsd', msg_dec[2])
                     msg_dec[2] = None
 
-                elif keyops.WrapOp in priv_key.key_ops:
+                elif keyops.WrapOp in sop.priv_key.key_ops:
                     recip = KeyWrap(
                         phdr=dict(),
                         uhdr={
-                            headers.Algorithm: priv_key.alg,
-                            headers.KID: priv_key.kid,
+                            headers.Algorithm: sop.priv_key.alg,
+                            headers.KID: sop.priv_key.kid,
                         },
                         # Non-encoded parameters
-                        key=priv_key
+                        key=sop.priv_key
                     )
-                    if self._config.prefer_content_key:
-                        recip.payload = self._config.prefer_content_key.pop(0)
+                    if sop.content_key:
+                        recip.payload = sop.content_key
 
                     msg_obj = EncMessage(
                         phdr={
-                            headers.Algorithm: self._config.prefer_content_alg,
+                            headers.Algorithm: sop.content_alg,
                         },
                         uhdr={
-                            headers.IV: self._config.prefer_content_iv.pop(0),
+                            headers.IV: sop.content_iv.pop(0),
                         },
                         payload=target_plaintext,
                         recipients=[recip],
@@ -995,15 +999,15 @@ class CoseContext(AbstractContext):
                     msg_dec[2] = None
 
                 else:
-                    raise ValueError(f'Cannot MAC with key having {priv_key.key_ops}')
+                    raise ValueError(f'Cannot MAC with key having {sop.priv_key.key_ops}')
 
             else:
                 phdr = {
-                    headers.Algorithm: priv_key.alg,
+                    headers.Algorithm: sop.priv_key.alg,
                 }
                 uhdr = dict()
 
-                if keyops.SignOp in priv_key.key_ops:
+                if keyops.SignOp in sop.priv_key.key_ops:
                     # Direct signing
                     msg_obj = Sign1Message(
                         phdr=phdr,
@@ -1011,9 +1015,9 @@ class CoseContext(AbstractContext):
                         payload=target_plaintext,
                         # Non-encoded parameters
                         external_aad=ext_aad_enc,
-                        key=priv_key
+                        key=sop.priv_key
                     )
-                    LOGGER.debug('Signing with COSE key %s', repr(priv_key))
+                    LOGGER.debug('Signing with COSE key %s', repr(sop.priv_key))
                     msg_enc = msg_obj.encode(
                         tag=False
                     )
@@ -1022,7 +1026,7 @@ class CoseContext(AbstractContext):
                     msg_dec[2] = None
 
                 else:
-                    raise ValueError(f'Cannot sign with key having {priv_key.key_ops}')
+                    raise ValueError(f'Cannot sign with key having {sop.priv_key.key_ops}')
 
             msg_enc = cbor2.dumps(msg_dec)
             LOGGER.debug('Sending COSE message %s', encode_diagnostic(msg_dec))

@@ -275,11 +275,10 @@ class TestBpsecCose(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_source_bib_symmetric_kek(self):
-        key_mac = self._load_sym_key('key-ExampleA.1.cbor')
-        key_wrap = self._load_sym_key('key-ExampleA.5.cbor')
-        # target payload and bundle-age types
         self._ctx._config.node_id = 'ipn:1.0'
 
+        key_mac = self._load_sym_key('key-ExampleA.1.cbor')
+        key_wrap = self._load_sym_key('key-ExampleA.5.cbor')
         # Indirect MAC with key wrap
         self._ctx.sec_assoc.append(SecAssociation(
             src_pat=re.compile('.*'),
@@ -416,21 +415,40 @@ class TestBpsecCose(unittest.TestCase):
         self.assertEqual(StatusReport.ReasonCode.FAILED_SEC, result)
 
     def test_source_bcb_symmetric_kek(self):
-        cosekey = self._load_sym_key('key-ExampleA.5.cbor')
-        # MAC with this key
-        self._ctx.priv_key_id = cosekey.kid
-        # target payload and bundle-age types
         self._ctx._config.node_id = 'ipn:1.0'
-        self._ctx._config.confidentiality_for_blocks = {1, 7}
-        self._ctx._config.prefer_content_alg = algorithms.A256GCM
-        self._ctx._config.prefer_content_key = [
-            bytes.fromhex('13bf9cead057c0aca2c9e52471ca4b19ddfaf4c0784e3f3e8e3999dbae4ce45c'),
-            bytes.fromhex('13bf9cead057c0aca2c9e52471ca4b19ddfaf4c0784e3f3e8e3999dbae4ce45c'),
-        ]
-        self._ctx._config.prefer_content_iv = [
-            b'Twelve121212',
-            b'Twelve121213',
-        ]
+
+        key_enc = self._load_sym_key('key-ExampleA.4.cbor')
+        key_wrap = self._load_sym_key('key-ExampleA.5.cbor')
+        # Indirect encrypt with key wrap
+        self._ctx.sec_assoc.append(SecAssociation(
+            src_pat=re.compile('.*'),
+            dst_pat=re.compile('.*'),
+            tgt_blk_types=[1],
+            templates=[
+                SecOperation(
+                    sec_type='bcb',
+                    role='source',
+                    priv_key_id=key_wrap.kid,
+                    content_alg=algorithms.A256GCM,
+                    content_key=bytes.fromhex('13bf9cead057c0aca2c9e52471ca4b19ddfaf4c0784e3f3e8e3999dbae4ce45c'),
+                    content_iv=[b'Twelve121212'],
+                )
+            ],
+        ))
+        # Direct encrypt
+        self._ctx.sec_assoc.append(SecAssociation(
+            src_pat=re.compile('.*'),
+            dst_pat=re.compile('.*'),
+            tgt_blk_types=[7],
+            templates=[
+                SecOperation(
+                    sec_type='bcb',
+                    role='source',
+                    priv_key_id=key_enc.kid,
+                    content_iv=[b'Twelve121213'],
+                )
+            ],
+        ))
 
         with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality-base.cbor'), 'rb') as infile:
             ctr = BundleContainer(bundle=Bundle(infile.read()))
@@ -461,6 +479,7 @@ class TestBpsecCose(unittest.TestCase):
             self.assertEqual(infile.read().hex(), bytes(ctr.bundle).hex())
 
     def test_verify_bcb_symmetric_kek_valid(self):
+        self._load_sym_key('key-ExampleA.4.cbor')
         self._load_sym_key('key-ExampleA.5.cbor')
         self._ctx._config.accept_after_verify = True
 
