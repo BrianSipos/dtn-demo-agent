@@ -2,7 +2,8 @@
 '''
 from abc import ABC, abstractmethod
 import cbor2
-from dataclasses import dataclass
+import copy
+from dataclasses import dataclass, field
 import datetime
 import enum
 import logging
@@ -92,6 +93,37 @@ class AbstractContext(ABC):
         raise NotImplementedError()
 
 
+SecurityOperationType = Literal['bib', 'bcb']
+
+
+@dataclass
+class SecOperation:
+    ''' Options for an individual security operation to process.
+    '''
+    sec_type: SecurityOperationType
+    ''' Type of operation to apply '''
+    role: Literal['source', 'verifier', 'acceptor']
+    ''' Role for the operation '''
+
+    tgt_blk_num: Optional[int] = None
+    ''' The existing target block number.
+    When used as a template, this is None.
+    '''
+
+    priv_key_id: Optional[bytes] = None
+    ''' When role is source: the KID to use for this operation '''
+    content_alg: Optional[algorithms.CoseAlgorithm] = None
+    ''' Authorized layer 0 algorithm to source or validate '''
+    content_key: Optional[bytes] = None
+    ''' Content IV for encryption, left as None to use random or when not encrypting '''
+    content_iv: Optional[bytes] = None
+
+    priv_key: Optional[CoseKey] = None
+    ''' Derived reference to a key '''
+    x5chain: Optional[List[bytes]] = None
+    ''' Derived DER certificate chain '''
+
+
 @dataclass
 class SecAssociation:
     ''' A single security association with endpoint pattern matching and
@@ -101,23 +133,42 @@ class SecAssociation:
     src_pat: re.Pattern
     dst_pat: re.Pattern
 
-    secop: Literal['bib', 'bcb']
-    ''' Type of operation to apply '''
-    target_types: List[int]
+    tgt_blk_types: List[int]
     ''' Naive list of block types to target '''
-    role: Literal['source', 'verifier', 'acceptor']
-    ''' Role for the operation '''
 
-    sym_key: Optional[SymmetricKey]
-    ''' Key to use for the operation '''
+    templates: List[SecOperation] = field(default_factory=list)
+    ''' Template security operation to expand based on :py:attr:`target_types` '''
 
-    def is_match(self, ctr: BundleContainer) -> bool:
+    def is_match(self, ctr: BundleContainer, sec_type: SecurityOperationType) -> List[SecOperation]:
         ''' Check for a match on a bundle '''
         src_match = self.src_pat.fullmatch(ctr.bundle.primary.source)
         dst_match = self.dst_pat.fullmatch(ctr.bundle.primary.destination)
         LOGGER.debug('SA match on src %s %s dst %s %s', ctr.bundle.primary.source,
                      src_match, ctr.bundle.primary.destination, dst_match)
-        return src_match is not None and dst_match is not None
+        if src_match is None or dst_match is None:
+            return []
+
+        target_block_nums = sorted([
+            blk.block_num
+            for blk in ctr.bundle.blocks
+            if blk.type_code in self.tgt_blk_types
+        ])
+        if not target_block_nums:
+            LOGGER.warning('No target blocks have matching type %s', self.tgt_blk_types)
+            return []
+
+        result = []
+        for sop in self.templates:
+            if sop.sec_type != sec_type:
+                continue
+
+            # clone SecOp for each valid target
+            for blk_num in target_block_nums:
+                sop = copy.copy(sop)
+                sop.tgt_blk_num = blk_num
+                result.append(sop)
+
+        return result
 
 
 class CertificateStore:
@@ -204,7 +255,7 @@ class CoseSecOpCtx:
     ''' Target block for specific operations, which can be modified '''
 
     def check_secblk(self) -> bool:
-        ''' Initial consistency check of :py:ivar:`sec_blk`
+        ''' Initial consistency check of :py:attr:`sec_blk`
         '''
         type_ids = [param.type_code for param in self.sec_blk.payload.parameters]
         if len(set(type_ids)) != len(type_ids):
@@ -220,7 +271,7 @@ class CoseSecOpCtx:
         return True
 
     def extract_secblk(self) -> None:
-        ''' Extract derived fields from :py:ivar:`sec_blk`
+        ''' Extract derived fields from :py:attr:`sec_blk`
         '''
 
         # Encoded security source EID
@@ -295,7 +346,7 @@ class CoseSecOpCtx:
     def decode_msg(self, result: TypeValuePair) -> CoseMessage:
         ''' Decode a COSE message froma  result value and condition it
         for this context.
-        This relies on :py:ivar:`tgt_blk` and other optional fields to be set.
+        This relies on :py:attr:`tgt_blk` and other optional fields to be set.
         '''
         msg_cls: CoseMessage = CoseMessage._COSE_MSG_ID[result.type_code]
 
@@ -324,12 +375,12 @@ class CoseContext(AbstractContext):
         self._config: Optional[Config] = None
         self._ca_certs = []
         self._cert_chain = []
-        # Index into either asym_key_store or sym_key_store
-        self.priv_key_id: Optional[bytes] = None
 
         self.asym_key_store: Dict[bytes, CoseKey] = dict()
         self.sym_key_store: Dict[bytes, SymmetricKey] = dict()
         self.cert_store = CertificateStore()
+
+        # security associations for policy
         self.sec_assoc: List[SecAssociation] = list()
 
     def load_config(self, config: Config):
@@ -358,7 +409,9 @@ class CoseContext(AbstractContext):
             cose_key.kid = b'PEM'
             cose_key.key_ops = [keyops.SignOp]
             self.asym_key_store[cose_key.kid] = cose_key
-            self.priv_key_id = cose_key.kid
+
+            # FIXME add sec association
+            # self.priv_key_id = cose_key.kid
 
     @staticmethod
     def extract_cose_key(keyobj):
@@ -398,7 +451,7 @@ class CoseContext(AbstractContext):
                 convert('qinv', 'iqmp')
 
             cose_key = RSAKey(**kwargs)
-            cose_key.alg = algorithms.Ps256
+            cose_key.alg = algorithms.Ps512
 
         elif isinstance(keyobj, (ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey)):
             CURVE_CLS_MAP = {
@@ -491,35 +544,33 @@ class CoseContext(AbstractContext):
         return validate
 
     def apply_bib(self, ctr: BundleContainer) -> None:
-        if not self.priv_key_id:
-            LOGGER.warning('No private key ID')
+        secops = [assoc.is_match(ctr, 'bib') for assoc in self.sec_assoc]
+        secops: List[SecOperation] = [item for sublist in secops for item in sublist]
+        if not secops:
+            LOGGER.warning('No BIB operations')
             return
 
         addl_protected_map = {}
         addl_unprotected_map = {}
         aad_scope = {0: 1, -1: 1}  # primary and target metadata
 
-        # arbitrary ordering
-        target_block_nums = sorted([
-            blk.block_num
-            for blk in ctr.bundle.blocks
-            if blk.type_code in self._config.integrity_for_blocks
-        ])
-        if not target_block_nums:
-            LOGGER.warning('No target blocks have matching type')
-            return
-
-        if self.priv_key_id in self.sym_key_store:
-            priv_key = self.sym_key_store[self.priv_key_id]
-            x5chain = None
-        elif self.priv_key_id in self.asym_key_store:
-            # any asymmetric key associated with a cert
-            priv_key = self.asym_key_store[self.priv_key_id]
-            x5chain = []
-            for cert in self._cert_chain:
-                x5chain.append(encode_der_cert(cert))
-        else:
-            raise RuntimeError(f'No private key with KID {self.priv_key_id}')
+        # Pre-populate derived attributes of all operations
+        common_x5chain = None
+        for sop in secops:
+            if sop.priv_key_id in self.sym_key_store:
+                sop.priv_key = self.sym_key_store[sop.priv_key_id]
+                sop.x5chain = None
+            elif sop.priv_key_id in self.asym_key_store:
+                # any asymmetric key associated with a cert
+                sop.priv_key = self.asym_key_store[sop.priv_key_id]
+                sop.x5chain = []
+                for cert in self._cert_chain:
+                    sop.x5chain.append(encode_der_cert(cert))
+                # FIXME: make this logic correct for multiple SOPs
+                common_x5chain = sop.x5chain
+            else:
+                LOGGER.error(f'No private key with KID {sop.priv_key_id}')
+                return
 
         # A little switcharoo to avoid cached overload_fields on `data`
         bib = CanonicalBlock(
@@ -527,7 +578,7 @@ class CoseContext(AbstractContext):
             block_num=ctr.get_block_num(),
         )
         bib_data = BlockIntegrityBlock(
-            targets=target_block_nums,
+            targets=[sop.tgt_blk_num for sop in secops],
             context_id=BPSEC_COSE_CONTEXT_ID,
             context_flags=(
                 AbstractSecurityBlock.Flag.PARAMETERS_PRESENT
@@ -542,11 +593,11 @@ class CoseContext(AbstractContext):
         ssrc_enc = cbor2.dumps(ssrc_fld.i2m(bib_data, ssrc_val))
 
         # identity de-duplicated in additional headers
-        if x5chain:
+        if common_x5chain:
             if self._config.integrity_include_chain:
-                addl_unprotected_map[headers.X5chain.identifier] = X5Chain(x5chain).encode()
+                addl_unprotected_map[headers.X5chain.identifier] = X5Chain(common_x5chain).encode()
             else:
-                addl_unprotected_map[headers.X5t.identifier] = X5T.from_certificate(algorithms.Sha256, x5chain[0]).encode()
+                addl_unprotected_map[headers.X5t.identifier] = X5T.from_certificate(algorithms.Sha256, common_x5chain[0]).encode()
 
         # Inject optional additional headers
         addl_protected = cbor2.dumps(addl_protected_map) if addl_protected_map else b''
@@ -560,38 +611,38 @@ class CoseContext(AbstractContext):
                 TypeValuePair(type_code=4, value=addl_unprotected)
             )
 
-        secop = CoseSecOpCtx(ctr=ctr, sec_blk=bib, ssrc_enc=ssrc_enc,
-                             aad_scope=aad_scope, addl_protected=addl_protected)
+        secopctx = CoseSecOpCtx(ctr=ctr, sec_blk=bib, ssrc_enc=ssrc_enc,
+                                aad_scope=aad_scope, addl_protected=addl_protected)
 
         # Message for each target with one result per op/target
         target_result = []
-        for tgt_blk_num in bib_data.getfieldval('targets'):
-            tgt_blk = ctr.block_num(tgt_blk_num)
+        for sop in secops:
+            tgt_blk = ctr.block_num(sop.tgt_blk_num)
             tgt_blk.ensure_block_type_specific_data()
             target_plaintext = tgt_blk.getfieldval('btsd')
 
-            secop.tgt_blk = tgt_blk
-            ext_aad_enc = secop.get_external_aad()
+            secopctx.tgt_blk = tgt_blk
+            ext_aad_enc = secopctx.get_external_aad()
             LOGGER.debug('Integrity protecting target %d AAD %s payload %s',
-                         tgt_blk_num, encode_diagnostic(ext_aad_enc),
+                         sop.tgt_blk_num, encode_diagnostic(ext_aad_enc),
                          encode_diagnostic(target_plaintext))
 
-            if isinstance(priv_key, SymmetricKey):
-                if keyops.MacCreateOp in priv_key.key_ops:
+            if isinstance(sop.priv_key, SymmetricKey):
+                if keyops.MacCreateOp in sop.priv_key.key_ops:
                     # direct MAC
                     msg_obj = Mac0Message(
                         phdr={
-                            headers.Algorithm: priv_key.alg,
+                            headers.Algorithm: sop.priv_key.alg,
                         },
                         uhdr={
-                            headers.KID: priv_key.kid,
+                            headers.KID: sop.priv_key.kid,
                         },
                         payload=target_plaintext,
                         # Non-encoded parameters
                         external_aad=ext_aad_enc,
-                        key=priv_key
+                        key=sop.priv_key
                     )
-                    LOGGER.debug('MAC with COSE key %s', repr(priv_key))
+                    LOGGER.debug('MAC with COSE key %s', repr(sop.priv_key))
                     msg_enc = msg_obj.encode(
                         tag=False
                     )
@@ -599,22 +650,22 @@ class CoseContext(AbstractContext):
                     msg_dec = cbor2.loads(msg_enc)
                     msg_dec[2] = None
 
-                elif keyops.WrapOp in priv_key.key_ops:
+                elif keyops.WrapOp in sop.priv_key.key_ops:
                     recip = KeyWrap(
                         phdr=dict(),
                         uhdr={
-                            headers.Algorithm: priv_key.alg,
-                            headers.KID: priv_key.kid,
+                            headers.Algorithm: sop.priv_key.alg,
+                            headers.KID: sop.priv_key.kid,
                         },
                         # Non-encoded parameters
-                        key=priv_key
+                        key=sop.priv_key
                     )
-                    if self._config.prefer_content_key:
-                        recip.payload = self._config.prefer_content_key.pop(0)
+                    if sop.content_key:
+                        recip.payload = sop.content_key
 
                     msg_obj = MacMessage(
                         phdr={
-                            headers.Algorithm: self._config.prefer_content_alg,
+                            headers.Algorithm: sop.content_alg,
                         },
                         uhdr=dict(),
                         payload=target_plaintext,
@@ -631,15 +682,15 @@ class CoseContext(AbstractContext):
                     msg_dec[2] = None
 
                 else:
-                    raise ValueError(f'Cannot MAC with key having {priv_key.key_ops}')
+                    raise ValueError(f'Cannot MAC with key having {sop.priv_key.key_ops}')
 
             else:
                 phdr = {
-                    headers.Algorithm: priv_key.alg,
+                    headers.Algorithm: sop.priv_key.alg,
                 }
                 uhdr = dict()
 
-                if keyops.SignOp in priv_key.key_ops:
+                if keyops.SignOp in sop.priv_key.key_ops:
                     # Direct signing
                     msg_obj = Sign1Message(
                         phdr=phdr,
@@ -647,9 +698,9 @@ class CoseContext(AbstractContext):
                         payload=target_plaintext,
                         # Non-encoded parameters
                         external_aad=ext_aad_enc,
-                        key=priv_key
+                        key=sop.priv_key
                     )
-                    LOGGER.debug('Signing with COSE key %s', repr(priv_key))
+                    LOGGER.debug('Signing with COSE key %s', repr(sop.priv_key))
                     msg_enc = msg_obj.encode(
                         tag=False
                     )
@@ -658,7 +709,7 @@ class CoseContext(AbstractContext):
                     msg_dec[2] = None
 
                 else:
-                    raise ValueError(f'Cannot sign with key having {priv_key.key_ops}')
+                    raise ValueError(f'Cannot sign with key having {sop.priv_key.key_ops}')
 
             msg_enc = cbor2.dumps(msg_dec)
             LOGGER.debug('Sending COSE message %s', encode_diagnostic(msg_dec))

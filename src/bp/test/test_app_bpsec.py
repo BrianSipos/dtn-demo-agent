@@ -3,6 +3,7 @@
 import datetime
 import logging
 import os
+import re
 import unittest
 import asn1
 from cryptography import x509
@@ -15,11 +16,15 @@ from bp.encoding.admin import StatusReport
 from bp.encoding.blocks import PrimaryBlock, CanonicalBlock
 from bp.encoding.bundle import Bundle
 from bp.util import BundleContainer
-from bp.encoding.bpsec import (TargetResultList,
-                               BlockIntegrityBlock, BlockConfidentialityBlock)
+from bp.encoding.bpsec import (
+    BlockIntegrityBlock, BlockConfidentialityBlock
+)
 from bp.config import Config
 from bp.agent import Agent
-from bp.app.bpsec import CoseContext, BPSEC_COSE_CONTEXT_ID
+from bp.app.bpsec import (
+    CoseContext, BPSEC_COSE_CONTEXT_ID,
+    SecAssociation, SecOperation
+)
 
 LOGGER = logging.getLogger()
 SELFDIR = os.path.dirname(os.path.abspath(__file__))
@@ -170,10 +175,21 @@ class TestBpsecCose(unittest.TestCase):
         self._bp._apply_primary(ctr)
         return ctr
 
+    def _load_sym_key(self, name: str) -> SymmetricKey:
+        ''' Load a symmetric key from a file containing encoded COSE_Key.
+
+        :param name: The data file name to load.
+        :return: The loaded key itself.
+        '''
+        with open(os.path.join(SELFDIR, 'data', name), 'rb') as infile:
+            cosekey = SymmetricKey.decode(infile.read())
+        self._ctx.sym_key_store[cosekey.kid] = cosekey
+        return cosekey
+
     def test_source_bib_ec2(self):
-        ca_key = ec.generate_private_key(ec.SECP256R1(), backend=default_backend())
+        ca_key = ec.generate_private_key(ec.SECP384R1(), backend=default_backend())
         ca_cert = self._dummy_ca_cert(ca_key)
-        end_key = ec.generate_private_key(ec.SECP256R1(), backend=default_backend())  # Curve for COSE ES256
+        end_key = ec.generate_private_key(ec.SECP384R1(), backend=default_backend())  # Curve for COSE ES384
         end_cert = self._dummy_end_cert(ca_key, ca_cert, end_key)
 
         self._ctx._ca_certs = [ca_cert]
@@ -183,7 +199,19 @@ class TestBpsecCose(unittest.TestCase):
         priv_key.kid = b'test'
         priv_key.key_ops = [keyops.SignOp]
         self._ctx.asym_key_store[priv_key.kid] = priv_key
-        self._ctx.priv_key_id = priv_key.kid
+        # Sign payload only
+        self._ctx.sec_assoc.append(SecAssociation(
+            src_pat=re.compile('.*'),
+            dst_pat=re.compile('.*'),
+            tgt_blk_types=[1],
+            templates=[
+                SecOperation(
+                    sec_type='bib',
+                    role='source',
+                    priv_key_id=priv_key.kid,
+                )
+            ],
+        ))
 
         ctr = self._dummy_ctr()
         bib_set = ctr.block_type(BlockIntegrityBlock)
@@ -203,9 +231,9 @@ class TestBpsecCose(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_source_bib_rsa(self):
-        ca_key = rsa.generate_private_key(0x10001, 1024, backend=default_backend())
+        ca_key = rsa.generate_private_key(0x10001, 3072, backend=default_backend())
         ca_cert = self._dummy_ca_cert(ca_key)
-        end_key = rsa.generate_private_key(0x10001, 1024, backend=default_backend())
+        end_key = rsa.generate_private_key(0x10001, 3072, backend=default_backend())
         end_cert = self._dummy_end_cert(ca_key, ca_cert, end_key)
 
         self._ctx._ca_certs = [ca_cert]
@@ -215,7 +243,19 @@ class TestBpsecCose(unittest.TestCase):
         priv_key.kid = b'test'
         priv_key.key_ops = [keyops.SignOp]
         self._ctx.asym_key_store[priv_key.kid] = priv_key
-        self._ctx.priv_key_id = priv_key.kid
+        # Sign payload only
+        self._ctx.sec_assoc.append(SecAssociation(
+            src_pat=re.compile('.*'),
+            dst_pat=re.compile('.*'),
+            tgt_blk_types=[1],
+            templates=[
+                SecOperation(
+                    sec_type='bib',
+                    role='source',
+                    priv_key_id=priv_key.kid,
+                )
+            ],
+        ))
 
         ctr = self._dummy_ctr()
         bib_set = ctr.block_type(BlockIntegrityBlock)
@@ -235,20 +275,39 @@ class TestBpsecCose(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_source_bib_symmetric_kek(self):
-        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
-            cosekey = SymmetricKey.decode(infile.read())
-        self._ctx.sym_key_store.clear()
-        self._ctx.sym_key_store[cosekey.kid] = cosekey
-        # MAC with this key
-        self._ctx.priv_key_id = cosekey.kid
+        key_mac = self._load_sym_key('key-ExampleA.1.cbor')
+        key_wrap = self._load_sym_key('key-ExampleA.5.cbor')
         # target payload and bundle-age types
         self._ctx._config.node_id = 'ipn:1.0'
-        self._ctx._config.integrity_for_blocks = {1, 7}
-        self._ctx._config.prefer_content_alg = algorithms.HMAC384
-        self._ctx._config.prefer_content_key = [
-            bytes.fromhex('71776572747975696f7061736466676871776572747975696f7061736466676864456712646567f4646a3368106667bb'),
-            bytes.fromhex('71776572747975696f7061736466676871776572747975696f7061736466676864456712646567f4646a3368106667bb'),
-        ]
+
+        # Indirect MAC with key wrap
+        self._ctx.sec_assoc.append(SecAssociation(
+            src_pat=re.compile('.*'),
+            dst_pat=re.compile('.*'),
+            tgt_blk_types=[1],
+            templates=[
+                SecOperation(
+                    sec_type='bib',
+                    role='source',
+                    priv_key_id=key_wrap.kid,
+                    content_alg=algorithms.HMAC384,
+                    content_key=bytes.fromhex('71776572747975696f7061736466676871776572747975696f7061736466676864456712646567f4646a3368106667bb'),
+                )
+            ],
+        ))
+        # Direct MAC
+        self._ctx.sec_assoc.append(SecAssociation(
+            src_pat=re.compile('.*'),
+            dst_pat=re.compile('.*'),
+            tgt_blk_types=[7],
+            templates=[
+                SecOperation(
+                    sec_type='bib',
+                    role='source',
+                    priv_key_id=key_mac.kid,
+                )
+            ],
+        ))
 
         with open(os.path.join(SELFDIR, 'data', 'interop-integrity-base.cbor'), 'rb') as infile:
             ctr = BundleContainer(bundle=Bundle(infile.read()))
@@ -279,10 +338,8 @@ class TestBpsecCose(unittest.TestCase):
             self.assertEqual(infile.read().hex(), bytes(ctr.bundle).hex())
 
     def test_verify_bib_symmetric_kek_valid(self):
-        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
-            cosekey = SymmetricKey.decode(infile.read())
-        self._ctx.sym_key_store.clear()
-        self._ctx.sym_key_store[cosekey.kid] = cosekey
+        self._load_sym_key('key-ExampleA.1.cbor')
+        self._load_sym_key('key-ExampleA.5.cbor')
         self._ctx._config.accept_after_verify = True
 
         with open(os.path.join(SELFDIR, 'data', 'interop-integrity-full.cbor'), 'rb') as infile:
@@ -303,10 +360,7 @@ class TestBpsecCose(unittest.TestCase):
             self.assertEqual(infile.read().hex(), bytes(ctr.bundle).hex())
 
     def test_verify_bib_symmetric_direct_valid(self):
-        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.1.cbor'), 'rb') as infile:
-            cosekey = SymmetricKey.decode(infile.read())
-        self._ctx.sym_key_store.clear()
-        self._ctx.sym_key_store[cosekey.kid] = cosekey
+        self._load_sym_key('key-ExampleA.1.cbor')
 
         with open(os.path.join(SELFDIR, 'data', 'exampleA.1.cbor'), 'rb') as infile:
             ctr = BundleContainer(bundle=Bundle(infile.read()))
@@ -326,10 +380,7 @@ class TestBpsecCose(unittest.TestCase):
         self.assertSetEqual({3}, set(bib.block_num for bib in bib_set))
 
     def test_verify_bib_symmetric_direct_invalid_mod_scope(self):
-        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.1.cbor'), 'rb') as infile:
-            cosekey = SymmetricKey.decode(infile.read())
-        self._ctx.sym_key_store.clear()
-        self._ctx.sym_key_store[cosekey.kid] = cosekey
+        self._load_sym_key('key-ExampleA.1.cbor')
 
         with open(os.path.join(SELFDIR, 'data', 'interop-altered-aad.cbor'), 'rb') as infile:
             ctr = BundleContainer(bundle=Bundle(infile.read()))
@@ -347,10 +398,7 @@ class TestBpsecCose(unittest.TestCase):
         self.assertEqual(StatusReport.ReasonCode.FAILED_SEC, result)
 
     def test_verify_bib_symmetric_direct_unknown_critical_header(self):
-        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.1.cbor'), 'rb') as infile:
-            cosekey = SymmetricKey.decode(infile.read())
-        self._ctx.sym_key_store.clear()
-        self._ctx.sym_key_store[cosekey.kid] = cosekey
+        self._load_sym_key('key-ExampleA.1.cbor')
 
         with open(os.path.join(SELFDIR, 'data', 'interop-critical-header.cbor'), 'rb') as infile:
             ctr = BundleContainer(bundle=Bundle(infile.read()))
@@ -368,10 +416,7 @@ class TestBpsecCose(unittest.TestCase):
         self.assertEqual(StatusReport.ReasonCode.FAILED_SEC, result)
 
     def test_source_bcb_symmetric_kek(self):
-        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
-            cosekey = SymmetricKey.decode(infile.read())
-        self._ctx.sym_key_store.clear()
-        self._ctx.sym_key_store[cosekey.kid] = cosekey
+        cosekey = self._load_sym_key('key-ExampleA.5.cbor')
         # MAC with this key
         self._ctx.priv_key_id = cosekey.kid
         # target payload and bundle-age types
@@ -416,10 +461,7 @@ class TestBpsecCose(unittest.TestCase):
             self.assertEqual(infile.read().hex(), bytes(ctr.bundle).hex())
 
     def test_verify_bcb_symmetric_kek_valid(self):
-        with open(os.path.join(SELFDIR, 'data', 'key-ExampleA.5.cbor'), 'rb') as infile:
-            cosekey = SymmetricKey.decode(infile.read())
-        self._ctx.sym_key_store.clear()
-        self._ctx.sym_key_store[cosekey.kid] = cosekey
+        self._load_sym_key('key-ExampleA.5.cbor')
         self._ctx._config.accept_after_verify = True
 
         with open(os.path.join(SELFDIR, 'data', 'interop-confidentiality-full.cbor'), 'rb') as infile:
