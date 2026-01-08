@@ -55,7 +55,7 @@ class Config(object):
     bus_service: Optional[str] = None
 
     # The Node ID of this agent, which is a URI.
-    node_id: str = u''
+    node_id: str = ''
     # Receive routing
     rx_route_table: List[RxRouteItem] = field(default_factory=list)
     # Transmit routing

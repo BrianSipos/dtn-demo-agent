@@ -415,8 +415,24 @@ class CoseContext(AbstractContext):
             cose_key.key_ops = [keyops.SignOp]
             self.asym_key_store[cose_key.kid] = cose_key
 
-            # FIXME add sec association
-            # self.priv_key_id = cose_key.kid
+            # Sign self-sourced payload only
+            if self._config.node_id.startswith('ipn:'):
+                own_pat = re.escape(self._config.node_id.removesuffix('.0')) + '\..*'
+            elif self._config.node_id.startswith('dtn:'):
+                own_pat = re.escape(self._config.node_id.removesuffix('/')) + '/.*'
+            LOGGER.debug('Signing from source pattern %s', own_pat)
+            self.sec_assoc.append(SecAssociation(
+                src_pat=re.compile(own_pat),
+                dst_pat=re.compile('.*'),
+                tgt_blk_types=[1],
+                templates=[
+                    SecOperation(
+                        sec_type='bib',
+                        role='source',
+                        priv_key_id=cose_key.kid,
+                    )
+                ],
+            ))
 
     @staticmethod
     def extract_cose_key(keyobj):
