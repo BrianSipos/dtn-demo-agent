@@ -3,13 +3,30 @@
 from abc import abstractmethod, ABCMeta
 import copy
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, List, Literal, Optional, Tuple, Type, Union
+from typing import (
+    Any, ClassVar, Dict, List, Literal, Optional, Set, Type, Union,
+    cast
+)
 import cbor2
 import portion
 
 
 Scheme = Union[str, int]
 ''' Possible values for the scheme part of a pattern item '''
+
+
+def norm_scheme(val: Scheme) -> Scheme:
+    ''' Normalize an input scheme '''
+    try:
+        # prefer integer form
+        scheme = int(val)
+    except ValueError:
+        if isinstance(val, str):
+            # leave as text
+            scheme = val.casefold()
+        else:
+            raise TypeError
+    return scheme
 
 
 @dataclass
@@ -23,36 +40,8 @@ class EidRepr:
 class PatternItem(metaclass=ABCMeta):
     ''' Each item of a pattern '''
 
-    INDEX: ClassVar[int] = None
-    ''' Registered encoded value '''
-    NAME: ClassVar[str] = None
-    ''' Registered URI scheme name '''
-
-    scheme: Scheme
-    ''' Scheme for this pattern item. '''
-    altscheme: Optional[Scheme]
-    ''' If known, the alternate form from :ivar:`scheme` for this item. '''
-
     def __repr__(self) -> str:
-        return 'Item(' + str(self.scheme) + ':' + self.to_ssp_text() + ')'
-
-    def scheme_match(self, val: Scheme) -> bool:
-        ''' Determine if this item matches at least the scheme of an EID '''
-        return (
-            val == self.scheme
-            or (
-                self.altscheme is not None
-                and val == self.altscheme
-            )
-        )
-
-    def pref_scheme(self, cls) -> Optional[int]:
-        ''' Get preferred scheme type, falling back to the main scheme '''
-        if isinstance(self.scheme, cls):
-            return self.scheme
-        if isinstance(self.altscheme, cls):
-            return self.altscheme
-        return self.scheme
+        return 'Item(' + self.to_text() + ')'
 
     @abstractmethod
     def is_match(self, eid: EidRepr) -> bool:
@@ -60,46 +49,108 @@ class PatternItem(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    def from_ssp_text(self, ssp: str) -> None:
-        ''' Input the SSP from text form '''
+    def from_text(self, scheme: Scheme, ssp: str) -> None:
+        ''' Input the SSP from text form.
+
+        :param scheme: The part before the first colon.
+        :param ssp: The part after the colon.
+        '''
         raise NotImplementedError
 
     @abstractmethod
-    def to_ssp_text(self) -> str:
+    def to_text(self) -> str:
         ''' Output the SSP to text form '''
         raise NotImplementedError
 
     @abstractmethod
-    def from_ssp_cbor(self, ssp: object) -> None:
-        ''' Input the SSP from encoded CBOR form '''
+    def from_dec_cbor(self, item: List[object]) -> None:
+        ''' Input the item from decoded CBOR array form '''
         raise NotImplementedError
 
     @abstractmethod
-    def to_dec_cbor(self) -> object:
-        ''' Output the SSP to encoded CBOR form '''
+    def to_dec_cbor(self) -> List[object]:
+        ''' Output the SSP to decoded CBOR array form '''
         raise NotImplementedError
 
 
+class SchemeSpecificItem(PatternItem):
+    ''' A scheme-specific pattern definition '''
+
+    INDEX: ClassVar[int]
+    ''' Registered encoded value '''
+    NAME: ClassVar[str]
+    ''' Registered URI scheme name '''
+
+
+@dataclass
 class AnySspItem(PatternItem):
     ''' Special case for any-SSP item with no state '''
 
-    TEXT_FORM = '**'
+    TEXT_FORM: ClassVar[str] = '**'
+    ''' The scheme-specific part '''
+
+    ANYSCHEME = '*'
+    ''' The wildcard match-all scheme '''
+
+    schemes: Dict[Scheme, bool] = field(default_factory=list)
+    ''' All schemes that this item applies to.
+    The mapped values are False for unknown schemes and True for known.
+    '''
 
     def is_match(self, eid: EidRepr) -> bool:
-        return self.scheme_match(eid.scheme)
+        if AnySspItem.ANYSCHEME in self.schemes:
+            return True
 
-    def from_ssp_text(self, ssp: str):
+        # Both forms are already normalized
+        return eid.scheme in self.schemes
+
+    def from_text(self, scheme: Scheme, ssp: str):
         if ssp != self.TEXT_FORM:
             raise ValueError
 
-    def to_ssp_text(self) -> str:
-        return self.TEXT_FORM
+        if isinstance(scheme, str) and scheme.startswith('['):
+            if scheme[-1] != ']':
+                raise ValueError(f'Mismatched range bracket in: {scheme}')
+            parts = scheme[1:-1].split(',')
+        else:
+            parts = [scheme]
 
-    def from_ssp_cbor(self, _ssp: object) -> None:
-        return
+        self.schemes = {
+            norm_scheme(part): False for part in parts
+        }
 
-    def to_dec_cbor(self) -> object:
-        return self.pref_scheme(int)
+    def to_text(self) -> str:
+        # prefer text form when known
+        parts = [
+            str(scheme)
+            for scheme, known in self.schemes.items()
+            if isinstance(scheme, str) or not known
+        ]
+
+        if len(parts) != 1:
+            scheme = '[' + ','.join(parts) + ']'
+        else:
+            scheme = parts[0]
+
+        return scheme + ':' + self.TEXT_FORM
+
+    def from_dec_cbor(self, item: List[object]) -> None:
+        if item[0] is not None:
+            raise ValueError
+
+        self.schemes = {
+            norm_scheme(part): False for part in item[1:]
+            if isinstance(part, (int, str))
+        }
+
+    def to_dec_cbor(self) -> List[object]:
+        # prefer int form when known
+        items = [
+            scheme
+            for scheme, known in self.schemes.items()
+            if isinstance(scheme, int) or not known
+        ]
+        return [None] + items
 
 
 class IntInterval(portion.AbstractDiscreteInterval):
@@ -152,7 +203,7 @@ class UnsignedElement:
                     if low > high:
                         low, high = high, low
 
-                    if high < self.domain_max:
+                    if self.domain_max is None or high < self.domain_max:
                         self.val |= apiIntInterval.closed(low, high)
                     else:
                         self.val |= apiIntInterval.closedopen(low, portion.inf)
@@ -179,20 +230,22 @@ class UnsignedElement:
         else:
             return str(self.val)
 
-    def from_ssp_cbor(self, ssp: object) -> None:
-        if isinstance(ssp, list):
-            mut = copy.copy(ssp)
+    def from_dec_cbor(self, enc: object) -> None:
+        if isinstance(enc, list):
+            if not all(isinstance(item, int) for item in enc):
+                raise ValueError('Range is not all integers')
+            mut = copy.copy(enc)
 
             self.val = IntInterval()
-            ref = None
+            ref: Optional[int] = None
             closed = True
             while mut:
-                if self.val.empty:
+                if ref is None:
                     # least value
-                    ref = mut.pop(0)
+                    ref = cast(int, mut.pop(0))
                 else:
                     # excluded width
-                    width = mut.pop(0)
+                    width = cast(int, mut.pop(0))
                     ref += width + 1
 
                 if not mut:
@@ -200,9 +253,9 @@ class UnsignedElement:
                     break
 
                 # included width
-                width = mut.pop(0)
+                width = cast(int, mut.pop(0))
                 high = ref + width
-                if high < self.domain_max:
+                if self.domain_max is None or high < self.domain_max:
                     self.val |= apiIntInterval.closed(ref, high)
                 else:
                     self.val |= apiIntInterval.closedopen(ref, portion.inf)
@@ -210,11 +263,13 @@ class UnsignedElement:
 
             if not closed:
                 # last included width
-                self.val |= apiIntInterval.closedopen(int(ref), portion.inf)
+                self.val |= apiIntInterval.closedopen(ref, portion.inf)
 
-        else:
+        elif isinstance(enc, (int, bool)):
             # either int or True
-            self.val = ssp
+            self.val = enc
+        else:
+            raise ValueError(f'Invalid value {enc}')
 
     def to_dec_cbor(self) -> object:
         if isinstance(self.val, IntInterval):
@@ -250,7 +305,7 @@ UINT64_MAX = int(2**64) - 1
 
 
 @dataclass
-class IpnSchemeItem(PatternItem):
+class IpnSchemeItem(SchemeSpecificItem):
     ''' The IPN scheme with a numeric range for three elements'''
     INDEX: ClassVar[int] = 2
     NAME: ClassVar[str] = 'ipn'
@@ -263,7 +318,7 @@ class IpnSchemeItem(PatternItem):
     ''' The service number pattern '''
 
     def is_match(self, eid: EidRepr) -> bool:
-        if not self.scheme_match(eid.scheme):
+        if eid.scheme not in {self.INDEX, self.NAME}:
             return False
 
         # normalize the EID value
@@ -291,7 +346,7 @@ class IpnSchemeItem(PatternItem):
                 self.serv.is_match(snum),
             ])
 
-    def from_ssp_text(self, ssp: str):
+    def from_text(self, scheme: Scheme, ssp: str):
         parts = ssp.split('.')
         if len(parts) == 2:
             self.alloc = None
@@ -310,7 +365,7 @@ class IpnSchemeItem(PatternItem):
         else:
             raise ValueError('IPN SSP does not have 2 or 3 elements')
 
-    def to_ssp_text(self) -> str:
+    def to_text(self) -> str:
         parts = []
         if self.alloc is not None:
             parts.append(self.alloc.to_text())
@@ -319,37 +374,42 @@ class IpnSchemeItem(PatternItem):
         else:
             parts.append(self.node.to_text())
         parts.append(self.serv.to_text())
-        return '.'.join(parts)
 
-    def from_ssp_cbor(self, ssp: object) -> None:
+        return self.NAME + ':' + '.'.join(parts)
+
+    def from_dec_cbor(self, item: List[object]) -> None:
+        _scheme, ssp = item
+        if not isinstance(ssp, list):
+            raise ValueError('IPN SSP is not an array')
+
         if len(ssp) == 2:
             self.alloc = None
             # split off the FQNN part
             self.node.domain_max = UINT64_MAX
-            self.node.from_ssp_cbor(ssp[0])
+            self.node.from_dec_cbor(ssp[0])
             self.serv.domain_max = UINT64_MAX
-            self.serv.from_ssp_cbor(ssp[1])
+            self.serv.from_dec_cbor(ssp[1])
         elif len(ssp) == 3:
             self.alloc = UnsignedElement(domain_max=UINT32_MAX)
-            self.alloc.from_ssp_cbor(ssp[0])
+            self.alloc.from_dec_cbor(ssp[0])
             self.node.domain_max = UINT32_MAX
-            self.node.from_ssp_cbor(ssp[1])
+            self.node.from_dec_cbor(ssp[1])
             self.serv.domain_max = UINT64_MAX
-            self.serv.from_ssp_cbor(ssp[2])
+            self.serv.from_dec_cbor(ssp[2])
         else:
             raise ValueError('IPN SSP does not have 2 or 3 elements')
 
-    def to_dec_cbor(self) -> object:
+    def to_dec_cbor(self) -> List[object]:
         parts = []
         if self.alloc:
             parts.append(self.alloc.to_dec_cbor())
         parts.append(self.node.to_dec_cbor())
         parts.append(self.serv.to_dec_cbor())
 
-        return [self.pref_scheme(int), parts]
+        return [self.INDEX, parts]
 
 
-_KNOWN_SCHEMES = {IpnSchemeItem}
+_KNOWN_SCHEMES: Set[Type[SchemeSpecificItem]] = {IpnSchemeItem}
 ''' Registered scheme-specific items '''
 _KNOWN_SCHEMES_INDEX = {cls.INDEX: cls for cls in _KNOWN_SCHEMES}
 ''' Lookup by index number '''
@@ -364,7 +424,7 @@ class UnknownSchemeError(ValueError):
 @dataclass
 class EidPattern:
     ''' Top container for EID Pattern data model '''
-    items: Optional[List[PatternItem]] = field(default_factory=list)
+    items: List[PatternItem] = field(default_factory=list)
     ''' Either a list of items in the pattern or the None value to
     indicate the any-scheme pattern. '''
 
@@ -378,33 +438,74 @@ class EidPattern:
                     return True
             return False
 
-    def _use_scheme(self, scheme: Scheme) -> Tuple[Type[PatternItem], Optional[Scheme]]:
+    def _get_cls(self, scheme: Scheme) -> Optional[Type[SchemeSpecificItem]]:
         cls = None
-        altscheme = None
         if isinstance(scheme, int):
             try:
                 cls = _KNOWN_SCHEMES_INDEX[scheme]
-                altscheme = cls.NAME
             except KeyError:
                 pass
         elif isinstance(scheme, str):
             # leave as text
             try:
                 cls = _KNOWN_SCHEMES_NAME[scheme]
-                altscheme = cls.INDEX
             except KeyError:
                 pass
-        else:
-            raise TypeError
 
-        return cls, altscheme
+        return cls
+
+    def normalize(self):
+        ''' Normalize the entire pattern.
+        This will modify its state.
+        '''
+        # coalesce down to single instance of this class
+        seen_anyssp = [
+            item for item in self.items
+            if isinstance(item, AnySspItem)
+        ]
+
+        keep_anyssp = None
+        if seen_anyssp:
+            keep_anyssp = seen_anyssp.pop(0)
+            for item in seen_anyssp:
+                self.items.remove(item)
+                # combine scheme keys, values get overwritten below
+                keep_anyssp.schemes |= item.schemes
+
+        if keep_anyssp:
+            keep_others = []
+            if AnySspItem.ANYSCHEME in keep_anyssp.schemes:
+                # remove all other schemes and items
+                keep_anyssp.schemes = {AnySspItem.ANYSCHEME: False}
+            else:
+                # expand 'known' scheme marking on remaining one
+                new_schemes = {}
+                for scheme in keep_anyssp.schemes.keys():
+                    cls = self._get_cls(scheme)
+                    if cls is None:
+                        new_schemes[scheme] = False
+                    else:
+                        new_schemes[cls.INDEX] = True
+                        new_schemes[cls.NAME] = True
+
+                keep_anyssp.schemes = new_schemes
+
+                # Remove redundant items of the same scheme
+                keep_others = [
+                    item for item in self.items
+                    if isinstance(item, SchemeSpecificItem)
+                    and not (
+                        item.INDEX in keep_anyssp.schemes or item.NAME in keep_anyssp.schemes
+                    )
+                ]
+
+            # move to front
+            self.items = [keep_anyssp] + keep_others
 
     def from_text(self, text: str) -> 'EidPattern':
         ''' Decode text into an EID Pattern. '''
         text = text.strip()
-        if text == '*:**':
-            self.items = None
-        elif text == '':
+        if text == '':
             self.items = []
         else:
             self.items = []
@@ -415,36 +516,28 @@ class EidPattern:
                 except ValueError:
                     raise ValueError(f'Pattern item does not contain a separator colon: {part}')
 
-                scheme = scheme.casefold()
-                try:
-                    scheme = int(scheme)
-                except ValueError:
-                    # leave as text
-                    pass
-                cls, altscheme = self._use_scheme(scheme)
                 # override for any-SSP independent of scheme
-                # after altscheme is determined
                 if ssp == AnySspItem.TEXT_FORM:
                     cls = AnySspItem
+                else:
+                    scheme = norm_scheme(scheme)
+                    cls = self._get_cls(scheme)
 
                 if cls is None:
                     raise UnknownSchemeError(f'Unknown scheme {scheme}')
 
-                kwargs = dict(scheme=scheme, altscheme=altscheme)
-                item = cls(**kwargs)
-                item.from_ssp_text(ssp)
+                item = cls()
+                item.from_text(scheme, ssp)
                 self.items.append(item)
 
+        self.normalize()
         return self
 
     def to_text(self) -> str:
-        if self.items is None:
-            return '*:**'
-        else:
-            accum = []
-            for item in self.items:
-                accum.append(str(item.pref_scheme(str)) + ':' + item.to_ssp_text())
-            return '|'.join(accum)
+        accum = []
+        for item in self.items:
+            accum.append(item.to_text())
+        return '|'.join(accum)
 
     def from_cbor(self, data: bytes) -> 'EidPattern':
         try:
@@ -453,29 +546,35 @@ class EidPattern:
             raise ValueError('Not well formed CBOR')
 
         if obj is True:
-            self.items = None
+            self.items = [AnySspItem(schemes={AnySspItem.ANYSCHEME: False})]
         else:
             self.items = []
-            for part in obj:
-                if isinstance(part, list):
-                    # pair of scheme and SSP pattern
-                    scheme, ssp = part
-                    cls, altscheme = self._use_scheme(scheme)
-                else:
-                    # any-ssp with just scheme
-                    scheme, ssp = part, None
-                    _cls, altscheme = self._use_scheme(scheme)
+            for item_part in obj:
+                if item_part[0] is None:
+                    # any-ssp with list of schemes
                     cls = AnySspItem
+                else:
+                    # pair of scheme and SSP pattern
+                    scheme = item_part[0]
+                    cls = self._get_cls(scheme)
 
-                kwargs = dict(scheme=scheme, altscheme=altscheme)
-                item = cls(**kwargs)
-                item.from_ssp_cbor(ssp)
+                if cls is None:
+                    raise UnknownSchemeError(f'Unknown scheme {scheme}')
+
+                item = cls()
+                item.from_dec_cbor(item_part)
                 self.items.append(item)
 
+        self.normalize()
         return self
 
     def to_cbor(self) -> bytes:
-        if self.items is None:
+        has_anyscheme = [
+            item for item in self.items
+            if isinstance(item, AnySspItem) and AnySspItem.ANYSCHEME in item.schemes
+        ]
+        if has_anyscheme:
+            # structure special case
             obj = True
         else:
             obj = []

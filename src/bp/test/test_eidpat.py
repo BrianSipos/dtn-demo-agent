@@ -9,7 +9,8 @@ class TestPatternText(unittest.TestCase):
     def test_any_scheme(self):
         pat = EidPattern()
         pat.from_text('*:**')
-        self.assertIsNone(pat.items)
+        self.assertEqual(1, len(pat.items))
+        self.assertSetEqual({'*'}, set(pat.items[0].schemes.keys()))
 
     def test_empty(self):
         pat = EidPattern()
@@ -41,15 +42,15 @@ class TestPatternText(unittest.TestCase):
         pat.from_text('ipn:*.*.*')
         self.assertEqual(1, len(pat.items))
 
-    def test_twopart_ipn_anyssp(self):
+    def test_onepart_ipn_2_anyssp(self):
         pat = EidPattern()
-        pat.from_text('ipn:**|2:**')
-        self.assertEqual(2, len(pat.items))
+        pat.from_text('[ipn,2]:**')
+        self.assertEqual(1, len(pat.items))
 
-    def test_twopart_ipn_dtn_anyssp(self):
+    def test_onepart_ipn_dtn_anyssp(self):
         pat = EidPattern()
-        pat.from_text('ipn:**|dtn:**')
-        self.assertEqual(2, len(pat.items))
+        pat.from_text('[ipn,dtn]:**')
+        self.assertEqual(1, len(pat.items))
 
     def test_error_malformed(self):
         pat = EidPattern()
@@ -86,7 +87,8 @@ class TestPatternCbor(unittest.TestCase):
     def test_any_scheme(self):
         pat = EidPattern()
         pat.from_cbor(bytes.fromhex('F5'))
-        self.assertIsNone(pat.items)
+        self.assertEqual(1, len(pat.items))
+        self.assertSetEqual({'*'}, set(pat.items[0].schemes.keys()))
 
     def test_empty(self):
         pat = EidPattern()
@@ -95,12 +97,12 @@ class TestPatternCbor(unittest.TestCase):
 
     def test_onepart_ipn_anyssp(self):
         pat = EidPattern()
-        pat.from_cbor(bytes.fromhex('816369706E'))
+        pat.from_cbor(bytes.fromhex('8182F66369706E'))
         self.assertEqual(1, len(pat.items))
 
     def test_onepart_2_anyssp(self):
         pat = EidPattern()
-        pat.from_cbor(bytes.fromhex('8102'))
+        pat.from_cbor(bytes.fromhex('8182F602'))
         self.assertEqual(1, len(pat.items))
 
     def test_onepart_2_all2_single(self):
@@ -118,15 +120,15 @@ class TestPatternCbor(unittest.TestCase):
         pat.from_cbor(bytes.fromhex('81820283F5F5F5'))
         self.assertEqual(1, len(pat.items))
 
-    def test_twopart_2_anyssp(self):
+    def test_onepart_ipn_2_anyssp(self):
         pat = EidPattern()
-        pat.from_cbor(bytes.fromhex('826369706E02'))
-        self.assertEqual(2, len(pat.items))
+        pat.from_cbor(bytes.fromhex('8183F66369706E02'))
+        self.assertEqual(1, len(pat.items))
 
-    def test_twopart_2_1_anyssp(self):
+    def test_onepart_2_1_anyssp(self):
         pat = EidPattern()
-        pat.from_cbor(bytes.fromhex('820201'))
-        self.assertEqual(2, len(pat.items))
+        pat.from_cbor(bytes.fromhex('8183F60201'))
+        self.assertEqual(1, len(pat.items))
 
     def test_error_malformed(self):
         pat = EidPattern()
@@ -146,8 +148,8 @@ class TestRoundtrips(unittest.TestCase):
     CASES = [
         ('', '80'),
         ('*:**', 'F5'),
-        ('asdf:**', '816461736466'),
-        ('ipn:**', '8102'),
+        ('asdf:**', '8182F66461736466'),
+        ('ipn:**', '8182F602'),
         ('ipn:0.0.0', '81820283000000'),
         ('ipn:0.1.2', '81820283000102'),
         ('ipn:1.2', '818202820102'),
@@ -201,7 +203,12 @@ class TestNormalCanonical(unittest.TestCase):
 
     def test_text_range(self):
         CASES = [
-            # normalization
+            # scheme-independent normalization
+            ('*:**|ipn:**|2:**', '*:**'),  # redundant items removed
+            ('ipn:**|dtn:**', '[ipn,dtn]:**'),  # redundant item coalesced
+            ('[ipn,2]:**', 'ipn:**'),  # redundant any-SSP scheme elided
+            ('ipn:0.0.0|2:0.1.2|ipn:**', 'ipn:**'),  # redundant scheme-specific items
+            # IPN scheme normalization
             ('ipn:*.*.[10,10]', 'ipn:*.*.[10]'),  # duplicate elided
             ('ipn:*.*.[10,11,12]', 'ipn:*.*.[10-12]'),  # adjacency coalesced
             ('ipn:*.*.[10-45,40-50]', 'ipn:*.*.[10-50]'),  # finite overlap
@@ -209,7 +216,9 @@ class TestNormalCanonical(unittest.TestCase):
             ('ipn:[10-4294967296].*.0', 'ipn:[10+].*.0'),  # clamped domain maximum
             ('ipn:0.[10-4294967296].0', 'ipn:0.[10+].0'),  # clamped domain maximum
             ('ipn:*.*.[10-18446744073709551616]', 'ipn:*.*.[10+]'),  # clamped domain maximum
-            # canonicalization
+            # scheme-independent canonicalization
+            ('ipn:0.0.0|dtn:**', 'dtn:**|ipn:0.0.0'),  # any-SSP in front
+            # IPN scheme canonicalization
             ('ipn:*.*.[10-10]', 'ipn:*.*.[10]'),  # singleton elided
             ('ipn:*.*.[20-10]', 'ipn:*.*.[10-20]'),  # bounds ordering
             ('ipn:*.*.[10-20,1-5]', 'ipn:*.*.[1-5,10-20]'),  # interval ordering
