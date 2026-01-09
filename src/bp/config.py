@@ -55,7 +55,7 @@ class Config(object):
     bus_service: Optional[str] = None
 
     # The Node ID of this agent, which is a URI.
-    node_id: str = u''
+    node_id: str = ''
     # Receive routing
     rx_route_table: List[RxRouteItem] = field(default_factory=list)
     # Transmit routing
@@ -72,21 +72,11 @@ class Config(object):
     # Local private key PEM file
     encr_key_file: Optional[str] = None
 
-    integrity_for_blocks: Set[int] = field(default_factory=lambda: {1})
-    ''' BIB target outgoing blocks of this type '''
     integrity_include_chain: bool = True
     ''' Include certificate chain in integrity parameters '''
 
-    confidentiality_for_blocks: Set[int] = field(default_factory=set)
-    ''' BCB target outgoing blocks of this type '''
     accept_after_verify: bool = False
     ''' Are security operations accepted after successful verification '''
-
-    prefer_content_alg: Optional[algorithms.CoseAlgorithm] = None
-    ''' Preferred content algorithm when key is for wrapping '''
-    prefer_content_key: List[bytes] = field(default_factory=list)
-    ''' Preferred content key when wrapping, left as None to use random key '''
-    prefer_content_iv: List[bytes] = field(default_factory=list)
 
     # The bus service names of CLs to attach to
     cl_attach: Dict[str, str] = field(default_factory=dict)
