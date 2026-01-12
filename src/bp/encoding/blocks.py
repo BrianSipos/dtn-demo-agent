@@ -31,11 +31,6 @@ class Timestamp(CborArray):
 
 class AbstractBlock(CborArray):
     ''' Represent an abstract block with CRC fields.
-
-    .. py:attribute:: crc_type_name
-        The name of the CRC-type field.
-    .. py:attribute:: crc_value_name
-        The name of the CRC-value field.
     '''
 
     @enum.unique
@@ -59,7 +54,9 @@ class AbstractBlock(CborArray):
     }
 
     crc_type_name = 'crc_type'
+    ''' The name of the CRC-type field. '''
     crc_value_name = 'crc_value'
+    ''' The name of the CRC-value field. '''
 
     def fill_fields(self):
         ''' Fill all fields so that the block is the full size it needs
