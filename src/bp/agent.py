@@ -5,11 +5,7 @@ import logging
 import traceback
 import dbus.service
 from gi.repository import GLib as glib
-import cbor2
-from cryptography.hazmat.backends import default_backend
 import scapy.volatile
-import tcpcl
-from scapy_cbor.util import encode_diagnostic
 from bp.encoding import (
     DtnTimeField, Timestamp,
     Bundle, AbstractBlock, PrimaryBlock, CanonicalBlock,
@@ -251,7 +247,7 @@ class Agent(dbus.service.Object):
             return
 
         eid = ctr.bundle.primary.destination
-        self._logger.info('Getting TX route for: %s', eid)
+        self._logger.info('Getting TX route for %s on table size %d', eid, len(self._config.tx_route_table))
         found = None
         for item in self._config.tx_route_table:
             match = item.eid_pattern.match(eid)
@@ -264,7 +260,7 @@ class Agent(dbus.service.Object):
             self._logger.debug('Route found: %s', found)
             ctr.route = found
         else:
-            self._logger.debug('No static route for: %s', eid)
+            self._logger.debug('No static route for %s', eid)
 
         return
 
@@ -425,7 +421,6 @@ class Agent(dbus.service.Object):
         # self._logger.debug('Sending bundle\n%s', ctr.bundle.show(dump=True))
         data = bytes(ctr.bundle)
         self._logger.info('send_bundle size %d', len(data))
-        # self._logger.debug('send_bundle data %s', encode_diagnostic(cbor2.loads(data)))
         ctr.sender(data)
 
     @dbus.service.method(DBUS_IFACE, in_signature='ss', out_signature='')

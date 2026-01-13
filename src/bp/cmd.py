@@ -5,7 +5,7 @@ import logging
 import sys
 from urllib.parse import urlsplit
 from gi.repository import GLib as glib
-
+from dbus.mainloop.glib import DBusGMainLoop
 from tcpcl.cmd import root_logging
 from bp.config import Config
 from bp.agent import Agent
@@ -34,8 +34,6 @@ def uristr(val):
 
 def main():
     ''' Agent command entry point. '''
-    from dbus.mainloop.glib import DBusGMainLoop
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--log-level', dest='log_level',
                         metavar='LEVEL',
