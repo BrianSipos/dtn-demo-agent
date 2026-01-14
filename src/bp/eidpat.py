@@ -182,6 +182,11 @@ class UnsignedElement:
         else:
             return self.val == elem
 
+    def from_value(self, val: int):
+        if self.domain_max is not None and val > self.domain_max:
+            raise ValueError('Value too large')
+        self.val = val
+
     def from_text(self, part: str):
         if part == '*':
             self.val = True
@@ -210,7 +215,7 @@ class UnsignedElement:
                 else:
                     self.val |= portion.singleton(int(intvl))
         else:
-            self.val = int(part)
+            self.from_value(int(part))
 
     def to_text(self) -> str:
         if self.val is None:
@@ -231,7 +236,9 @@ class UnsignedElement:
             return str(self.val)
 
     def from_dec_cbor(self, enc: object) -> None:
-        if isinstance(enc, list):
+        if enc is True:
+            self.val = True
+        elif isinstance(enc, list):
             if not all(isinstance(item, int) for item in enc):
                 raise ValueError('Range is not all integers')
             mut = copy.copy(enc)
@@ -265,9 +272,9 @@ class UnsignedElement:
                 # last included width
                 self.val |= apiIntInterval.closedopen(ref, portion.inf)
 
-        elif isinstance(enc, (int, bool)):
+        elif isinstance(enc, int):
             # either int or True
-            self.val = enc
+            self.from_value(enc)
         else:
             raise ValueError(f'Invalid value {enc}')
 
@@ -310,11 +317,11 @@ class IpnSchemeItem(SchemeSpecificItem):
     INDEX: ClassVar[int] = 2
     NAME: ClassVar[str] = 'ipn'
 
-    alloc: Optional[UnsignedElement] = field(default_factory=UnsignedElement)
-    ''' The allocator pattern or None to indicate that :ivar:`node` is the 64-bit FQNN '''
-    node: UnsignedElement = field(default_factory=UnsignedElement)
-    ''' The unqualified node number or FQNN pattern '''
-    serv: UnsignedElement = field(default_factory=UnsignedElement)
+    alloc: UnsignedElement = field(default_factory=lambda: UnsignedElement(domain_max=UINT32_MAX))
+    ''' The allocator number pattern '''
+    node: UnsignedElement = field(default_factory=lambda: UnsignedElement(domain_max=UINT32_MAX))
+    ''' The unqualified node number pattern '''
+    serv: UnsignedElement = field(default_factory=lambda: UnsignedElement(domain_max=UINT64_MAX))
     ''' The service number pattern '''
 
     def is_match(self, eid: EidRepr) -> bool:
@@ -333,48 +340,37 @@ class IpnSchemeItem(SchemeSpecificItem):
         else:
             raise ValueError
 
-        if self.alloc is not None:
-            return all([
-                self.alloc.is_match(anum),
-                self.node.is_match(qnum),
-                self.serv.is_match(snum),
-            ])
-        else:
-            fqnn = (anum << 32) + qnum
-            return all([
-                self.node.is_match(fqnn),
-                self.serv.is_match(snum),
-            ])
+        return all([
+            self.alloc.is_match(anum),
+            self.node.is_match(qnum),
+            self.serv.is_match(snum),
+        ])
 
     def from_text(self, scheme: Scheme, ssp: str):
         parts = ssp.split('.')
         if len(parts) == 2:
-            self.alloc = None
-            # split off the FQNN part
-            self.node.domain_max = UINT64_MAX
-            self.node.from_text(parts[0])
-            self.serv.domain_max = UINT64_MAX
-            self.serv.from_text(parts[1])
+            # Special handling of single values
+            if parts[0] == '!':
+                fqnn = UINT32_MAX
+            else:
+                fqnn = int(parts[0])
+            snum = int(parts[1])
+            self.alloc.from_value(fqnn >> 32)
+            self.node.from_value(fqnn & UINT32_MAX)
+            self.serv.from_value(snum)
         elif len(parts) == 3:
-            self.alloc = UnsignedElement(domain_max=UINT32_MAX)
             self.alloc.from_text(parts[0])
-            self.node.domain_max = UINT32_MAX
             self.node.from_text(parts[1])
-            self.serv.domain_max = UINT64_MAX
             self.serv.from_text(parts[2])
         else:
-            raise ValueError('IPN SSP does not have 2 or 3 elements')
+            raise ValueError('IPN SSP does not have 3 elements')
 
     def to_text(self) -> str:
-        parts = []
-        if self.alloc is not None:
-            parts.append(self.alloc.to_text())
-        if (self.alloc is None or self.alloc.val == 0) and self.node.val == UINT32_MAX:
-            parts.append('!')
-        else:
-            parts.append(self.node.to_text())
-        parts.append(self.serv.to_text())
-
+        parts = [
+            self.alloc.to_text(),
+            self.node.to_text(),
+            self.serv.to_text(),
+        ]
         return self.NAME + ':' + '.'.join(parts)
 
     def from_dec_cbor(self, item: List[object]) -> None:
@@ -382,14 +378,7 @@ class IpnSchemeItem(SchemeSpecificItem):
         if not isinstance(ssp, list):
             raise ValueError('IPN SSP is not an array')
 
-        if len(ssp) == 2:
-            self.alloc = None
-            # split off the FQNN part
-            self.node.domain_max = UINT64_MAX
-            self.node.from_dec_cbor(ssp[0])
-            self.serv.domain_max = UINT64_MAX
-            self.serv.from_dec_cbor(ssp[1])
-        elif len(ssp) == 3:
+        if len(ssp) == 3:
             self.alloc = UnsignedElement(domain_max=UINT32_MAX)
             self.alloc.from_dec_cbor(ssp[0])
             self.node.domain_max = UINT32_MAX
@@ -397,7 +386,7 @@ class IpnSchemeItem(SchemeSpecificItem):
             self.serv.domain_max = UINT64_MAX
             self.serv.from_dec_cbor(ssp[2])
         else:
-            raise ValueError('IPN SSP does not have 2 or 3 elements')
+            raise ValueError('IPN SSP does not have 3 elements')
 
     def to_dec_cbor(self) -> List[object]:
         parts = []

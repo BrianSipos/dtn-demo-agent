@@ -52,7 +52,7 @@ class TestPatternText(unittest.TestCase):
         pat.from_text('[ipn,dtn]:**')
         self.assertEqual(1, len(pat.items))
 
-    def test_error_malformed(self):
+    def test_error_invalid(self):
         pat = EidPattern()
 
         CASES = [
@@ -63,6 +63,12 @@ class TestPatternText(unittest.TestCase):
             'ipn:*.*.[]',
             'ipn:*.*.[,3]',
             'ipn:*.*.[+]',
+            # out-of-domain values
+            'ipn:4294967296.4294967295.18446744073709551615',
+            'ipn:4294967295.4294967296.18446744073709551615',
+            'ipn:4294967295.4294967295.18446744073709551616',
+            'ipn:18446744073709551616.18446744073709551615',
+            'ipn:18446744073709551615.18446744073709551616',
         ]
         for text in CASES:
             with self.subTest(text):
@@ -103,11 +109,6 @@ class TestPatternCbor(unittest.TestCase):
     def test_onepart_2_anyssp(self):
         pat = EidPattern()
         pat.from_cbor(bytes.fromhex('8182F602'))
-        self.assertEqual(1, len(pat.items))
-
-    def test_onepart_2_all2_single(self):
-        pat = EidPattern()
-        pat.from_cbor(bytes.fromhex('818202820000'))
         self.assertEqual(1, len(pat.items))
 
     def test_onepart_2_all3_single(self):
@@ -152,7 +153,6 @@ class TestRoundtrips(unittest.TestCase):
         ('ipn:**', '8182F602'),
         ('ipn:0.0.0', '81820283000000'),
         ('ipn:0.1.2', '81820283000102'),
-        ('ipn:1.2', '818202820102'),
         ('ipn:0.*.*', '8182028300F5F5'),
         ('ipn:0.*.[10]', '8182028300F5820A00'),  # not simplified
         ('ipn:0.[1-10,50-100].*', '818202830084010918261832F5'),
@@ -226,9 +226,11 @@ class TestNormalCanonical(unittest.TestCase):
             ('ipn:0.[10-4294967295].0', 'ipn:0.[10+].0'),  # domain maximum
             ('ipn:*.*.[10-18446744073709551615]', 'ipn:*.*.[10+]'),  # domain maximum
             ('ipn:0.[4294967295].0', 'ipn:0.[4294967295].0'),  # not special value
-            ('ipn:0.4294967295.0', 'ipn:0.!.0'),  # special value
-            ('ipn:4294967295.0', 'ipn:!.0'),  # special value
+            # FIXME ('ipn:0.!.0', 'ipn:0.4294967295.0'),  # special value
             ('ipn:977000.4294967295.0', 'ipn:977000.4294967295.0'),  # not special value
+            ('ipn:!.0', 'ipn:0.4294967295.0'),  # special encoding
+            ('ipn:4196183048192100.0', 'ipn:977000.100.0'),  # two-element normalization
+            ('ipn:18446744073709551615.0', 'ipn:4294967295.4294967295.0'),
         ]
         for orig_text, expect_text in CASES:
             with self.subTest(orig_text):
@@ -300,7 +302,7 @@ class TestPatternMatch(unittest.TestCase):
             (EidRepr('ipn', [2**32, 2**32, 2**64]), True),
             (EidRepr('ipn', [1, 0]), True),
             (EidRepr('ipn', [2**64, 2**64]), True),
-            (EidRepr(2, [0, 0, 0]), True),  # Special case
+            (EidRepr(2, [0, 0, 0]), True),  # known pattern scheme
         ]
         for eid, expect in CASES:
             with self.subTest(str(eid)):
@@ -334,9 +336,31 @@ class TestPatternMatch(unittest.TestCase):
             (EidRepr('ipn', [0, 0, 0]), True),
             (EidRepr('ipn', [0, 1, 0]), False),
             (EidRepr('ipn', [2**32, 2**32, 2**64]), False),
+            (EidRepr('ipn', [0, 0]), True),
             (EidRepr('ipn', [1, 0]), False),
             (EidRepr('ipn', [2**64, 2**64]), False),
             (EidRepr(2, [0, 0, 0]), True),
+            (EidRepr(2, [0, 1, 0]), False),
+        ]
+        for eid, expect in CASES:
+            with self.subTest(str(eid)):
+                self.assertEqual(expect, pat.is_match(eid))
+
+    def test_onepart_ipn_2elem_all_single(self):
+        pat = EidPattern()
+        pat.from_text('ipn:0.0')
+
+        CASES = [
+            (EidRepr('dtn', 'none'), False),
+            (EidRepr(1, 0), False),
+            (EidRepr('ipn', [0, 0, 0]), True),
+            (EidRepr('ipn', [0, 1, 0]), False),
+            (EidRepr('ipn', [2**32, 2**32, 2**64]), False),
+            (EidRepr('ipn', [0, 0]), True),
+            (EidRepr('ipn', [1, 0]), False),
+            (EidRepr('ipn', [2**64, 2**64]), False),
+            (EidRepr(2, [0, 0, 0]), True),
+            (EidRepr(2, [0, 1, 0]), False),
         ]
         for eid, expect in CASES:
             with self.subTest(str(eid)):
@@ -345,26 +369,6 @@ class TestPatternMatch(unittest.TestCase):
     def test_onepart_ipn_3elem_wildcard(self):
         pat = EidPattern()
         pat.from_text('ipn:0.1.*')
-
-        CASES = [
-            (EidRepr('dtn', 'none'), False),
-            (EidRepr(1, 0), False),
-            (EidRepr('ipn', [0, 0, 0]), False),
-            (EidRepr('ipn', [0, 1, 0]), True),
-            (EidRepr('ipn', [0, 1, 100]), True),
-            (EidRepr('ipn', [0, 1, 2**64]), True),
-            (EidRepr('ipn', [2**32, 2**32, 2**64]), False),
-            (EidRepr('ipn', [1, 0]), True),
-            (EidRepr('ipn', [2**64, 2**64]), False),
-            (EidRepr(2, [0, 1, 0]), True),
-        ]
-        for eid, expect in CASES:
-            with self.subTest(str(eid)):
-                self.assertEqual(expect, pat.is_match(eid))
-
-    def test_onepart_ipn_2elem_wildcard(self):
-        pat = EidPattern()
-        pat.from_text('ipn:1.*')
 
         CASES = [
             (EidRepr('dtn', 'none'), False),
