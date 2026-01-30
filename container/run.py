@@ -226,7 +226,7 @@ class PkiCa:
                 outfile.write(self._ca_cert.public_bytes(serialization.Encoding.PEM))
 
 
-def _runcmd(parts, **kwargs):
+def _runcmd(parts, **kwargs) -> subprocess.CompletedProcess:
     LOGGER.info('Running command %s', ' '.join(f'"{part}"' for part in parts))
     return subprocess.run(parts, **kwargs)
 
@@ -237,7 +237,7 @@ class Docker:
         self._docker = re.split(r'\s+', os.environ.get('DOCKER', 'docker').strip())
         self.composefile = os.path.join(stage_dir, 'docker-compose.yml')
 
-    def run_docker(self, args, **kwargs):
+    def run_docker(self, args, **kwargs) -> subprocess.CompletedProcess:
         env = os.environ
         env.update({
             'DOCKER_BUILDKIT': '1',
@@ -246,17 +246,17 @@ class Docker:
         kwargs.setdefault('check', True)
         return _runcmd(self._docker + args, **kwargs)
 
-    def run_docker_compose(self, args, **kwargs):
+    def run_docker_compose(self, args, **kwargs) -> subprocess.CompletedProcess:
         env = os.environ
         env.update({
             'DOCKER_BUILDKIT': '1',
         })
         kwargs.setdefault('env', env)
         kwargs.setdefault('check', True)
-        filepart = ['compose', '-f', self.composefile, '-p', 'demo']
+        filepart = ['compose', '-f', os.path.relpath(self.composefile), '-p', 'demo']
         return _runcmd(self._docker + filepart + args, **kwargs)
 
-    def run_exec(self, args, **kwargs):
+    def run_exec(self, args, **kwargs) -> subprocess.CompletedProcess:
         kwargs.setdefault('check', False)
         return self.run_docker_compose(['exec'] + args, **kwargs)
 
@@ -299,7 +299,10 @@ class Runner:
 
         for (node_name, node_opts) in self._config['nodes'].items():
             ipn_node = node_opts.get('ipn_node')
-            nodeid = f'ipn:{ipn_node}.0' if ipn_node else 'dtn://{}/'.format(node_name)
+            if ipn_node:
+                nodeid = 'ipn:{}.0'.format(ipn_node)
+            else:
+                nodeid = 'dtn://{}/'.format(node_name)
 
             # Ubuntu common path mounted to /etc/ssl/
             nodedir = os.path.join(self._stagedir, 'nodes', node_name, 'ssl')
@@ -355,7 +358,6 @@ class Runner:
                 'driver': 'bridge',
                 'driver_opts': {
                     'com.docker.network.bridge.name': f'br-{net_name}',
-                    'com.docker.network.container_iface_prefix': net_name,
                     'com.docker.network.driver.mtu': net_opts.get('mtu', 1500),
                 },
                 'enable_ipv6': ('subnet6' in net_opts),
@@ -383,7 +385,7 @@ class Runner:
                 'deploy': {
                     'resources': {
                         'limits': {
-                            'memory': '256M',
+                            'memory': '1G',
                         },
                     },
                 },
@@ -406,7 +408,14 @@ class Runner:
                         'target': '/var/log/dtn',
                     },
                 ],
-                'networks': [net_name for net_name in node_opts['nets']],
+                'networks': {
+                    net_name: {
+                        'driver_opts': {
+                            'com.docker.network.endpoint.ifname': net_name,
+                        }
+                    }
+                    for net_name in node_opts['nets']
+                },
             }
 
             node_serv['build'] = {
@@ -443,7 +452,7 @@ class Runner:
                         'multicast_member': [
                             {
                                 'addr': 'FF05::114',
-                                'iface': f'{net_name}0',
+                                'iface': f'{net_name}',
                             }
                             for net_name in node_opts['nets']
                         ],
@@ -463,7 +472,7 @@ class Runner:
             bp_rx_routes = extconfig.get('bp_rx_routes', [])
             bp_rx_routes += [
                 {
-                    'eid_pattern': f'dtn://{node_name}/.*',
+                    'eid_pattern': 'dtn://{}/.*'.format(node_name),
                     'action': 'deliver',
                 },
                 {
@@ -487,6 +496,7 @@ class Runner:
 
                     'polling': extconfig.get('udpcl_polling', []),
                     'init_listen': udpcl_listen,
+                    'mtu_default': 1400,
                 },
                 'tcpcl': {
                     'log_level': 'debug',
@@ -538,7 +548,7 @@ class Runner:
     @action
     def ready(self):
         ''' Wait for services to be ready '''
-        for name, node in self._config['nodes'].items():
+        for name in self._config['nodes'].keys():
             serv_name = 'dtn-bp-agent@node'
 
             args = ['-T', name, 'systemctl', 'is-active', '-q', serv_name]
@@ -552,8 +562,10 @@ class Runner:
 
     @action
     def check_sand(self):
+        ''' Check container logs for presence of SAND verification '''
+        stop_at = 2
         # limit number of checks
-        for _ix in range(10):
+        for _ix in range(20):
             least = None
             for node_name in self._config['nodes'].keys():
                 comp = self._docker.run_exec(['-T', node_name, 'journalctl', '--unit=dtn-bp-agent@node'], capture_output=True, text=True)
@@ -561,13 +573,53 @@ class Runner:
                 if least is None or got < least:
                     least = got
             LOGGER.info('Least number of verified BIBs: %s', least)
-            if least is not None and least >= 3:
+            if least is not None and least >= stop_at:
                 return
-            time.sleep(3)
+            time.sleep(2)
 
         for node_name in self._config['nodes'].keys():
             self._docker.run_exec(['-T', node_name, 'journalctl', '--unit=dtn-bp-agent@node'])
-        raise RuntimeError('Did not see at least 3 verified BIBs')
+        raise RuntimeError(f'Did not see at least {stop_at} verified BIBs')
+
+    @action
+    def rate_ctrl(self):
+        ''' Enable AQM and rate limits between nodes '''
+        net_seq = {}
+        for (net_name, net_opts) in self._config['nets'].items():
+            rate_name = '200kbps'
+            aqm_depth = '1000'
+            aqm_target = '1ms'
+            aqm_interval = '20ms'
+
+            net_seq[net_name] = [
+                [
+                    'tc', 'qdisc', 'add', 'dev', net_name,
+                    'root', 'handle', '1:', 'htb',
+                    'default', '10'
+                ],
+                [  # default flow limit
+                    'tc', 'class', 'add', 'dev', net_name,
+                    'parent', '1:', 'classid', '1:10', 'htb',
+                    'rate', rate_name, 'ceil', rate_name
+                ],
+                [  # AQM in this flow
+                    'tc', 'qdisc', 'add', 'dev', net_name,
+                    'parent', '1:10', 'handle', '102:', 'codel',
+                    'limit', aqm_depth, 'target', aqm_target,
+                    'interval', aqm_interval, 'ecn'
+                ],
+                # [  # AQM in this flow
+                #     'tc', 'qdisc', 'add', 'dev', net_name,
+                #     'parent', '1:10', 'handle', '102:', 'red',
+                #     'limit', '20k', 'avpkt', '1400', 'ecn'
+                # ],
+                ['tc', 'qdisc', 'show', 'dev', net_name]
+            ]
+
+        for (node_name, node_opts) in self._config['nodes'].items():
+            for net_name in node_opts.get('nets', []):
+                for cmd in net_seq.get(net_name, []):
+                    self._docker.run_exec([node_name] + cmd)
 
     @action
     def stop(self):

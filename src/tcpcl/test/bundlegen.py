@@ -178,8 +178,8 @@ class Generator(object):
     ''' A 'bundle' data generator.
     '''
 
-    BLOCK_NUM_PRIMARY = 1
-    BLOCK_TYPE_PRIMARY = 1
+    BLOCK_NUM_PAYLOAD = 1
+    BLOCK_TYPE_PAYLOAD = 1
     BLOCK_TYPE_BIB = 11
     BLOCK_TYPE_BCB = 12
 
@@ -193,7 +193,7 @@ class Generator(object):
     def create_block_data(self, block_type, block_flags, bundle_flags):
         ''' Block-type-specific data gerator.
         '''
-        if block_type == self.BLOCK_TYPE_PRIMARY and bundle_flags & 0x0002:
+        if block_type == self.BLOCK_TYPE_PAYLOAD and bundle_flags & 0x0002:
             # Admin record
             admin_type = 1
             admin_data = [  # Status Report
@@ -329,8 +329,8 @@ class Generator(object):
             blocks.append(block)
         # Last block is payload
         if True:
-            block_type = self.BLOCK_TYPE_PRIMARY
-            block = self.create_block_random(block_type, bundle_flags, {self.BLOCK_NUM_PRIMARY})
+            block_type = self.BLOCK_TYPE_PAYLOAD
+            block = self.create_block_random(block_type, bundle_flags, {self.BLOCK_NUM_PAYLOAD})
             blocks.append(block)
 
         buf = io.BytesIO()
