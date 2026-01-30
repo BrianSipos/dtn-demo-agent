@@ -5,7 +5,7 @@ import copy
 from dataclasses import dataclass, astuple, field
 from datetime import datetime, timedelta, timezone
 import enum
-from typing import Optional, BinaryIO, List, Tuple
+from typing import Optional, BinaryIO, List, Tuple, Callable, Iterable
 import ipaddress
 import logging
 import os
@@ -13,6 +13,7 @@ from io import BytesIO, BufferedReader
 import secrets
 import socket
 import struct
+import time
 import cbor2
 import portion
 import dbus.service
@@ -23,6 +24,10 @@ from udpcl.config import Config, PollConfig, ListenConfig
 LOGGER = logging.getLogger(__name__)
 
 # Patch socket module
+try:
+    IP_RECVTOS = socket.IP_RECVTOS
+except AttributeError:
+    IP_RECVTOS = 13
 try:
     IP_PKTINFO = socket.IP_PKTINFO
 except AttributeError:
@@ -212,7 +217,7 @@ class Conversation:
             sock.bind(sockaddr)
 
         if self.family == socket.AF_INET:
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_RECVTOS, 1)
+            sock.setsockopt(socket.IPPROTO_IP, IP_RECVTOS, 1)
             sock.setsockopt(socket.IPPROTO_IP, IP_PKTINFO, 1)
         elif self.family == socket.AF_INET6:
             sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_RECVTCLASS, 1)
@@ -238,6 +243,245 @@ class EcnCounts:
     ect0: int = 0
     ect1: int = 0
     ce: int = 0
+
+    def __iadd__(self, other: 'EcnCounts') -> 'EcnCounts':
+        self.ect0 += other.ect0
+        self.ect1 += other.ect1
+        self.ce += other.ce
+        return self
+
+    def __sub__(self, other: 'EcnCounts') -> 'EcnCounts':
+        return EcnCounts(
+            ect0=(self.ect0 - other.ect0),
+            ect1=(self.ect1 - other.ect1),
+            ce=(self.ce - other.ce),
+        )
+
+
+@dataclass
+class UdpSender:
+    ''' Functional class to send a UDP datagram with socket options.
+    '''
+    sock: socket.socket
+    ''' Socket to send on. '''
+    sockaddr: Tuple
+    ''' Peer destination address '''
+    opts: List[Tuple] = field(default_factory=list)
+    ''' Additional three-tuple of :py:meth:`socket.setsockopt` parameters '''
+    ancdata: List[Tuple] = field(default_factory=list)
+    ''' Additional :py:meth:`socket.sendmsg` ancillary data '''
+
+    def __call__(self, data: bytes) -> None:
+        ''' Send it '''
+        for opt in self.opts:
+            self.sock.setsockopt(*opt)
+
+        self.sock.sendmsg([data], self.ancdata, 0, self.sockaddr)
+
+
+@dataclass
+class TxSendItem:
+    ''' A single SDU item to transmit '''
+    item: BundleItem
+    ''' Source bundle ID to signal on '''
+    sender: Callable[[bytes], None] = None
+    ''' Callable to send one datagram with no extra parameters. '''
+    dgram_iter: Optional[Iterable[bytes]] = None
+    ''' Current iterable of datagrams to pace. '''
+
+
+@dataclass
+class TxSendWait:
+    agent: 'Agent'
+    ''' The parent agent to report on '''
+    glib_timer_id: Optional[int] = None
+    ''' GLib callback event ID '''
+
+    tok_avail: int = 0
+    ''' Size of available bucket to send (millibytes) '''
+    last_avail_ns: Optional[int] = None
+    ''' Time of last tok_avail update (nanoseconds) '''
+    tok_rate: int = 0
+    ''' Rate of token availability (bytes per nanosecond) '''
+    last_rate_ns: Optional[int] = None
+    ''' Time of last tok_rate update (nanoseconds) '''
+
+    pri_item_queue: List[TxSendItem] = field(default_factory=list)
+    ''' Priority queue to process first '''
+    tx_item_queue: List[TxSendItem] = field(default_factory=list)
+    ''' Normal queue to process in order '''
+    cur_item: Optional[TxSendItem] = None
+    ''' Current iterable of datagrams to pace. '''
+    cur_dgram: Optional[bytes] = None
+    ''' Next datagram to pace with definite size '''
+
+    cur_ecn: Optional[EcnCounts] = None
+    ''' Counters most recently seen '''
+    last_ecn: Optional[EcnCounts] = None
+    ''' Counters from last cycle '''
+
+    srtt_ns: int = int(100e6)
+    ''' Estimated or assumed RTT (nanoseconds); default 100ms '''
+    ecn_mss: int = 1400
+    ''' Estimated or assumed path MSS (bytes) '''
+    ecn_alpha: float = 0
+    ''' Estimated alpha parameter (average CE marking rate) '''
+    cwnd: float = 0
+    ''' Congestion control window size (datagram count) '''
+
+    def __del__(self):
+        self.stop()
+
+    def start(self):
+        ''' Set up timer callbacks as necessary '''
+        if self.glib_timer_id is None:
+            LOGGER.debug('CCA %s starting', id(self))
+            self.glib_timer_id = glib.timeout_add(10, self.tick)
+
+            self.last_avail_ns = None
+            self.last_rate_ns = None
+            self.ecn_alpha = 0
+
+    def stop(self):
+        LOGGER.debug('CCA %s stopping', id(self))
+        if self.glib_timer_id is not None:
+            glib.source_remove(self.glib_timer_id)
+            self.glib_timer_id = None
+
+    def tick(self) -> bool:
+        ''' Increment the token counter. '''
+        now = time.monotonic_ns()
+
+        # do this each tick
+        if self.last_avail_ns is not None:
+            diff_ns = now - self.last_avail_ns
+
+            if not self._update_send(diff_ns):
+                # nothing to do
+                self.stop()
+                return
+        self.last_avail_ns = now
+
+        if self.last_rate_ns is None:
+            # initial window size in bytes
+            LOGGER.debug('CCA %s reset', id(self))
+            self._update_rtt(None)
+            self.last_rate_ns = now
+        else:
+            # do this only once each RTT
+            diff_ns = now - self.last_rate_ns
+            if diff_ns >= self.srtt_ns:
+                self._update_rtt(diff_ns)
+                self.last_rate_ns = now
+
+        return True
+
+    def _update_rtt(self, diff_ns: int) -> None:
+        ''' Recompute congestion state '''
+        # Initial and minimum CWND (number of datagrams)
+        # from 10 kB/s
+        min_cwnd = (10e3 / 1e9) * self.srtt_ns / self.ecn_mss
+        if diff_ns is None:
+            self.cwnd = min_cwnd
+
+        # marked packet counts since last cycle
+        if self.cur_ecn and self.last_ecn:
+            diff_ecn = self.cur_ecn - self.last_ecn
+        else:
+            LOGGER.info('CCA has no diff_ecn yet')
+            diff_ecn = EcnCounts()
+        self.last_ecn = copy.copy(self.cur_ecn)
+
+        # Section 2.3.2 of Prague CCA
+        denom = diff_ecn.ect0 + diff_ecn.ect1 + diff_ecn.ce
+        frac = diff_ecn.ce / denom if denom != 0 else None
+        if diff_ecn.ce > 0 and self.ecn_alpha == 0.0:
+            # first occurrence is when alpha==0
+            self.ecn_alpha = 1.0
+        elif frac is not None:
+            self.ecn_alpha += 0.02 * (frac - self.ecn_alpha)
+
+        # section 2.4.2 multiplicative decrease
+        scale = 10
+        self.cwnd = (1.0 - self.ecn_alpha / scale) * self.cwnd
+        if self.cwnd < min_cwnd:
+            self.cwnd = min_cwnd
+
+        # Section 2.4.3 additive increase
+        scale = 0.4
+        # numerator is number of new non-CE packets
+        self.cwnd += scale * (diff_ecn.ect0 + diff_ecn.ect1) / self.cwnd
+
+        # Section 2.5.1 packet pacing
+        self.tok_rate = self.ecn_mss * self.cwnd / self.srtt_ns
+
+        LOGGER.debug('CCA %s cycle end; denom=%3d, CE=%3d, frac=%6.3f, alpha=%6.3f, CWND=%6.3f, rate=%6.1f kB/s',
+                     id(self),
+                     denom, diff_ecn.ce,
+                     frac if frac is not None else -1,
+                     self.ecn_alpha, self.cwnd,
+                     self.tok_rate*1e6)
+
+    def _update_send(self, diff_ns: int) -> bool:
+        ''' Send datagrams when tokens available.
+        :param diff_ns: The time difference since last update.
+        :return: True if there are any datagrams pending pacing.
+        '''
+        # delta in millibytes
+        delta = int(1e3) * self.tok_rate * diff_ns
+        self.tok_avail += delta
+
+        # always deal with these first
+        while self.pri_item_queue:
+            pri_item = self.pri_item_queue.pop(0)
+
+            # drain the whole iterator
+            while True:
+                try:
+                    pri_dgram = next(pri_item.dgram_iter)
+                except StopIteration:
+                    break
+
+                # accounting in millibytes
+                need = 1000 * len(pri_dgram)
+                # let the sender do any buffering
+                pri_item.sender(pri_dgram)
+                self.tok_avail -= need
+
+        while True:
+            if self.cur_item is None:
+                try:
+                    self.cur_item = self.tx_item_queue.pop(0)
+                except IndexError:
+                    LOGGER.debug('CCA ran out of items')
+                    return False
+
+            if self.cur_dgram is None:
+                try:
+                    self.cur_dgram = next(self.cur_item.dgram_iter)
+                except StopIteration:
+                    # no more in this iterator
+                    LOGGER.debug('CCA done with item')
+                    self.agent.send_bundle_finished(
+                        str(self.cur_item.item.transfer_id),
+                        self.cur_item.item.total_length,
+                        'success'
+                    )
+
+                    self.cur_item = None
+                    continue
+
+            # accounting in millibytes
+            need = 1000 * len(self.cur_dgram)
+            if need > self.tok_avail:
+                # wait until later
+                return True
+
+            # let the sender do any buffering
+            self.cur_item.sender(self.cur_dgram)
+            self.tok_avail -= need
+
+            self.cur_dgram = None
 
 
 def range_encode(intvls: portion.Interval) -> List[int]:
@@ -288,8 +532,10 @@ class Agent(dbus.service.Object):
         self._on_stop = None
 
         self._bindsocks = {}
-        # Map from socket to glib io-watch ID
-        self._listen_plain = {}
+        # Map from RX socket to glib io-watch ID
+        self._recv_wait = {}
+        # Map from TX socket to `TxSendWait`
+        self._send_wait = {}
         # Existing sockets, map from `Conversation.key` to `socket.socket`
         self._plain_sock = {}
         # In-progress DTLS handshakes, map from `Conversation.key` to `socket.socket`
@@ -298,9 +544,8 @@ class Agent(dbus.service.Object):
         self._dtls_sess = {}
 
         self._tx_id = 0
-        self._tx_queue = []
-        # map from transfer ID to :py:class:`Transfer`
-        self._rx_fragments = {}
+        self._tx_queue: List[BundleItem] = []
+        self._rx_fragments: Dict[int, Transfer] = {}
         self._rx_id = 0
         self._rx_queue = {}
 
@@ -391,7 +636,7 @@ class Agent(dbus.service.Object):
         self.__logger.info('Listening on %s:%d', conv.local_address, conv.local_port)
 
         if conv.family == socket.AF_INET:
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_RECVTOS, 1)
+            sock.setsockopt(socket.IPPROTO_IP, IP_RECVTOS, 1)
 
         multicast_member = opts.get('multicast_member', [])
         for item in multicast_member:
@@ -417,7 +662,7 @@ class Agent(dbus.service.Object):
                 sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mreq)
 
         self._bindsocks[conv.key] = sock
-        self._listen_plain[sock] = glib.io_add_watch(sock, glib.IO_IN, self._sock_recvfrom)
+        self._recv_wait[sock] = glib.io_add_watch(sock, glib.IO_IN, self._sock_recvfrom)
 
     @dbus.service.method(DBUS_IFACE, in_signature='sq')
     def listen_stop(self, address, port):
@@ -437,8 +682,8 @@ class Agent(dbus.service.Object):
 
         sock = self._bindsocks.pop(conv.key)
         self.__logger.info('Un-listening on %s:%d', conv.local_address, conv.local_port)
-        if sock in self._listen_plain:
-            glib.source_remove(self._listen_plain.pop(sock))
+        if sock in self._recv_wait:
+            glib.source_remove(self._recv_wait.pop(sock))
         sock.close()
 
     def polling_start(self, item: PollConfig):
@@ -474,7 +719,7 @@ class Agent(dbus.service.Object):
     def _get_tos(self, is_data: bool) -> int:
         ''' Get the TOS byte for IP headers '''
         if self._config.ecn_init:
-            return ECN_ECT0
+            return ECN_ECT1
         else:
             return ECN_NOECT
 
@@ -581,22 +826,24 @@ class Agent(dbus.service.Object):
         self.__logger.debug('Received PMTUD ack %s:%s to %s for sizes %s',
                             nonce, seq_nos, conv.peer_address, seen_sizes)
 
-    def _ecn_recvfrom(self, conv: Conversation, ip_ecn: int):
+    def _ecn_recvfrom(self, conv: Conversation, ip_ecn: int) -> None:
+        ''' Handle a non-zero ECN marking '''
         # aggregate of all packets from the same peer, regardless of destination
         ecn_key = (conv.peer_address, conv.peer_port)
 
         if ecn_key not in self._ecn_state:
             self.__logger.debug('Received ECN marking 0x%02x in new conversation %s', ip_ecn, conv)
-            counts = EcnCounts()
             state = {
-                'counts': counts,
+                'counts': EcnCounts(),
                 'timer': None,
-                'last': None,
+                'last_time': None,
+                'last_counts': None,
+                'last_repeat': 0,
             }
             self._ecn_state[ecn_key] = state
         else:
             state = self._ecn_state[ecn_key]
-            counts = state['counts']
+        counts = state['counts']
 
         if ip_ecn == ECN_ECT0:
             counts.ect0 += 1
@@ -605,24 +852,44 @@ class Agent(dbus.service.Object):
         elif ip_ecn == ECN_CE:
             counts.ce += 1
 
-        if state['timer'] is not None:
-            glib.source_remove(state['timer'])
-        delay = self._config.ecn_feedback_delay // timedelta(milliseconds=1)
-        state['timer'] = glib.timeout_add(delay, self._ecn_sendto, ecn_key)
+        if state['timer'] is None:
+            delay = self._config.ecn_feedback_max // timedelta(milliseconds=1)
+            state['timer'] = glib.timeout_add(delay, self._ecn_counts_sendto, ecn_key)
 
-        if state['last'] is not None:
-            diff = state['last'] - datetime.now(timezone.utc)
-            if diff > self._config.ecn_feedback_delay:
-                self._ecn_sendto(ecn_key)
+        self._ecn_counts_sendto(ecn_key)
 
-    def _ecn_sendto(self, ecn_key: Tuple):
+    def _ecn_counts_sendto(self, ecn_key: Tuple) -> bool:
+        ''' Send an ECN Feedback item to a peer.
+        '''
         state = self._ecn_state[ecn_key]
+        # minimum delay based on CE marking
+        nowtime = datetime.now(timezone.utc)
+        if state['last_time'] is not None:
+            diff = nowtime - state['last_time']
+            if diff < self._config.ecn_feedback_min:
+                return False
+            self.__logger.debug('ECN counts diff %s', diff)
+
+        state['last_time'] = nowtime
+
         counts = state['counts']
+
+        # suppress even sending duplicates past 2
+        if state['last_counts'] == counts:
+            state['last_repeat'] += 1
+        else:
+            state['last_repeat'] = 0
+        self.__logger.debug('ECN counts repeat %s %s', state['last_repeat'], counts)
+        state['last_counts'] = copy.copy(counts)
+        if state['last_repeat'] >= 3:
+            # stop repeating
+            glib.source_remove(state['timer'])
+            state['timer'] = None
+            return False
 
         msg = cbor2.dumps({
             ExtensionKey.ECN_COUNTS: [counts.ect0, counts.ect1, counts.ce],
         })
-
         item = BundleItem(
             address=str(ecn_key[0]),
             port=ecn_key[1],
@@ -630,7 +897,20 @@ class Agent(dbus.service.Object):
         )
         self._add_tx_item(item, is_transfer=False)
 
-    def _sock_recvfrom(self, sock, *_args, **_kwargs):
+        return True
+
+    def _ecn_counts_recv(self, conv: Conversation, ext: list):
+        ''' Receive ECN Feedback from a peer. '''
+        LOGGER.debug('Got ECN Counts from %s with %s', conv, ext)
+        sock = conv.find_in(self._plain_sock)
+        send_wait: TxSendWait = self._send_wait.get(sock)
+        if not send_wait:
+            LOGGER.error('ECN Counts with no TxSendWait')
+            return
+
+        send_wait.cur_ecn = EcnCounts(*ext)
+
+    def _sock_recvfrom(self, sock: socket.socket, *_args, **_kwargs) -> bool:
         ''' Callback to handle incoming datagrams.
 
         :return: True to continue listening.
@@ -742,12 +1022,12 @@ class Agent(dbus.service.Object):
         return True
 
     def _recv_datagram(self, sock, data: bytes, conv: Conversation, ip_tos: int = 0):
-        DTLS_FIRST_OCTETS = (
+        DTLS_FIRST_OCTETS = {
             20,  # change_cipher_spec
             21,  # alert
             22,  # handshake
             23,  # application_data
-        )
+        }
         timestamp = datetime.now(timezone.utc)
 
         # Sequential data source
@@ -881,6 +1161,8 @@ class Agent(dbus.service.Object):
                     )
                 )
 
+        if ExtensionKey.ECN_COUNTS in extmap:
+            self._ecn_counts_recv(conv, extmap[ExtensionKey.ECN_COUNTS])
         if ExtensionKey.PEER_PROBE in extmap:
             self._pmtud_recv_probe(conv, extmap[ExtensionKey.PEER_PROBE])
         if ExtensionKey.PEER_CONFIRM in extmap:
@@ -978,10 +1260,9 @@ class Agent(dbus.service.Object):
         if self._tx_queue:
             glib.idle_add(self._process_tx_queue)
 
-    def _send_transfer(self, sender, item):
-        ''' Send a transfer, fragmenting if necessary.
+    def _send_transfer(self, item) -> Iterable:
+        ''' An iterator for datagrams, segmenting as necessary.
 
-        :param sender: A datagram sending function.
         :param item: The item to send.
         :type item: :py:class:`BundleItem`
         '''
@@ -1024,7 +1305,7 @@ class Agent(dbus.service.Object):
 
         for seg in segments:
             self.__logger.debug('Sending datagram size %d', len(seg))
-            sender(seg)
+            yield seg
 
     def _process_tx_queue(self):
         ''' Perform the next TX bundle if possible.
@@ -1065,72 +1346,79 @@ class Agent(dbus.service.Object):
             self._plain_sock[conv.key] = sock
 
         # Listen for any return-path regardless
-        if sock not in self._listen_plain:
-            self._listen_plain[sock] = glib.io_add_watch(sock, glib.IO_IN, self._sock_recvfrom)
+        if sock not in self._recv_wait:
+            self._recv_wait[sock] = glib.io_add_watch(sock, glib.IO_IN, self._sock_recvfrom)
 
-        ancdata = []
+        if sock not in self._send_wait:
+            send_wait = TxSendWait(agent=self)
+            self._send_wait[sock] = send_wait
+        else:
+            send_wait = self._send_wait[sock]
 
-        # Direct socket options
-        for opt in item.sock_opts:
-            sock.setsockopt(*opt)
+        tx_item = TxSendItem(item=item)
 
-        if conv.family == socket.AF_INET:
-            ancdata.append((socket.IPPROTO_IP, socket.IP_TOS, struct.pack('@I', item.ip_tos)))
-        elif conv.family == socket.AF_INET6:
-            ancdata.append((socket.IPPROTO_IPV6, socket.IPV6_TCLASS, struct.pack('@I', item.ip_tos)))
+        # if self._config.dtls_enable_tx:
+        #     conn = self._dtls_sess.get(conv.key)
+        #     if conn:
+        #         self.__logger.debug('Using existing session with %s', conv)
+        #     else:
+        #         self.__logger.debug('Need new session with %s', conv)
+        #         sock.sendto(cbor2.dumps({ExtensionKey.STARTTLS: None}), conv.get_peer_addr())
+        #         conn = self._starttls(sock, conv, server_side=False)
+        #     sender = conn.write
 
-        def simplesender(data):
-            ''' Send to a single destination
-            '''
-            sockaddr = conv.get_peer_addr()
-            self.__logger.debug('With ancdata %s', ancdata)
-            sock.sendmsg([data], ancdata, 0, sockaddr)
+        sender = UdpSender(
+            sock=sock,
+            sockaddr=conv.get_peer_addr(),
+            opts=copy.copy(item.sock_opts),
+        )
+        tx_item.sender = sender
 
+        # sendmsg ancillary data
         if conv.peer_address.is_multicast:
             multicast = self._config.multicast
 
             loop = 0
             if loop is not None:
                 if conv.family == socket.AF_INET:
-                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loop)
+                    sender.opts.append(
+                        (socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, loop)
+                    )
                 else:
-                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_LOOP, loop)
+                    sender.opts.append(
+                        (socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_LOOP, loop)
+                    )
 
             if multicast.ttl is not None:
                 if conv.family == socket.AF_INET:
-                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, multicast.ttl)
+                    sender.opts.append(
+                        (socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, multicast.ttl)
+                    )
                 else:
-                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, multicast.ttl)
-
-            sender = simplesender
-
-        else:
-            # unicast transfer
-
-            if self._config.dtls_enable_tx:
-                conn = self._dtls_sess.get(conv.key)
-                if conn:
-                    self.__logger.debug('Using existing session with %s', conv)
-                else:
-                    self.__logger.debug('Need new session with %s', conv)
-                    sock.sendto(cbor2.dumps({ExtensionKey.STARTTLS: None}), conv.get_peer_addr())
-                    conn = self._starttls(sock, conv, server_side=False)
-                sender = conn.write
-            else:
-                sender = simplesender
+                    sender.opts.append(
+                        (socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, multicast.ttl)
+                    )
+        # ECN marking
+        if conv.family == socket.AF_INET:
+            sender.ancdata.append(
+                (socket.IPPROTO_IP, socket.IP_TOS, struct.pack('@I', item.ip_tos))
+            )
+        elif conv.family == socket.AF_INET6:
+            sender.ancdata.append(
+                (socket.IPPROTO_IPV6, socket.IPV6_TCLASS, struct.pack('@I', item.ip_tos))
+            )
 
         if item.transfer_id is not None:
             # only allow fragmentation of transfers
-            self._send_transfer(sender, item)
+            tx_item.dgram_iter = self._send_transfer(item)
         else:
-            sender(item.file.read())
+            tx_item.dgram_iter = iter([item.file.read()])
 
-        if item.transfer_id is not None:
-            self.send_bundle_finished(
-                str(item.transfer_id),
-                item.total_length,
-                'success'
-            )
+        if item.transfer_id is None:
+            send_wait.pri_item_queue.append(tx_item)
+        else:
+            send_wait.tx_item_queue.append(tx_item)
+        send_wait.start()
 
         return bool(self._tx_queue)
 

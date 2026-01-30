@@ -6,7 +6,8 @@ ENV PIP_DEFAULT_TIMEOUT=300
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 # Distro upgrade for security patches
-RUN apt-get update && apt-get upgrade -y
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get upgrade -y
 
 # Use systemd as top-level process
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \

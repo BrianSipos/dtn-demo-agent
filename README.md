@@ -147,6 +147,10 @@ To initiate a primary SA with another SAFE endpoint run:
 ```sh
 ./container/run.py --config container/example-safe.yaml exec node001 -- dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/safe org.ietf.dtn.bp.safe.start string:dtn://node002/safe
 
+```sh
+./container/run.py --config container/example-sand.yaml act pkigen build create start ready rate_ctrl && \
+sleep 9 && \
+docker container exec node001 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/Agent org.ietf.dtn.bp.Agent.ping string:"dtn://node002/sand" int32:8000000
 ```
 
 # Wireshark Protocols and Dissectors
