@@ -8,7 +8,7 @@ import unittest
 from cryptography import x509
 from pycose import algorithms
 from pycose.keys import curves, keyparam, CoseKey, EC2Key, OKPKey
-from typing import Tuple, Union
+from typing import List, Tuple, Union
 
 from pycose_edhoc import (
     _bytes_compress,
@@ -40,13 +40,13 @@ class TestUtils(unittest.TestCase):
 
 class TestEdhoc(unittest.TestCase):
 
-    def _get_thumbprint(self, data: bytes) -> Tuple[int, bytes]:
+    def _get_thumbprint(self, data: bytes) -> List[int, bytes]:
         alg = algorithms.Sha256Trunc64
 
-        return (
+        return [
             alg.identifier,
             alg.compute_hash(data)
-        )
+        ]
 
     def _check_msg1(self, msg, method: Method, suite: CipherSuite, conn_id: Union[int, bytes]):
         LOGGER.debug('Got msg data: %s', msg.hex())
