@@ -9,7 +9,7 @@ import enum
 import logging
 import re
 import traceback
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Callable, Dict, List, Literal, Optional, Tuple, Union
 from certvalidator import CertificateValidator, ValidationContext
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -32,8 +32,8 @@ from scapy_cbor.util import encode_diagnostic
 import tcpcl.session
 from bp.config import Config
 from bp.encoding import (
-    DtnTimeField, Timestamp,
-    AbstractBlock, PrimaryBlock, CanonicalBlock, StatusReport,
+    DtnTimeField,
+    PrimaryBlock, CanonicalBlock, StatusReport,
     BlockIntegrityBlock, BlockConfidentialityBlock, AbstractSecurityBlock,
     TypeValuePair, TargetResultList,
 )
