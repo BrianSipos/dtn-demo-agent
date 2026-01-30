@@ -1073,22 +1073,30 @@ class CoseContext(AbstractContext):
         secop.extract_secblk()
 
         failure = None
-        for (ix, blk_num) in enumerate(bib.payload.targets):
-            target_blk = ctr.block_num(blk_num)
-            for result in bib.payload.results[ix].results:
-                msg_cls = CoseMessage._COSE_MSG_ID[result.type_code]
+        accept_ix = []
+        for (tgt_ix, tgt_blk_num) in enumerate(bcb.payload.targets):
+            tgt_blk = ctr.block_num(tgt_blk_num)
+            result_list = bcb.payload.results[tgt_ix].results
+            if len(result_list) != 1:
+                LOGGER.error('Result array in BCB num %d does not have exactly one result', bcb.block_num)
+                failure = StatusReport.ReasonCode.FAILED_SEC
+            else:
+                result = result_list[0]
 
-                # replace detached payload
-                msg_enc = bytes(result.getfieldval('value'))
-                msg_dec = cbor2.loads(msg_enc)
-                LOGGER.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
-                msg_dec[2] = target_blk.getfieldval('btsd')
+                secop.tgt_blk = tgt_blk
+                one_failure = self.verify_bcb_target(secop, result)
+                if one_failure is not None:
+                    failure = one_failure
+                elif self._config.accept_after_verify:
+                    LOGGER.debug('Accepting target block num %d after verification', tgt_blk_num)
+                    accept_ix.append(tgt_ix)
 
-                msg_obj = msg_cls.from_cose_obj(msg_dec, allow_unknown_attributes=False)
-                msg_obj.external_aad = CoseContext.get_bpsec_cose_aad(ctr, target_blk, bib, aad_scope, addl_protected)
-                # use additional headers as defaults
-                for (key, val) in msg_cls._parse_header(addl_headers, allow_unknown_attributes=False).items():
-                    msg_obj.uhdr.setdefault(key, val)
+        for tgt_ix in sorted(accept_ix, reverse=True):
+            bcb.payload.targets.pop(tgt_ix)
+            bcb.payload.results.pop(tgt_ix)
+        if not bcb.payload.targets:
+            LOGGER.debug('Removing empty BCB num %d', bcb.block_num)
+            ctr.remove_block(bcb)
 
         return failure
 
