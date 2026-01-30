@@ -49,20 +49,20 @@ class CipherSuite:
     value: int
     ''' The ciphersuite code point value '''
 
-    edhoc_aead: algorithms.CoseAlgorithm
+    edhoc_aead: Type[algorithms.CoseAlgorithm]
     ''' AEAD algorithm '''
-    edhoc_hash: algorithms.CoseAlgorithm
+    edhoc_hash: Type[algorithms.CoseAlgorithm]
     ''' Hash algorithm '''
     edhoc_mac_length: int
     ''' Specific MAC length in bytes '''
-    edhoc_ke: curves.CoseCurve
+    edhoc_ke: Type[curves.CoseCurve]
     ''' Key Exchange algorithm '''
-    edhoc_sign: algorithms.CoseAlgorithm
+    edhoc_sign: Type[algorithms.CoseAlgorithm]
     ''' Signature algorithm '''
 
-    app_aead: algorithms.CoseAlgorithm
+    app_aead: Type[algorithms.CoseAlgorithm]
     ''' AEAD algorithm for using applications '''
-    app_hash: algorithms.CoseAlgorithm
+    app_hash: Type[algorithms.CoseAlgorithm]
     ''' Hash algorithm for using applications '''
 
     @property

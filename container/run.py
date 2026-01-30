@@ -59,7 +59,7 @@ class PkiCa:
             raise ValueError(f'Unknown keytype: {keytype}')
         return node_key
 
-    def generate_root_ca(self, certfile: str, keyfile: str) -> x509.Certificate:
+    def generate_root_ca(self, certfile: str, keyfile: str) -> None:
         ''' Generate and retain a root CA. '''
         ca_key = self.generate_key({})
 
@@ -132,12 +132,14 @@ class PkiCa:
         self._ca_key = ca_key
         self._ca_cert = ca_cert
 
-    def generate_end_entity(self, cafile: str, certfile: str, keyfile: str, mode: str, nodeid: str, fqdn: Optional[str] = None) -> x509.Certificate:
+    def generate_end_entity(self, cafile: Optional[str], certfile: str, keyfile: str, mode: str, nodeid: str, fqdn: Optional[str] = None) -> None:
         '''
         :param mode: Either 'transport' or 'signing'.
         :param nodeid: The Node ID for the entity as a URI string.
         :param fqdn: For transport mode, the FQDN of the node.
         '''
+        if self._ca_cert is None or self._ca_key is None:
+            raise RuntimeError('missing CA cert')
 
         sans = [
             self.other_name_eid(nodeid)
@@ -160,9 +162,10 @@ class PkiCa:
         node_key = self.generate_key({})
 
         if mode == 'transport':
-            sans += [
-                x509.DNSName(fqdn),
-            ]
+            if fqdn:
+                sans += [
+                    x509.DNSName(fqdn),
+                ]
             key_usage['digital_signature'] = True
             ekus += [
                 x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH,
@@ -570,7 +573,7 @@ class Runner:
                 if least is None or got < least:
                     least = got
             LOGGER.info('Least number of verified BIBs: %s', least)
-            if least >= stop_at:
+            if least is not None and least >= stop_at:
                 return
             time.sleep(2)
 
