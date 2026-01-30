@@ -412,7 +412,7 @@ class Agent(dbus.service.Object):
             # Assume the route is a TxRouteItem
             cl_obj = self._cl_agent.get(ctr.route.cl_type)
             if cl_obj:
-                self._logger.info('send_bundle raw_config %s', ctr.route.raw_config)
+                self._logger.info('send_bundle on %s raw_config %s', type(cl_obj), ctr.route.raw_config)
                 ctr.sender = cl_obj.send_bundle_func(ctr.route.raw_config)
 
         if ctr.sender is None:
@@ -481,4 +481,5 @@ class Agent(dbus.service.Object):
                 btsd=bytes(scapy.volatile.RandString(datalen)),
             ),
         ]
+        self._logger.info('ping to %s', nodeid)
         self.send_bundle(ctr)
