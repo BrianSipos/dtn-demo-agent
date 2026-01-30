@@ -1,0 +1,35 @@
+nets:
+  dtnA:
+    subnet4: "192.168.100.0/24"
+  dtnB:
+    subnet4: "192.168.110.0/24"
+    subnet6: "fda1:1cec:f450:c055::/64"
+
+nodes:
+  node001:
+    nets: [dtnA]
+    keys:
+      sign:
+        keytype: SECP256R1
+    config:
+      apps: {}
+      tls_enable: false
+      integrity_for_blocks: []
+      ltp:
+        engine_id: 1
+      bp_tx_routes:
+        - eid_pattern: ".*"
+          next_nodeid: "dtn://node002/"
+          cl_type: ltpcl
+          mtu: 1500
+          address: node002
+          port: 1113
+
+  node002:
+    nets: [dtnA, dtnB]
+    config:
+      apps: {}
+      tls_enable: false
+      integrity_for_blocks: []
+      ltp:
+        engine_id: 2

@@ -50,4 +50,5 @@ COPY container/*.service container/*.slice /usr/local/lib/systemd/system/
 # This will require file /etc/xdg/dtn/node.yaml
 RUN systemctl enable dtn-bp-agent@node && \
     systemctl enable dtn-tcpcl-agent@node && \
-    systemctl enable dtn-udpcl-agent@node
+    systemctl enable dtn-udpcl-agent@node && \
+    systemctl enable dtn-ltpcl-agent@node

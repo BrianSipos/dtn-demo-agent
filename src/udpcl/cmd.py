@@ -1,20 +1,16 @@
 ''' Command entry points.
 '''
 import argparse
-from binascii import unhexlify
 import logging
 import sys
-from gi.repository import GLib as glib
-
+from dbus.mainloop.glib import DBusGMainLoop
 from tcpcl.cmd import root_logging
-from udpcl.config import Config, ListenConfig
+from udpcl.config import Config
 from udpcl.agent import Agent
 
 
 def main():
     ''' Agent command entry point. '''
-    from dbus.mainloop.glib import DBusGMainLoop
-
     parser = argparse.ArgumentParser()
     parser.add_argument('--log-level', dest='log_level',
                         metavar='LEVEL',
@@ -37,7 +33,6 @@ def main():
         logging.getLogger().setLevel(config.log_level.upper())
 
     agent = Agent(config)
-
     agent.exec_loop()
 
 

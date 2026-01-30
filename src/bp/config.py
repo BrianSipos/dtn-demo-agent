@@ -123,7 +123,7 @@ class Config(object):
                     setattr(self, fld.name, bpdat[fld.name])
 
         # Get CL bus names to attach to
-        for cl_type in ('tcpcl', 'udpcl'):
+        for cl_type in ('tcpcl', 'ltpcl', 'udpcl'):
             cldat = filedat.get(cl_type)
             if cldat:
                 self.cl_attach[cl_type] = cldat['bus_service']
