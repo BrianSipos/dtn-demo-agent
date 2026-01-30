@@ -3,8 +3,9 @@
 from dataclasses import dataclass, field, fields
 from typing import Optional, Set, Dict, List
 import logging
-import dbus.bus
 import re
+from pycose import algorithms
+import dbus.bus
 import yaml
 
 LOGGER = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ class Config(object):
     bus_service: Optional[str] = None
 
     # The Node ID of this agent, which is a URI.
-    node_id: str = u''
+    node_id: str = ''
     # Receive routing
     rx_route_table: List[RxRouteItem] = field(default_factory=list)
     # Transmit routing
@@ -70,10 +71,12 @@ class Config(object):
     encr_cert_file: Optional[str] = None
     # Local private key PEM file
     encr_key_file: Optional[str] = None
-    # Sign outgoing blocks of this type
-    integrity_for_blocks: Set[int] = field(default_factory=lambda: {1})
-    # Include certificate chain in integrity parameters
+
     integrity_include_chain: bool = True
+    ''' Include certificate chain in integrity parameters '''
+
+    accept_after_verify: bool = False
+    ''' Are security operations accepted after successful verification '''
 
     # The bus service names of CLs to attach to
     cl_attach: Dict[str, str] = field(default_factory=dict)

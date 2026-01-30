@@ -46,8 +46,8 @@ class AbstractApplication(dbus.service.Object):
     def add_chains(self, rx_chain, tx_chain):
         ''' Add steps to either processing chain.
 
-        :param rx_chain: The list of :py:cls:`util.ChainStep`.
-        :param tx_chain: The list of :py:cls:`util.ChainStep`.
+        :param rx_chain: The list of :py:class:`util.ChainStep`.
+        :param tx_chain: The list of :py:class:`util.ChainStep`.
         '''
         return
 

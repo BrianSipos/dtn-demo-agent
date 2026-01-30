@@ -38,7 +38,7 @@ class TestBpSafe(unittest.TestCase):
         self._eloop = GLib.MainLoop()
         self._endpoints = {}
         self._pdu_ix = 0
-        # log, in order, of all seen :py:cls:`Transfer`
+        # log, in order, of all seen :py:class:`Transfer`
         self._log = queue.Queue()
 
         random.seed(b'TestBpSafe')
@@ -73,10 +73,12 @@ class TestBpSafe(unittest.TestCase):
         # actual delivery
         self._endpoints[dst].recv_pdu(xfer.pdu, xfer.src)
 
-    def _wait_xfer(self, timeout=1) -> bytes:
+    def _wait_xfer(self, timeout=1) -> Transfer:
+        ''' Wait in event loop for a transfer to be received '''
+        LOGGER.debug('waiting...')
         GLib.timeout_add_seconds(timeout, lambda: self._eloop.quit())
         self._eloop.run()
-        return self._log.get(False)
+        return self._log.get(block=False)
 
     def test_method0_suite24_with_ead(self):
         method = Method.SIGN_SIGN
@@ -196,9 +198,10 @@ class TestBpSafe(unittest.TestCase):
 
         safe1.start('urn:safe2')
 
-        # expected sequence
+        # expected sequence of 5 messages
         for _ix in range(5):
             xfer = self._wait_xfer()
+            self.assertNotEqual(0, len(xfer.pdu))
 
         # no more transfers
         with self.assertRaises(queue.Empty):

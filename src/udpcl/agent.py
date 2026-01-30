@@ -546,8 +546,7 @@ class Agent(dbus.service.Object):
 
         self._tx_id = 0
         self._tx_queue: List[BundleItem] = []
-        # map from transfer ID to :py:cls:`Transfer`
-        self._rx_fragments = {}
+        self._rx_fragments: Dict[int, Transfer] = {}
         self._rx_id = 0
         self._rx_queue = {}
 
@@ -1266,7 +1265,7 @@ class Agent(dbus.service.Object):
         ''' An iterator for datagrams, segmenting as necessary.
 
         :param item: The item to send.
-        :type item: :py:cls:`BundleItem`
+        :type item: :py:class:`BundleItem`
         '''
         mtu = self._config.mtu_default
         data = item.file.read()

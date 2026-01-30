@@ -3,11 +3,13 @@ import unittest
 
 from scapy.packet import Raw
 
-from .. import extend
-from ..messages import (MessageHead,
-                        SessionInit, SessionExtendHeader, SessionTerm,
-                        TransferSegment, TransferExtendHeader, TransferAck,
-                        TransferRefuse, Keepalive, RejectMsg)
+from tcpcl import extend
+from tcpcl.messages import (
+    MessageHead,
+    SessionInit, SessionExtendHeader, SessionTerm,
+    TransferSegment, TransferExtendHeader, TransferAck,
+    TransferRefuse, Keepalive, RejectMsg
+)
 
 
 class TestSessionInit(unittest.TestCase):

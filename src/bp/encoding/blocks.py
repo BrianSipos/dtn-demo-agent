@@ -21,7 +21,7 @@ class Timestamp(CborArray):
     ''' A structured representation of an DTN Timestamp.
     The timestamp is a two-tuple of (time, sequence number)
     The creation time portion is automatically converted from a
-    :py:cls:`datetime.datetime` object and text.
+    :py:class:`datetime.datetime` object and text.
     '''
     fields_desc = (
         DtnTimeField('dtntime', default=0),
@@ -31,11 +31,6 @@ class Timestamp(CborArray):
 
 class AbstractBlock(CborArray):
     ''' Represent an abstract block with CRC fields.
-
-    .. py:attribute:: crc_type_name
-        The name of the CRC-type field.
-    .. py:attribute:: crc_value_name
-        The name of the CRC-value field.
     '''
 
     @enum.unique
@@ -59,7 +54,9 @@ class AbstractBlock(CborArray):
     }
 
     crc_type_name = 'crc_type'
+    ''' The name of the CRC-type field. '''
     crc_value_name = 'crc_value'
+    ''' The name of the CRC-value field. '''
 
     def fill_fields(self):
         ''' Fill all fields so that the block is the full size it needs
@@ -245,9 +242,9 @@ class CanonicalBlock(AbstractBlock):
                     pay = cls(pay_data)
                     self.add_payload(pay)
                 except Exception as err:
-                    if conf.debug_dissector:
-                        raise
-                    LOGGER.warning('CanonicalBlock failed to dissect payload: %s', err)
+                    LOGGER.warning('CanonicalBlock failed to dissect BTSD (maybe encrypted?): %s', err)
+                    # if conf.debug_dissector:
+                    #     raise
 
         return super().post_dissect(s)
 

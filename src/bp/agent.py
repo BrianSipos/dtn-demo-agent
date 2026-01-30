@@ -275,11 +275,10 @@ class Agent(dbus.service.Object):
         if status:
             glib.idle_add(self.send_bundle, status)
 
-    def recv_bundle(self, ctr):
+    def recv_bundle(self, ctr: BundleContainer):
         ''' Perform agent handling of a received bundle.
 
         :param ctr: The bundle container just recieved.
-        :type ctr: :py:cls:`BundleContainer`
         '''
         self._logger.debug('Received bundle\n%s', repr(ctr))
 
@@ -386,13 +385,12 @@ class Agent(dbus.service.Object):
             td = datetime.timedelta(hours=1)
             pri_blk.lifetime = td.total_seconds() * 1e3 + td.microseconds // 1e3
 
-    def send_bundle(self, ctr):
+    def send_bundle(self, ctr: BundleContainer):
         ''' Perform agent handling to send a bundle.
         Part of this is to update final CRCs on all blocks and
         assign block numbers.
 
         :param ctr: The bundle container to send.
-        :type ctr: :py:cls:`BundleContainer`
         '''
         ctr.reload()
         self._apply_primary(ctr)
