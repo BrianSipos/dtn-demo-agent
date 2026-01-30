@@ -13,7 +13,6 @@ from typing import Dict, List, Literal, Optional, Tuple, Union
 from certvalidator import CertificateValidator, ValidationContext
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from pycose.messages import (
     CoseMessage, Mac0Message, MacMessage, Sign1Message, SignMessage,
@@ -234,7 +233,7 @@ class CertificateStore:
             chain.append(encode_der_cert(cur_cert))
 
         LOGGER.debug('CertificateStore.find_chain got size %d for %s:%s', len(chain), alg_id, want_tprint)
-        return chain
+        return tuple(chain)
 
 
 @dataclass
@@ -532,11 +531,12 @@ class CoseContext(AbstractContext):
 
         return cose_key
 
-    def validate_chain_func(self, time_at: datetime.datetime) -> callable:
+    def validate_chain_func(self, time_at: datetime.datetime) -> Callable[[Tuple[bytes]], None]:
         ''' Get a function to validate a certificate chain.
 
         :param time_at: The time to validate at.
-        :return: A callable which takes an x5chain of certificates
+        :return: A callable which takes an x5chain of certificates and either
+            throws an Exception not not if valid.
         '''
         val_ctx = ValidationContext(
             trust_roots=[
@@ -550,7 +550,7 @@ class CoseContext(AbstractContext):
             moment=time_at,
         )
 
-        def validate(chain):
+        def validate(chain: Tuple[bytes]):
             val = CertificateValidator(
                 end_entity_cert=chain[0],
                 intermediate_certs=chain[1:],
@@ -1073,30 +1073,22 @@ class CoseContext(AbstractContext):
         secop.extract_secblk()
 
         failure = None
-        accept_ix = []
-        for (tgt_ix, tgt_blk_num) in enumerate(bcb.payload.targets):
-            tgt_blk = ctr.block_num(tgt_blk_num)
-            result_list = bcb.payload.results[tgt_ix].results
-            if len(result_list) != 1:
-                LOGGER.error('Result array in BCB num %d does not have exactly one result', bcb.block_num)
-                failure = StatusReport.ReasonCode.FAILED_SEC
-            else:
-                result = result_list[0]
+        for (ix, blk_num) in enumerate(bib.payload.targets):
+            target_blk = ctr.block_num(blk_num)
+            for result in bib.payload.results[ix].results:
+                msg_cls = CoseMessage._COSE_MSG_ID[result.type_code]
 
-                secop.tgt_blk = tgt_blk
-                one_failure = self.verify_bcb_target(secop, result)
-                if one_failure is not None:
-                    failure = one_failure
-                elif self._config.accept_after_verify:
-                    LOGGER.debug('Accepting target block num %d after verification', tgt_blk_num)
-                    accept_ix.append(tgt_ix)
+                # replace detached payload
+                msg_enc = bytes(result.getfieldval('value'))
+                msg_dec = cbor2.loads(msg_enc)
+                LOGGER.debug('Received COSE message\n%s', encode_diagnostic(msg_dec))
+                msg_dec[2] = target_blk.getfieldval('btsd')
 
-        for tgt_ix in sorted(accept_ix, reverse=True):
-            bcb.payload.targets.pop(tgt_ix)
-            bcb.payload.results.pop(tgt_ix)
-        if not bcb.payload.targets:
-            LOGGER.debug('Removing empty BCB num %d', bcb.block_num)
-            ctr.remove_block(bcb)
+                msg_obj = msg_cls.from_cose_obj(msg_dec, allow_unknown_attributes=False)
+                msg_obj.external_aad = CoseContext.get_bpsec_cose_aad(ctr, target_blk, bib, aad_scope, addl_protected)
+                # use additional headers as defaults
+                for (key, val) in msg_cls._parse_header(addl_headers, allow_unknown_attributes=False).items():
+                    msg_obj.uhdr.setdefault(key, val)
 
         return failure
 
