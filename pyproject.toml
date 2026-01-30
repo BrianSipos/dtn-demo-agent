@@ -22,21 +22,25 @@ classifiers = [
 
 dependencies = [
   "asn1",
-  "cbor2 ~=5.6",
-  "pycose ~=1.0",
+  "cbor2 <5.8", # work around cbor2 issue 272
+  "pycose @git+https://github.com/BrianSipos/pycose.git@sipos-combined-patches",
   "crcmod ~=1.7",
   "cryptography >=41",
-  "pycryptodome ~=3.21",
   "certvalidator",
   "dbus-python",
+  "ifaddr ~=0.2",
+  # work around lack of release version fix for oscrypto issue #75
+  # https://github.com/wbond/oscrypto/pull/76
+  "oscrypto @git+https://github.com/wbond/oscrypto.git@master",
   "portion ~=2.1",
   "psutil",
+  "pycryptodome ~=3.21",
   "PyGObject ~=3.34", # glib integration
   "PyYAML",
   "python3-dtls",
   "scapy ~=2.6",
   "six",
-  "zeroconf",
+  "zeroconf ~=0.148",
 ]
 
 [project.optional-dependencies]
@@ -59,9 +63,10 @@ flake8 = [
   "flake8_pyproject",
 ]
 docs = [
-  "sphinx <6",
+  "sphinx ~=8.2",
   "sphinx_rtd_theme",
   "sphinx-argparse",
+  "sphinx-autodoc-typehints",
 ]
 container = [
   "PyYAML",
@@ -71,9 +76,11 @@ container = [
 
 [tool.pytest.ini_options]
 addopts = [
-    "--log-cli-level=warning",
     "--import-mode=importlib",
 ]
+log_level="debug"
+log_cli="True"
+log_cli_level="warning"
 
 [tool.pylint.MAIN]
 load-plugins="pylint_junit"

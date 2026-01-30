@@ -299,7 +299,7 @@ class Agent(dbus.service.Object):
 
         self._tx_id = 0
         self._tx_queue = []
-        # map from transfer ID to :py:cls:`Transfer`
+        # map from transfer ID to :py:class:`Transfer`
         self._rx_fragments = {}
         self._rx_id = 0
         self._rx_queue = {}
@@ -983,7 +983,7 @@ class Agent(dbus.service.Object):
 
         :param sender: A datagram sending function.
         :param item: The item to send.
-        :type item: :py:cls:`BundleItem`
+        :type item: :py:class:`BundleItem`
         '''
         mtu = self._config.mtu_default
         data = item.file.read()
