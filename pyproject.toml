@@ -62,6 +62,9 @@ flake8 = [
   "flake8",
   "flake8_pyproject",
 ]
+ty = [
+  "ty",
+]
 docs = [
   "importlib",
   "sphinx ~=8.2",

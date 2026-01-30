@@ -43,7 +43,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install with dependencies
-        run: pip3 install flake8 flake8_pyproject
+        run: pip3 install .[flake8]
       - name: Run flake8
         run: flake8 . || true
 
