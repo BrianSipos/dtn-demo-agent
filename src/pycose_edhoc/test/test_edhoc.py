@@ -40,13 +40,13 @@ class TestUtils(unittest.TestCase):
 
 class TestEdhoc(unittest.TestCase):
 
-    def _get_thumbprint(self, data: bytes) -> List[int, bytes]:
+    def _get_thumbprint(self, data: bytes) -> Tuple[int, bytes]:
         alg = algorithms.Sha256Trunc64
 
-        return [
+        return (
             alg.identifier,
             alg.compute_hash(data)
-        ]
+        )
 
     def _check_msg1(self, msg, method: Method, suite: CipherSuite, conn_id: Union[int, bytes]):
         LOGGER.debug('Got msg data: %s', msg.hex())
@@ -103,7 +103,7 @@ class TestEdhoc(unittest.TestCase):
             pubkey=init_authn_pub,
         )
         init_id_cred = {34: self._get_thumbprint(cbor2.loads(init_cred.data))}
-        self.assertEqual([-15, unhexlify('c24ab2fd7643c79f')], init_id_cred[34])
+        self.assertEqual((-15, unhexlify('c24ab2fd7643c79f')), init_id_cred[34])
 
         resp_authn_priv = OKPKey.from_dict({
             keyparam.OKPKpCurve: curves.Ed25519,
@@ -132,7 +132,7 @@ class TestEdhoc(unittest.TestCase):
             pubkey=resp_authn_pub,
         )
         resp_id_cred = {34: self._get_thumbprint(cbor2.loads(resp_cred.data))}
-        self.assertEqual([-15, unhexlify('79f2a41b510c1f9b')], resp_id_cred[34])
+        self.assertEqual((-15, unhexlify('79f2a41b510c1f9b')), resp_id_cred[34])
 
         cred_store = CredStore()
         cred_store.add(init_id_cred, init_cred)
