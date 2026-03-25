@@ -503,7 +503,7 @@ def _get_kdf(hash_cls: Type[hashes.HashAlgorithm]) -> AbstractKDF:
         raise NotImplementedError(f'Undefined use of hash class {hash_cls}')
 
 
-class CommonState:
+class EdhocEntity:
     ''' Common processing for either EDHOC endpoint.
 
     :param authn_priv_key: The local entity private key.
@@ -839,6 +839,22 @@ class CommonState:
         '''
         return self.edhoc_kdf(self._prk_exporter, info_label, context, length)
 
+    def get_message_1(self, ead: Optional[EadList] = None) -> bytes:
+        raise NotImplementedError
+    def get_message_2(self, ead: Optional[EadList] = None) -> bytes:
+        raise NotImplementedError
+    def get_message_3(self, ead: Optional[EadList] = None) -> bytes:
+        raise NotImplementedError
+    def get_message_4(self, ead: Optional[EadList] = None) -> bytes:
+        raise NotImplementedError
+    def process_message_1(self, msg: bytes) -> EadList:
+        raise NotImplementedError
+    def process_message_2(self, msg: bytes) -> EadList:
+        raise NotImplementedError
+    def process_message_3(self, msg: bytes) -> EadList:
+        raise NotImplementedError
+    def process_message_4(self, msg: bytes) -> EadList:
+        raise NotImplementedError
 
 CipherSuitesType = List[Union[CipherSuite, int]]
 
@@ -853,7 +869,7 @@ def _normalize_suites(suites: CipherSuitesType) -> List[CipherSuite]:
     return res
 
 
-class EdhocInitiator(CommonState):
+class EdhocInitiator(EdhocEntity):
     ''' Logic for the initiator side of an EDHOC conversation. '''
 
     def __init__(self, method: Method, suites: CipherSuitesType, **kwargs):
@@ -1028,7 +1044,7 @@ class EdhocInitiator(CommonState):
         return ead
 
 
-class EdhocResponder(CommonState):
+class EdhocResponder(EdhocEntity):
     ''' Logic for the responder side of an EDHOC conversation. '''
 
     def __init__(self, valid_methods=List[Method], valid_suites=CipherSuitesType, **kwargs):

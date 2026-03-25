@@ -1,4 +1,4 @@
-''' Test the package :py:mod:`pycose_edhoc`.
+''' Test the package :py:mod:`bp.safe_info`.
 '''
 from binascii import unhexlify
 import cbor2
@@ -215,18 +215,24 @@ class TestBpSafe(unittest.TestCase):
             self.assertEqual(sa1.peer_sai, sa2.local_sai)
 
             self.assertEqual(sa1.prk_sa1, sa2.prk_sa1)
-            self._compare_cose_keys(sa1.tx_use.key, sa2.rx_use.key)
-            self._compare_cose_keys(sa1.rx_use.key, sa2.tx_use.key)
+
+            sa1_tx_ck = sa1.tx_keys[b'']
+            sa2_rx_ck = sa2.rx_keys[b'']
+            self._compare_cose_keys(sa1_tx_ck.key, sa2_rx_ck.key)
+
+            sa2_tx_ck = sa2.tx_keys[b'']
+            sa1_rx_ck = sa1.rx_keys[b'']
+            self._compare_cose_keys(sa2_tx_ck.key, sa1_rx_ck.key)
 
             # only one post-IA PDU
-            self.assertEqual(1, sa1.tx_use.op_count)
-            self.assertEqual(3, sa1.tx_use.bytes_count)
-            self.assertEqual(0, sa1.rx_use.op_count)
-            self.assertEqual(0, sa1.rx_use.bytes_count)
-            self.assertEqual(0, sa2.tx_use.op_count)
-            self.assertEqual(0, sa2.tx_use.bytes_count)
-            self.assertEqual(1, sa2.rx_use.op_count)
-            self.assertEqual(3, sa2.rx_use.bytes_count)
+            self.assertEqual(1, sa1_tx_ck.op_count)
+            self.assertEqual(3, sa1_tx_ck.bytes_count)
+            self.assertEqual(0, sa1_rx_ck.op_count)
+            self.assertEqual(0, sa1_rx_ck.bytes_count)
+            self.assertEqual(0, sa2_tx_ck.op_count)
+            self.assertEqual(0, sa2_tx_ck.bytes_count)
+            self.assertEqual(1, sa2_rx_ck.op_count)
+            self.assertEqual(3, sa2_rx_ck.bytes_count)
 
         ssas1 = safe1.get_secondary_sas()
         ssas2 = safe2.get_secondary_sas()
@@ -235,13 +241,18 @@ class TestBpSafe(unittest.TestCase):
             self.assertEqual(sa1.local_sai, sa2.peer_sai)
             self.assertEqual(sa1.peer_sai, sa2.local_sai)
 
-            self._compare_cose_keys(sa1.tx_use.key, sa2.rx_use.key)
-            self._compare_cose_keys(sa1.rx_use.key, sa2.tx_use.key)
+            sa1_tx_ck = sa1.tx_keys[b'']
+            sa2_rx_ck = sa2.rx_keys[b'']
+            self._compare_cose_keys(sa1_tx_ck.key, sa2_rx_ck.key)
 
-            self.assertEqual(0, sa1.tx_use.op_count)
-            self.assertEqual(0, sa1.rx_use.op_count)
-            self.assertEqual(0, sa2.tx_use.op_count)
-            self.assertEqual(0, sa2.rx_use.op_count)
+            sa2_tx_ck = sa2.tx_keys[b'']
+            sa1_rx_ck = sa1.rx_keys[b'']
+            self._compare_cose_keys(sa2_tx_ck.key, sa1_rx_ck.key)
+
+            self.assertEqual(0, sa1_tx_ck.op_count)
+            self.assertEqual(0, sa1_rx_ck.op_count)
+            self.assertEqual(0, sa2_tx_ck.op_count)
+            self.assertEqual(0, sa2_rx_ck.op_count)
 
     def _compare_cose_keys(self, key1: CoseKey, key2: CoseKey):
         self.assertEqual(key1.kty, key2.kty)
