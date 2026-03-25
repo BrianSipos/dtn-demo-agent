@@ -22,7 +22,7 @@ classifiers = [
 
 dependencies = [
   "asn1",
-  "cbor2 <5.8", # work around cbor2 issue 272
+  "cbor2 ~=5.9",
   "pycose @git+https://github.com/BrianSipos/pycose.git@sipos-combined-patches",
   "crcmod ~=1.7",
   "cryptography >=41",
