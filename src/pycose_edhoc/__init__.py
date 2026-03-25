@@ -841,20 +841,28 @@ class EdhocEntity:
 
     def get_message_1(self, ead: Optional[EadList] = None) -> bytes:
         raise NotImplementedError
+
     def get_message_2(self, ead: Optional[EadList] = None) -> bytes:
         raise NotImplementedError
+
     def get_message_3(self, ead: Optional[EadList] = None) -> bytes:
         raise NotImplementedError
+
     def get_message_4(self, ead: Optional[EadList] = None) -> bytes:
         raise NotImplementedError
+
     def process_message_1(self, msg: bytes) -> EadList:
         raise NotImplementedError
+
     def process_message_2(self, msg: bytes) -> EadList:
         raise NotImplementedError
+
     def process_message_3(self, msg: bytes) -> EadList:
         raise NotImplementedError
+
     def process_message_4(self, msg: bytes) -> EadList:
         raise NotImplementedError
+
 
 CipherSuitesType = List[Union[CipherSuite, int]]
 

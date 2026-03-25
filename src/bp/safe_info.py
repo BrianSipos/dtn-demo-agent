@@ -177,7 +177,7 @@ class InitialAuthn(ActivityInfo):
                 keyparam.KpBaseIV: okm(SAFE_EXPORTER_LABEL, b'biv_ir', suite.app_iv_length),
             }
         )
-        ri_key=SymmetricKey(
+        ri_key = SymmetricKey(
             k=okm(SAFE_EXPORTER_LABEL, b'key_ri', suite.app_key_length),
             optional_params={
                 keyparam.KpKid: b'',
@@ -347,18 +347,18 @@ class SaCreation(ActivityInfo):
             LOGGER.debug('Using SA algorithm %s', alg)
             if issubclass(alg, algorithms._HMAC):
                 key_length = alg.get_key_length()
-                ir_key=SymmetricKey(
+                ir_key = SymmetricKey(
                     k=safe_okm(ctxid, b'key_ir', key_length),
                     optional_params={
-                        keyparam.KpKid: b'', #FIXME replace
+                        keyparam.KpKid: b'',  # FIXME replace
                         keyparam.KpAlg: alg,
                         keyparam.KpKeyOps: [keyops.MacCreateOp if self.act.as_initiator else keyops.MacVerifyOp],
                     }
                 )
-                ri_key=SymmetricKey(
+                ri_key = SymmetricKey(
                     k=safe_okm(ctxid, b'key_ri', key_length),
                     optional_params={
-                        keyparam.KpKid: b'', #FIXME replace
+                        keyparam.KpKid: b'',  # FIXME replace
                         keyparam.KpAlg: alg,
                         keyparam.KpKeyOps: [keyops.MacVerifyOp if self.act.as_initiator else keyops.MacCreateOp],
                     }
@@ -366,19 +366,19 @@ class SaCreation(ActivityInfo):
             if issubclass(alg, algorithms._EncAlg):
                 key_length = alg.get_key_length()
                 iv_length = pycose_iv_length(alg)
-                ir_key=SymmetricKey(
+                ir_key = SymmetricKey(
                     k=safe_okm(ctxid, b'key_ir', key_length),
                     optional_params={
-                        keyparam.KpKid: b'', #FIXME replace
+                        keyparam.KpKid: b'',  # FIXME replace
                         keyparam.KpAlg: alg,
                         keyparam.KpKeyOps: [keyops.EncryptOp if self.act.as_initiator else keyops.DecryptOp],
                         keyparam.KpBaseIV: safe_okm(ctxid, b'biv_ir', iv_length),
                     }
                 )
-                ri_key=SymmetricKey(
+                ri_key = SymmetricKey(
                     k=safe_okm(0, b'key_ri', key_length),
                     optional_params={
-                        keyparam.KpKid: b'', #FIXME replace
+                        keyparam.KpKid: b'',  # FIXME replace
                         keyparam.KpAlg: alg,
                         keyparam.KpKeyOps: [keyops.DecryptOp if self.act.as_initiator else keyops.EncryptOp],
                         keyparam.KpBaseIV: safe_okm(0, b'biv_ri', iv_length),
@@ -404,7 +404,7 @@ class SaCreation(ActivityInfo):
             rx_key = ir_key
         ssa.tx_keys[tx_key.kid] = TxContentKey(key=tx_key)
         ssa.rx_keys[rx_key.kid] = RxContentKey(key=rx_key)
-        
+
         self.app.add_secondary_sa(ssa)
 
 
@@ -524,6 +524,7 @@ class PeerState:
     def all_normal(self) -> List[ActivityState]:
         return tuple(self.own.values()) + tuple(self.peer.values())
 
+
 @dataclass
 class BaseContentKey:
     key: SymmetricKey
@@ -539,6 +540,7 @@ class BaseContentKey:
         self.op_count += 1
         self.bytes_count += plain_size
 
+
 @dataclass
 class TxContentKey(BaseContentKey):
     ''' Each TX Content Key for an SA '''
@@ -548,6 +550,7 @@ class TxContentKey(BaseContentKey):
         # avoid zero-value PIV
         piv = self.op_count + 1
         return piv.to_bytes((piv.bit_length() + 7) // 8, 'big')
+
 
 @dataclass
 class RxContentKey(BaseContentKey):
