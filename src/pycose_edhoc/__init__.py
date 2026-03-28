@@ -16,6 +16,7 @@ from pycose.keys import curves, keytype, CoseKey, EC2Key, OKPKey, SymmetricKey
 from pycose.messages import Sign1Message, Enc0Message
 from pycose import headers
 import random
+from textwrap import fill
 from typing import ClassVar, List, Optional, Type, Union
 
 
@@ -815,9 +816,6 @@ class EdhocEntity:
         self._logger.debug('Generated PRK_exporter %s',
                            self._prk_exporter.hex())
 
-    def as_initiator(self) -> bool:
-        return self._as_init
-
     def get_own_conn_id(self) -> ConnectionId:
         return self._own_conn_id
 
@@ -924,7 +922,7 @@ class EdhocInitiator(EdhocEntity):
             length=len(ciphertext_2)
         )
         self._plain_2 = bytes_xor(ciphertext_2, keystream_2)
-        self._logger.debug('Decrypted PLAINTEXT_2 %s', self._plain_2.hex())
+        self._logger.debug('Decrypted PLAINTEXT_2\n%s', fill(self._plain_2.hex(), width=68))
 
         dec_plain_2 = cbor2.CBORDecoder(io.BytesIO(self._plain_2))
         self._peer_conn_id.decode(dec_plain_2)
@@ -1000,8 +998,7 @@ class EdhocInitiator(EdhocEntity):
         if ead:
             ead.encode(enc)
         self._plain_3 = plain_3.getvalue()
-        self._logger.debug('Created PLAINTEXT_3 %s',
-                           self._plain_3.hex())
+        self._logger.debug('Created PLAINTEXT_3\n%s', fill(self._plain_3.hex(), width=68))
 
         enc0 = Enc0Message(
             phdr={},
@@ -1042,7 +1039,7 @@ class EdhocInitiator(EdhocEntity):
         self._logger.debug('Decrypting with key K=%s',
                            enc0.key.k.hex())
         plain_4 = enc0.decrypt()
-        self._logger.debug('Decrypted PLAINTEXT_4 %s', plain_4.hex())
+        self._logger.debug('Decrypted PLAINTEXT_4\n%s', fill(plain_4.hex(), width=68))
 
         dec_plain_4 = cbor2.CBORDecoder(io.BytesIO(plain_4))
         ead = EadList()
@@ -1131,8 +1128,7 @@ class EdhocResponder(EdhocEntity):
         if ead:
             ead.encode(enc)
         self._plain_2 = plain_2.getvalue()
-        self._logger.debug('Created PLAINTEXT_2 %s',
-                           self._plain_2.hex())
+        self._logger.debug('Created PLAINTEXT_2\n%s', fill(self._plain_2.hex(), width=68))
 
         keystream_2 = self.edhoc_kdf(
             prk=self._prk_2e,
@@ -1165,7 +1161,7 @@ class EdhocResponder(EdhocEntity):
         self._logger.debug('Decrypting with key K=%s',
                            enc0.key.k.hex())
         self._plain_3 = enc0.decrypt()
-        self._logger.debug('Decrypted PLAINTEXT_3 %s', self._plain_3.hex())
+        self._logger.debug('Decrypted PLAINTEXT_3\n%s', fill(self._plain_3.hex(), width=68))
 
         dec_plain_3 = cbor2.CBORDecoder(io.BytesIO(self._plain_3))
         self._peer_id_cred.decode(dec_plain_3)
@@ -1215,9 +1211,7 @@ class EdhocResponder(EdhocEntity):
         self._logger.debug('Using EAD_4 %s', ead)
         if ead:
             ead.encode(enc)
-        plain_4.getvalue()
-        self._logger.debug('Created PLAINTEXT_4 %s',
-                           plain_4.getvalue().hex())
+        self._logger.debug('Created PLAINTEXT_4\n%s', fill(plain_4.getvalue().hex(), width=68))
 
         enc0 = Enc0Message(
             phdr={},
