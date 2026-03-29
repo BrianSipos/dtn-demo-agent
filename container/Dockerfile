@@ -27,7 +27,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         git python3-pip python3-venv python3-wheel python3-setuptools \
         libdbus-glib-1-dev libcairo2-dev libgirepository-2.0-dev \
         pkg-config \
-        dbus 
+        dbus \
+        iproute2
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --break-system-packages pip-tools maturin
 
@@ -50,4 +51,5 @@ COPY container/*.service container/*.slice /usr/local/lib/systemd/system/
 # This will require file /etc/xdg/dtn/node.yaml
 RUN systemctl enable dtn-bp-agent@node && \
     systemctl enable dtn-tcpcl-agent@node && \
-    systemctl enable dtn-udpcl-agent@node
+    systemctl enable dtn-udpcl-agent@node && \
+    systemctl enable dtn-btpu-agent@node

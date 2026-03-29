@@ -428,6 +428,7 @@ class Runner:
             os.makedirs(log_path, exist_ok=True)
 
             extconfig = node_opts.get('config', {})
+            use_mac = node_opts.get('use_mac', True)
             use_ipv4 = node_opts.get('use_ipv4', True)
             use_ipv6 = node_opts.get('use_ipv6', True)
             nodeid = 'dtn://{}/'.format(node_name)
@@ -480,6 +481,16 @@ class Runner:
             bp_tx_routes = extconfig.get('bp_tx_routes', [])
 
             nodeconf = {
+                'btpu': {
+                    'log_level': 'debug',
+                    'bus_addr': 'system',
+                    'bus_service': 'org.ietf.dtn.node.btpu',
+                    'node_id': nodeid,
+
+                    'polling': extconfig.get('btpu_polling', []),
+                    'init_listen': extconfig.get('btpu_listen', []),
+                    'mtu_default': 800, # FIXME force segmentation
+                },
                 'udpcl': {
                     'log_level': 'debug',
                     'bus_addr': 'system',

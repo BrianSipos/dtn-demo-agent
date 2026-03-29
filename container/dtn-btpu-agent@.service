@@ -1,0 +1,12 @@
+[Unit]
+Description=DTN BTPU Agent for %i
+After=network-online.target
+
+[Service]
+Slice=dtn.slice
+Type=dbus
+ExecStart=btpu-agent --config-file /etc/xdg/dtn/%i.yaml
+BusName=org.ietf.dtn.%i.btpu
+
+[Install]
+WantedBy=dtn-bp-agent@%i.service

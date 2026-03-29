@@ -13,7 +13,7 @@ import psutil
 import re
 import socket
 import traceback
-from typing import List
+from typing import List, Optional
 
 from scapy_cbor.util import encode_diagnostic
 from bp.config import Config, TxRouteItem
@@ -311,27 +311,11 @@ class SAND(AbstractApplication):
         ]
         return ctr
 
-    def _send_msg(self, ctr, address, local_address, local_if):
+    def _send_msg(self, ctr: BundleContainer):
         ''' Send an SAND message
 
         :param ctr: The message container.
-        :param address: The remote address to send to.
-        :param local_address: The address to send from.
         '''
-
-        # Force the route
-        ctr.route = TxRouteItem(
-            eid_pattern=None,
-            next_nodeid=ctr.bundle.primary.destination,
-            cl_type='udpcl',
-            raw_config=dict(
-                address=address,
-                port=4556,
-                local_address=local_address,
-                local_if=local_if,
-            ),
-        )
-
         try:
             self._agent.send_bundle(ctr)
         except Exception:
@@ -363,39 +347,50 @@ class SAND(AbstractApplication):
         # Each interface gets its own message
         for (if_name, items) in psutil.net_if_addrs().items():
             name_objs = []
-            addr_objs = []
-            local_if = None
-            local_ipv4 = None
-            local_ipv6 = None
+            ip_addr_objs = []
+            mac_addr_objs = []
+
+            local_if: Optional[int] = None
+            local_mac: Optional[str] = None
+            local_ipv4: Optional[str] = None
+            local_ipv6: Optional[str] = None
             for item in items:
-                if item.family not in {socket.AF_INET, socket.AF_INET6}:
-                    continue
+                if item.family == psutil.AF_LINK:
+                    # ignore loopback interfaces
+                    if item.address == '00:00:00:00:00:00':
+                        continue
+                    if not local_mac:
+                        local_mac = item.address
+                    mac_addr_objs.append(local_mac)
 
-                if item.family == socket.AF_INET6 and '%' in item.address:
-                    addr = item.address.split('%')[0]
-                else:
-                    addr = item.address
-                addr = ipaddress.ip_address(addr)
-                if addr.is_loopback:
-                    continue
+                elif item.family in {socket.AF_INET, socket.AF_INET6}:
+                    # ignore loopback interfaces
+                    if item.family == socket.AF_INET6 and '%' in item.address:
+                        addr = item.address.split('%')[0]
+                    else:
+                        addr = item.address
+                    addr = ipaddress.ip_address(addr)
+                    if addr.is_loopback:
+                        continue
 
-                local_if = socket.if_nametoindex(if_name)
-                if not local_ipv4 and item.family == socket.AF_INET:
-                    local_ipv4 = str(addr)
-                if not local_ipv6 and item.family == socket.AF_INET6:
-                    local_ipv6 = str(addr)
+                    local_if = socket.if_nametoindex(if_name)
+                    if not local_ipv4 and item.family == socket.AF_INET:
+                        local_ipv4 = str(addr)
+                    if not local_ipv6 and item.family == socket.AF_INET6:
+                        local_ipv6 = str(addr)
 
-                if addr == own_addr:
-                    name_objs.append(own_name)
-                addr_objs.append(
-                    addr.packed
-                )
+                    if addr == own_addr:
+                        name_objs.append(own_name)
+
+                    ip_addr_objs.append(
+                        addr.packed
+                    )
 
             # nothing to offer on this interface
-            if not addr_objs:
+            if not ip_addr_objs and not mac_addr_objs:
                 continue
 
-            LOGGER.info('Sending hello on %s with %s and %s', if_name, local_ipv4, local_ipv6)
+            LOGGER.info('Sending hello on %s with %s and %s and %s', if_name, local_ipv4, local_ipv6, local_mac)
 
             peer_objs = []
             for item in self._one_hop.values():
@@ -424,7 +419,7 @@ class SAND(AbstractApplication):
                         {
                             ClKeys.CL_TYPE: ClType.UDPCL,
                             ClKeys.DNSNAME: name_objs,
-                            ClKeys.ADDR: addr_objs,
+                            ClKeys.ADDR: ip_addr_objs,
                         },
                     ],
                 }
@@ -436,13 +431,56 @@ class SAND(AbstractApplication):
                 enc.encode(enc.encode_to_bytes(msg))
 
             ctr = self._gen_bundle(adu.getvalue(), NEIGHBOR_EID)
+
+            if local_mac:
+                ctr.route = TxRouteItem(
+                    eid_pattern=None,
+                    next_nodeid=ctr.bundle.primary.destination,
+                    cl_type='btpu',
+                    raw_config=dict(
+                        address='01:00:5E:90:00:04',
+                        local_address=local_mac,
+                        local_if=if_name,
+                    ),
+                )
+                self._send_msg(ctr)
+
             if local_ipv4:
-                self._send_msg(ctr, '224.0.1.20', local_ipv4, local_if)
-            if local_ipv6:
+                # reset state
                 ctr.sender = None
                 for blk in ctr.block_type(BlockIntegrityBlock):
                     ctr.remove_block(blk)
 
-                self._send_msg(ctr, 'FF05::114', local_ipv6, local_if)
+                ctr.route = TxRouteItem(
+                    eid_pattern=None,
+                    next_nodeid=ctr.bundle.primary.destination,
+                    cl_type='udpcl',
+                    raw_config=dict(
+                        address='224.0.1.20',
+                        port=4556,
+                        local_address=local_ipv4,
+                        local_if=local_if,
+                    ),
+                )
+                self._send_msg(ctr)
+
+            if local_ipv6:
+                # reset state
+                ctr.sender = None
+                for blk in ctr.block_type(BlockIntegrityBlock):
+                    ctr.remove_block(blk)
+
+                ctr.route = TxRouteItem(
+                    eid_pattern=None,
+                    next_nodeid=ctr.bundle.primary.destination,
+                    cl_type='udpcl',
+                    raw_config=dict(
+                        address='FF05::114',
+                        port=4556,
+                        local_address=local_ipv6,
+                        local_if=local_if,
+                    ),
+                )
+                self._send_msg(ctr)
 
         self._last_hello = self._now()

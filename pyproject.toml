@@ -29,6 +29,8 @@ dependencies = [
   "certvalidator",
   "dbus-python",
   "ifaddr ~=0.2",
+  "ipaddress ~=1.0",
+  "macaddress ~=2.0",
   # work around lack of release version fix for oscrypto issue #75
   # https://github.com/wbond/oscrypto/pull/76
   "oscrypto @git+https://github.com/wbond/oscrypto.git@master",
@@ -101,6 +103,7 @@ tcpcl-messagegen = "tcpcl.test.messagegen:main"
 tcpcl-bundlegen = "tcpcl.test.bundlegen:main"
 tcpcl-agent = "tcpcl.cmd:main"
 udpcl-agent = "udpcl.cmd:main"
+btpu-agent = "btpu.cmd:main"
 bp-agent = "bp.cmd:main"
 
 [project.urls]

@@ -1,0 +1,36 @@
+nets:
+  dtnA:
+    subnet4: "192.168.100.0/24"
+
+nodes:
+  node000:
+    nets: [dtnA]
+    keys:
+      sign:
+        keytype: SECP256R1
+    config:
+      apps:
+        sand:
+          enable: true
+          endpoint: dtn://node000/sand
+      btpu_listen:
+        - ifname: 'dtnA'
+          multicast_member:
+            - addr: '01:00:5E:90:00:04'
+      tls_enable: false
+
+  node001:
+    nets: [dtnA]
+    keys:
+      sign:
+        keytype: SECP256R1
+    config:
+      apps:
+        sand:
+          enable: true
+          endpoint: dtn://node001/sand
+      btpu_listen:
+        - ifname: 'dtnA'
+          multicast_member:
+            - addr: '01:00:5E:90:00:04'
+      tls_enable: false
