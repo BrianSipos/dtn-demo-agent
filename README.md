@@ -8,12 +8,14 @@ Once the agent is started, regardless of which or if a startup action was given,
 ## Starting the Agent
 
 All of these commands require either a local installation of the python packages, or using an environment such as
-```
+
+```sh
 PYTHONPATH=demo-agent/src
 ```
 
 When running local--local testing on loopback device "lo" alternate address assignments must be made similarly to:
-```
+
+```sh
 sudo ip -4 addr add 127.0.0.2/8 dev lo
 sudo ip -4 addr add 127.0.0.3/8 dev lo
 sudo ip -6 addr add ::2/128 dev lo
@@ -21,7 +23,8 @@ ip link set dev lo multicast on
 ```
 
 A pair of TCPCL entities can be created with commands:
-```
+
+```sh
 python3 -m tcpcl.agent --config-file=server.yaml
 python3 -m tcpcl.agent --config-file=client.yaml
 ```
@@ -66,16 +69,19 @@ Notable methods in this interface are:
 - `close()` which closes the TCP connection immediately.
 
 Files can be sent with commands similar to:
-```
+
+```sh
 dbus-send --print-reply --dest=tcpcl.Client /org/ietf/dtn/tcpcl/Contact0 org.ietf.dtn.tcpcl.Contact.send_bundle_file string:"/etc/hostname"
 ```
 
 Files can be popped out of the agent after reception with commands similar to:
-```
+
+```sh
 dbus-send --print-reply --dest=tcpcl.Server /org/ietf/dtn/tcpcl/Contact0 org.ietf.dtn.tcpcl.Contact.recv_bundle_get_queue
 ```
 to get the received Transfer ID, and
-```
+
+```sh
 dbus-send --print-reply --dest=tcpcl.Server /org/ietf/dtn/tcpcl/Contact0 org.ietf.dtn.tcpcl.Contact.recv_bundle_pop_file string:1 string:/tmp/dest
 ```
 to actually save the received bundle.
@@ -83,7 +89,8 @@ to actually save the received bundle.
 ## Network Sequencing Tests
 
 There is a full end-to-end agent test which can be run by the command:
-```
+
+```sh
 python3 -m tcpcl.test.bundlegen <gentype> <gencount>
 ```
 where `gentype` of "fullvalid" generates valid BPv7 test bundles, and `gencount` is the total number of bundles to generate and transfer.
@@ -94,51 +101,51 @@ The `run.py` commands use the environment `DOCKER` to control the container tool
 For example in fedora use the environment `DOCKER="sudo podman"`.
 
 To install prerequisites for python run:
-```
+
+```sh
 pip3 install '.[container]'
 ```
 
 To initialize and start a set of containers:
-```
+
+```sh
 ./container/run.py --config container/example.yaml act pkigen build create start ready
 ```
 
 To observe the log of one of the nodes:
-```
-./container/run.py --config container/example.yaml exec node000 -- journalctl -f
+
+```sh
+./container/run.py --config container/example.yaml exec node001 -- journalctl -f
 ```
 
 To capture traffic across container networks, run similar to:
-```
+
+```sh
 wireshark -i br-dtnA -i br-dtnB -f 'port 4556 or port 1113 or icmp' -Y 'bpv7' -k
 ```
 
 To call DBus methods in one of the nodes:
-```
-./container/run.py --config container/example.yaml exec node000 dbus-send --system --print-reply --dest=org.ietf.dtn.node.udpcl /org/ietf/dtn/udpcl/Agent org.ietf.dtn.udpcl.Agent.pmtud_start string:node002. uint16:4556
+
+```sh
+./container/run.py --config container/example.yaml exec node001 dbus-send --system --print-reply --dest=org.ietf.dtn.node.udpcl /org/ietf/dtn/udpcl/Agent org.ietf.dtn.udpcl.Agent.pmtud_start string:node003. uint16:4556
 ```
 
 ## ACME Validation Prototype
 
 To perform an ACME validation exchange between two nodes run the script:
 
-```
- node000 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.start_expect_acme_request string:"dDtaviYTPUWFS3NK37YWfQ" string:"tPUZNY4ONIk6LxErRFEjVw" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
-docker container exec -it node001 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.send_acme_request string:"dtn://node000/" string:"dDtaviYTPUWFS3NK37YWfQ" string:"tPUZNY4ONIk6LxErRFEjVw" string:"p3yRYFU4KxwQaHQjJ2RdiQ" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
-docker container exec -it node000 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.stop_expect_acme_request string:"dDtaviYTPUWFS3NK37YWfQ"
+```sh
+docker container exec -it node001 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.start_expect_acme_request string:"dDtaviYTPUWFS3NK37YWfQ" string:"tPUZNY4ONIk6LxErRFEjVw" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
+docker container exec -it node002 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.send_acme_request string:"dtn://node001/" string:"dDtaviYTPUWFS3NK37YWfQ" string:"tPUZNY4ONIk6LxErRFEjVw" string:"p3yRYFU4KxwQaHQjJ2RdiQ" string:"LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ" && \
+docker container exec -it node001 dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/admin org.ietf.dtn.bp.admin.stop_expect_acme_request string:"dDtaviYTPUWFS3NK37YWfQ"
 ```
 
 ## SAFE Prototype
 
 To initiate a primary SA with another SAFE endpoint run:
 
-```
-./container/run.py --config container/example-safe.yaml exec node000 -- dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/safe org.ietf.dtn.bp.safe.start string:dtn://node001/safe
-```
-
-## UDPCLv2 Prototype
-
-A demonstration of active queue management (AQM) with a variation of the Prague congestion control algorithm (CCA) can be run with the following, which will configure container interfaces to use HTB rate control down to 100kBps with a CoDEL queue for ECN marking and then transfer an 8MB ADU which takes more than a minute at that rate.
+```sh
+./container/run.py --config container/example-safe.yaml exec node001 -- dbus-send --system --print-reply --dest=org.ietf.dtn.node.bp /org/ietf/dtn/bp/app/safe org.ietf.dtn.bp.safe.start string:dtn://node002/safe
 
 ```sh
 ./container/run.py --config container/example-sand.yaml act pkigen build create start ready rate_ctrl && \

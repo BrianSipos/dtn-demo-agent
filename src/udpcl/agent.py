@@ -18,10 +18,8 @@ import cbor2
 import portion
 import dbus.service
 from gi.repository import GLib as glib
-from udpcl.config import PollConfig
 from bp.encoding.fields import DtnTimeField
-
-from udpcl.config import Config, ListenConfig
+from udpcl.config import Config, PollConfig, ListenConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,13 +33,14 @@ try:
 except AttributeError:
     IP_PKTINFO = 8
 
+# Code points to match Linux kernel
 IP_MTU_DISCOVER = 10
 IP_PMTUDISC_DONT = 0
 IP_PMTUDISC_WANT = 1
 IP_PMTUDISC_DO = 2  # Always DF
 IP_PMTUDISC_PROBE = 3  # DF and ignore MTU
 
-''' Delay in milliseconds '''
+# Following bit masks from RFC 9331
 ECN_NOECT = 0x00
 ECN_ECT1 = 0x01
 ECN_ECT0 = 0x02
@@ -92,7 +91,7 @@ class BundleItem(object):
 
 @dataclass
 class Transfer(object):
-    ''' State for fragmented transfers.
+    ''' State for segmented transfers.
     '''
 
     # The remote address
@@ -1235,7 +1234,7 @@ class Agent(dbus.service.Object):
         return str(self._add_tx_item(item))
 
     @dbus.service.method(DBUS_IFACE, in_signature='aya{sv}', out_signature='s')
-    def send_bundle_data(self, data, tx_params):
+    def send_bundle_data(self, data: bytes, tx_params):
         ''' Send bundle data directly.
         '''
         # byte array to bytes

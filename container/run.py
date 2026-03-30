@@ -296,10 +296,7 @@ class Runner:
 
         for (node_name, node_opts) in self._config['nodes'].items():
             ipn_node = node_opts.get('ipn_node')
-            if ipn_node:
-                nodeid = 'ipn:{}.0'.format(ipn_node)
-            else:
-                nodeid = 'dtn://{}/'.format(node_name)
+            nodeid = 'ipn:{}.0'.format(ipn_node) if ipn_node else 'dtn://{}/'.format(node_name)
 
             # Ubuntu common path mounted to /etc/ssl/
             nodedir = os.path.join(self._stagedir, 'nodes', node_name, 'ssl')
@@ -455,6 +452,19 @@ class Runner:
                         ],
                     })
 
+            ltp_opts = extconfig.get('ltp', {})
+            ltpcl_eng_id = ltp_opts.get('engine_id')
+            ltpcl_listen = []
+            if extconfig.get('ltpcl_listen', True):
+                if use_ipv4:
+                    ltpcl_listen.append({
+                        'address': '0.0.0.0',
+                    })
+                if use_ipv6:
+                    ltpcl_listen.append({
+                        'address': '::',
+                    })
+
             tcpcl_listen = []
             if extconfig.get('tcpcl_listen', True):
                 if use_ipv4 and not use_ipv6:
@@ -495,6 +505,17 @@ class Runner:
                     'init_listen': udpcl_listen,
                     'mtu_default': 1400,
                 },
+                'ltpcl': {
+                    'log_level': 'debug',
+                    'bus_addr': 'system',
+                    'bus_service': 'org.ietf.dtn.node.ltpcl',
+                    'node_id': nodeid,
+
+                    'engine_id': ltpcl_eng_id,
+                    'default_tx_port': 1113,
+                    'mtu_default': 1500,
+                    'init_listen': ltpcl_listen,
+                },
                 'tcpcl': {
                     'log_level': 'debug',
                     'bus_addr': 'system',
@@ -514,6 +535,7 @@ class Runner:
                     'bus_service': 'org.ietf.dtn.node.bp',
                     'node_id': nodeid,
 
+                    'integrity_for_blocks': extconfig.get('integrity_for_blocks', [1]),
                     'verify_ca_file': '/etc/ssl/certs/ca.crt',
                     'sign_cert_file': '/etc/ssl/certs/node-sign.crt',
                     'sign_key_file': '/etc/ssl/private/node-sign.pem',
@@ -540,7 +562,7 @@ class Runner:
 
     @action
     def start(self):
-        self._docker.run_docker_compose(['up', '-d'])
+        self._docker.run_docker_compose(['up', '-d', '--remove-orphans'])
 
     @action
     def ready(self):
