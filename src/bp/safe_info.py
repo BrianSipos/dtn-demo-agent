@@ -85,6 +85,7 @@ class ActSCKeys(enum.IntEnum):
     TX_PREKEY_KDR = 13
     ICK = 14
 
+
 @enum.unique
 class ActKCKeys(enum.IntEnum):
     ''' Map keys for ActivityType.KEY_CREATION '''
@@ -94,6 +95,7 @@ class ActKCKeys(enum.IntEnum):
     PREKEY_KID = 10
     ARN = 11
     VALID_NTI = 12
+
 
 @enum.unique
 class SecModeSelector(enum.IntEnum):
