@@ -1153,10 +1153,7 @@ class SafeEntity:
         act.info.state_changed()
 
     @property
-    def own_eid(self) -> str:
-        if not self._own_eid:
-            raise AttributeError('no own EID set')
-
+    def own_eid(self) -> Optional[str]:
         return self._own_eid
 
     @own_eid.setter
