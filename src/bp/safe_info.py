@@ -309,8 +309,8 @@ class SaCreation(ActivityInfo):
             ActSCKeys.TX_PREKEY_KDR: [0, 0],
             ActSCKeys.ICK: [
                 {
-                    ActKCKeys.KID: b'010101',
-                    ActKCKeys.ARN: random.randbytes(16),
+                    ActKCKeys.KID: random.randbytes(6),
+                    ActKCKeys.ARN: random.randbytes(10),  # total of 16 bytes
                 },
             ]
         }
@@ -413,6 +413,8 @@ class ActivityState:
     act_type: ActivityType
     ''' Activity type enumeration '''
 
+    error: Optional[int] = None
+    ''' Set to a specific error code if this activity has failed '''
     info: ActivityInfo = None
     ''' Activity-type specific descriptor '''
 
@@ -458,8 +460,11 @@ class ActivityState:
     def is_finished(self) -> bool:
         ''' Determine if this activity is finished.
 
-        :return: True if the last step was sent or received already.
+        :return: True if the last step was sent or received already or
+        the activity has failed with some error.
         '''
+        if self.error is not None:
+            return True
         if self.info is None:
             return False
         return self.info.is_finished()
@@ -851,11 +856,14 @@ class SafeEntity:
         # message ident
         enc.encode(act.act_idx)
         enc.encode(act.next_step)
+        enc.encode(act.act_type)
 
-        items = self._act_get_tx_items(act)
-        if items is not None:
-            enc.encode(act.act_type)
-            enc.encode(items)
+        if act.error is not None:
+            pass
+        else:
+            items = self._act_get_tx_items(act)
+            if items is not None:
+                enc.encode(items)
 
         act.last_step_tx = act.next_step
         self._act_state_changed(act)
@@ -869,14 +877,16 @@ class SafeEntity:
         self._logger.debug('Message RX data %s', msg.hex())
         dec = cbor2.CBORDecoder(io.BytesIO(msg))
 
-        act_idx = dec.decode()
-        act_step = dec.decode()
+        act_idx: Optional[int] = None
+        act_step: Optional[int] = None
+        act_type: Optional[int] = None
         try:
+            act_idx = dec.decode()
+            act_step = dec.decode()
             act_type = dec.decode()
         except cbor2.CBORDecodeEOF:
-            act_type = None
-        if act_type is None and act_step == 0:
-            self._logger.error('Received short message on step 0')
+            self._logger.error('Received short message on idx %s step %s', act_idx, act_step)
+            raise
 
         am_initiator = act_step % 2 == 1
         self._logger.debug('Message RX act-idx %s act-step %s am-initiator %s',
@@ -887,14 +897,13 @@ class SafeEntity:
             if act_step != 0:
                 self._logger.warning('First step seen of index %d step %d', act_idx, act_step)
 
-            act_type = ActivityType(act_type)
             act = ActivityState(
                 as_initiator=False,
                 init_eid=peer_state.peer_eid,
                 act_idx=act_idx,
-                act_type=act_type,
+                act_type=ActivityType(act_type),
             )
-            act.info = _INFOS[act_type](app=self, peer_state=peer_state, act=act)
+            act.info = _INFOS[act.act_type](app=self, peer_state=peer_state, act=act)
             peer_state.add_activity(act)
 
         else:
@@ -905,10 +914,17 @@ class SafeEntity:
             return
 
         try:
-            items = dec.decode()
+            item = dec.decode()
         except cbor2.CBORDecodeEOF:
-            items = None
-        self._act_set_rx_items(act, items)
+            self._logger.debug('Message on idx %s step %s has no payload or error', act_idx, act_step)
+            item = None
+
+        if isinstance(item, int):
+            self._act_set_error(act, item)
+        elif isinstance(item, dict):
+            self._act_set_rx_items(act, item)
+        elif item is not None:
+            self._logger.error('Message on idx %s step %s has invalid payload: %s', act_idx, act_step, item)
 
         act.last_step_rx = act_step
         self._act_state_changed(act)

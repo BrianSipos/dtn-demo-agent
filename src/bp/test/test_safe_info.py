@@ -229,13 +229,13 @@ class TestBpSafe(unittest.TestCase):
 
             # only one post-IA PDU
             self.assertEqual(1, sa1_tx_ck.op_count)
-            self.assertEqual(3, sa1_tx_ck.bytes_count)
+            self.assertEqual(4, sa1_tx_ck.bytes_count)
             self.assertEqual(0, sa1_rx_ck.op_count)
             self.assertEqual(0, sa1_rx_ck.bytes_count)
             self.assertEqual(0, sa2_tx_ck.op_count)
             self.assertEqual(0, sa2_tx_ck.bytes_count)
             self.assertEqual(1, sa2_rx_ck.op_count)
-            self.assertEqual(3, sa2_rx_ck.bytes_count)
+            self.assertEqual(4, sa2_rx_ck.bytes_count)
 
         ssas1 = safe1.get_secondary_sas()
         ssas2 = safe2.get_secondary_sas()
