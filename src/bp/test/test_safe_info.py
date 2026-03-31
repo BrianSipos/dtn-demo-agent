@@ -246,10 +246,12 @@ class TestBpSafe(unittest.TestCase):
             # Same per-SA PRK
             self._compare_keystores(sa1.keystores, sa2.keystores)
 
-            self.assertEqual(0, len(sa1.keystores.tx_keys))
-            self.assertEqual(0, len(sa1.keystores.rx_keys))
-            self.assertEqual(0, len(sa2.keystores.tx_keys))
-            self.assertEqual(0, len(sa2.keystores.rx_keys))
+            # one initial key in each direction
+            self.assertEqual(1, len(sa1.keystores.tx_keys))
+            self.assertEqual(1, len(sa1.keystores.rx_keys))
+            self.assertEqual(1, len(sa2.keystores.tx_keys))
+            self.assertEqual(1, len(sa2.keystores.rx_keys))
+            print(sa1.keystores)
 
     def _compare_keystores(self, ks1: KeyStoreSet, ks2: KeyStoreSet):
         self.assertEqual(ks1.prk_sa, ks2.prk_sa)

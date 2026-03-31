@@ -13,7 +13,7 @@ from pycose import algorithms, headers
 from pycose.keys import keyparam, keyops, CoseKey, SymmetricKey
 from pycose.messages import Enc0Message
 import random
-from typing import ClassVar, Dict, List, Optional, Tuple, Type, cast
+from typing import Any, ClassVar, Dict, Iterable, List, Optional, Tuple, Type, cast
 
 from pycose_edhoc import (
     AbstractKDF,
@@ -23,13 +23,16 @@ from pycose_edhoc import (
 
 LOGGER = logging.getLogger(__name__)
 
+SafeMap = Dict[int, Any]
+''' Type matching the decoded `safe-map` CDDL structure '''
+
 
 @dataclass
 class SimpleData:
     ''' Instances used with ActivityInfo.data '''
-    tx_items: Dict[int, object] = field(default_factory=dict)
+    tx_items: SafeMap = field(default_factory=dict)
     ''' Items to be sent to a peer '''
-    rx_items: Dict[int, object] = field(default_factory=dict)
+    rx_items: SafeMap = field(default_factory=dict)
     ''' Items received from a peer '''
 
 
@@ -48,9 +51,9 @@ class ActivityType(enum.IntEnum):
     SA_CREATION = 3
     SA_TEARDOWN = 4
 
-    CK_CREATION = 6
-    CK_DISCARD = 7
-    CK_REJECT = 8
+    KEY_CREATION = 6
+    KEY_DISCARD = 7
+    KEY_REJECT = 8
 
     CP_CREATION = 9
     CP_DISCARD = 10
@@ -68,15 +71,34 @@ class ActCIKeys(enum.IntEnum):
 @enum.unique
 class ActSCKeys(enum.IntEnum):
     ''' Map keys for ActivityType.SA_CREATION '''
-    LOCAL_SAI = 1
-    AKE = 2
-    ARN = 3
-    CTXID = 4
+    SENDER_SAI = 1
+
+    SOS = 4
     KUS = 5
     TSI = 6
     TSR = 7
-    NTI = 8
-    TBT = 9
+    VALID_NTI = 8
+    SMS = 9
+    RX_KEY_KDR = 10
+    TX_KEY_KDR = 11
+    RX_PREKEY_KDR = 12
+    TX_PREKEY_KDR = 13
+    ICK = 14
+
+@enum.unique
+class ActKCKeys(enum.IntEnum):
+    ''' Map keys for ActivityType.KEY_CREATION '''
+    SENDER_SAI = 1
+    KID = 2
+
+    PREKEY_KID = 10
+    ARN = 11
+    VALID_NTI = 12
+
+@enum.unique
+class SecModeSelector(enum.IntEnum):
+    END_TO_END = 1
+    TRANSPORT = 2
 
 
 @dataclass
@@ -93,10 +115,10 @@ class ActivityInfo(abc.ABC):
     def is_finished(self) -> bool:
         raise NotImplementedError
 
-    def get_tx_items(self) -> Optional[dict]:
+    def get_tx_items(self) -> Optional[SafeMap]:
         return None
 
-    def set_rx_items(self, items: Optional[dict]):
+    def set_rx_items(self, items: Optional[SafeMap]):
         pass
 
     def state_changed(self):
@@ -193,9 +215,9 @@ class InitialAuthn(ActivityInfo):
             peer_eid=self.peer_state.peer_eid,
             peer_sai=edhoc.get_peer_conn_id(),
             edhoc=edhoc,
-            suite=suite,
             keystores=KeyStoreSet(
                 was_initiator=self.act.as_initiator,
+                suite=suite,
                 app_kdf=edhoc.app_kdf,
                 prk_sa=prk_sa,
             ),
@@ -204,9 +226,9 @@ class InitialAuthn(ActivityInfo):
         # Assign initial keys
         prk_ck = None
         arn = b''
-        tx_key = psa.create_content_key(kid_ck=b'', prk_ck=prk_ck, arn=arn, txi=psa.keystores.was_initiator, is_tx=True)
+        tx_key = psa.keystores.create_content_key(kid_ck=b'', prk_ck=prk_ck, arn=arn, txi=psa.keystores.was_initiator, is_tx=True)
         psa.keystores.tx_keys[tx_key.kid] = TxContentKey(key=tx_key)
-        rx_key = psa.create_content_key(kid_ck=b'', prk_ck=prk_ck, arn=arn, txi=(not psa.keystores.was_initiator), is_tx=False)
+        rx_key = psa.keystores.create_content_key(kid_ck=b'', prk_ck=prk_ck, arn=arn, txi=(not psa.keystores.was_initiator), is_tx=False)
         psa.keystores.rx_keys[rx_key.kid] = RxContentKey(key=rx_key)
 
         self.app.add_primary_sa(psa)
@@ -219,7 +241,7 @@ class CapabilityIndication(ActivityInfo):
         state = (self.act.last_step_tx, self.act.last_step_rx)
         return max(state) == 2
 
-    def get_tx_items(self) -> Optional[dict]:
+    def get_tx_items(self) -> Optional[SafeMap]:
         sdata = cast(SimpleData, self.data)
         if sdata.tx_items:
             return None
@@ -246,7 +268,7 @@ class SaCreation(ActivityInfo):
         state = (self.act.last_step_tx, self.act.last_step_rx)
         return max(state) == 2
 
-    def get_tx_items(self) -> Optional[dict]:
+    def get_tx_items(self) -> Optional[SafeMap]:
         sdata = cast(SimpleData, self.data)
         if sdata.tx_items:
             return None
@@ -269,23 +291,32 @@ class SaCreation(ActivityInfo):
             self.data.ake_priv = None
 
         items = {
-            ActSCKeys.LOCAL_SAI: random.randbytes(6),
-            ActSCKeys.ARN: random.randbytes(16),
-            ActSCKeys.CTXID: 3,  # COSE Context
-            ActSCKeys.KUS: {
-                CoseCtxKusOptions.ALG: algorithms.A128GCM.identifier,
-            },
-            ActSCKeys.TBT: 1,
+            ActSCKeys.SENDER_SAI: random.randbytes(6),
+            ActSCKeys.SMS: SecModeSelector.END_TO_END,
+            ActSCKeys.KUS: [
+                3,  # COSE Context,
+                {
+                    CoseCtxKusOptions.ALG: algorithms.A128GCM.identifier,
+                },
+            ],
             ActSCKeys.TSI: None,
             ActSCKeys.TSR: None,
+            ActSCKeys.RX_KEY_KDR: [1, 1],
+            ActSCKeys.TX_KEY_KDR: [1, 1],
+            ActSCKeys.RX_PREKEY_KDR: [0, 0],
+            ActSCKeys.TX_PREKEY_KDR: [0, 0],
+            ActSCKeys.ICK: [
+                {
+                    ActKCKeys.KID: b'010101',
+                    ActKCKeys.ARN: random.randbytes(16),
+                },
+            ]
         }
-        if self.data.ake_priv:
-            items[ActSCKeys.AKE] = key_hdl.to_pub_data(self.data.ake_priv)
 
         sdata.tx_items = items
         return items
 
-    def set_rx_items(self, items: Optional[dict]):
+    def set_rx_items(self, items: Optional[SafeMap]):
         sdata = cast(SimpleData, self.data)
         sdata.rx_items = items
 
@@ -299,27 +330,27 @@ class SaCreation(ActivityInfo):
     def _generate_ssa(self):
         psa = self.peer_state.psa
 
-        local_sai = ConnectionId.from_item(self.data.tx_items[ActSCKeys.LOCAL_SAI])
-        peer_sai = ConnectionId.from_item(self.data.rx_items[ActSCKeys.LOCAL_SAI])
+        local_sai = ConnectionId.from_item(self.data.tx_items[ActSCKeys.SENDER_SAI])
+        peer_sai = ConnectionId.from_item(self.data.rx_items[ActSCKeys.SENDER_SAI])
 
         # Consistency check
-        if self.data.rx_items[ActSCKeys.CTXID] != self.data.tx_items[ActSCKeys.CTXID]:
-            raise RuntimeError('inconsistent CTXID')
+        if self.data.rx_items[ActSCKeys.KUS][0] != self.data.tx_items[ActSCKeys.KUS][0]:
+            raise RuntimeError('inconsistent CTX ID')
 
         if self.act.as_initiator:
             items_i, items_r = self.data.tx_items, self.data.rx_items
         else:
             items_i, items_r = self.data.rx_items, self.data.tx_items
 
-        sai_i = ConnectionId.from_item(items_i[ActSCKeys.LOCAL_SAI])
-        sai_r = ConnectionId.from_item(items_r[ActSCKeys.LOCAL_SAI])
+        sai_i = ConnectionId.from_item(items_i[ActSCKeys.SENDER_SAI])
+        sai_r = ConnectionId.from_item(items_r[ActSCKeys.SENDER_SAI])
 
         context = io.BytesIO()
         enc_context = cbor2.CBOREncoder(context)
         enc_context.encode(sai_i.value)
         enc_context.encode(sai_r.value)
         LOGGER.debug('Generated SSA context %s', context.getvalue().hex())
-        prk_sa = psa.edhoc.edhoc_exporter(SAFE_EXPORTER_LABEL, context.getvalue(), psa.suite.app_hash_length)
+        prk_sa = psa.edhoc.edhoc_exporter(SAFE_EXPORTER_LABEL, context.getvalue(), psa.keystores.suite.app_hash_length)
         LOGGER.debug('Generated PRK_SA2 %s', prk_sa.hex())
 
         ssa = SecondarySecAssn(
@@ -329,10 +360,35 @@ class SaCreation(ActivityInfo):
             peer_sai=peer_sai,
             keystores=KeyStoreSet(
                 was_initiator=self.act.as_initiator,
+                suite=psa.keystores.suite,
                 app_kdf=psa.keystores.app_kdf,
                 prk_sa=prk_sa,
             ),
         )
+
+        if ActSCKeys.ICK in self.data.tx_items:
+            # initial TX keys
+            for kc_items in self.data.tx_items[ActSCKeys.ICK]:
+                tx_key = ssa.keystores.create_content_key(
+                    kid_ck=kc_items[ActKCKeys.KID],
+                    prk_ck=None,
+                    arn=kc_items.get(ActKCKeys.ARN, b''),
+                    txi=ssa.keystores.was_initiator,
+                    is_tx=True
+                )
+                ssa.keystores.tx_keys[tx_key.kid] = TxContentKey(key=tx_key)
+
+        if ActSCKeys.ICK in self.data.rx_items:
+            # initial RX keys
+            for kc_items in self.data.rx_items[ActSCKeys.ICK]:
+                rx_key = ssa.keystores.create_content_key(
+                    kid_ck=kc_items[ActKCKeys.KID],
+                    prk_ck=None,
+                    arn=kc_items.get(ActKCKeys.ARN, b''),
+                    txi=(not ssa.keystores.was_initiator),
+                    is_tx=False
+                )
+                ssa.keystores.rx_keys[rx_key.kid] = RxContentKey(key=rx_key)
 
         self.app.add_secondary_sa(ssa)
 
@@ -501,6 +557,8 @@ class KeyStoreSet:
 
     was_initiator: bool
     ''' True if the local entity was the initiator for this SA '''
+    suite: CipherSuite
+    ''' Copy of the cipher suite info from EDHOC '''
     app_kdf: AbstractKDF
     ''' The KDF function to use for key derivation, determined by EDHOC suite. '''
     prk_sa: bytes
@@ -523,41 +581,16 @@ class KeyStoreSet:
 
         return self.app_kdf.expand(prk, info.getvalue(), length)
 
-
-@dataclass
-class PrimarySecAssn:
-    ''' State of a security association from Section 3.3 '''
-    local_sai: ConnectionId
-
-    peer_eid: str
-    peer_sai: ConnectionId
-
-    edhoc: EdhocEntity
-    suite: CipherSuite
-    ''' Copy of the cipher suite info from EDHOC '''
-
-    keystores: KeyStoreSet
-    ''' Key stores for this SA '''
-
-    def __str__(self) -> str:
-        parts = [
-            f'local_sai={self.local_sai.value.hex()}',
-            f'peer_eid={self.peer_eid!r}',
-            f'peer_sai={self.peer_sai.value.hex()}',
-            f'app_aead={self.suite.app_aead.__name__}',
-        ]
-        return f'PrimarySecAssn({",".join(parts)})'
-
     def create_content_key(self, kid_ck: bytes, prk_ck: Optional[bytes], arn: bytes, txi: bool, is_tx: bool) -> SymmetricKey:
         ''' Create a new content key with no key ops yet. '''
         txi = bool(txi)
 
         if prk_ck is None:
-            # no FS
-            prk_ck = self.keystores.prk_sa
+            # no FS default to same as PRK_SA
+            prk_ck = self.prk_sa
 
-        sk = self.keystores.safe_kdf(prk_ck, [1, txi, kid_ck, arn], self.suite.app_key_length)
-        iv = self.keystores.safe_kdf(prk_ck, [2, txi, kid_ck, arn], self.suite.app_iv_length)
+        sk = self.safe_kdf(prk_ck, [1, txi, kid_ck, arn], self.suite.app_key_length)
+        iv = self.safe_kdf(prk_ck, [2, txi, kid_ck, arn], self.suite.app_iv_length)
 
         ops = [keyops.EncryptOp if is_tx else keyops.DecryptOp]
         return SymmetricKey(
@@ -569,6 +602,28 @@ class PrimarySecAssn:
                 keyparam.KpBaseIV: iv,
             }
         )
+
+
+@dataclass
+class PrimarySecAssn:
+    ''' State of a security association from Section 3.3 '''
+    local_sai: ConnectionId
+
+    peer_eid: str
+    peer_sai: ConnectionId
+
+    edhoc: EdhocEntity
+
+    keystores: KeyStoreSet
+    ''' Key stores for this SA '''
+
+    def __str__(self) -> str:
+        parts = [
+            f'local_sai={self.local_sai.value.hex()}',
+            f'peer_eid={self.peer_eid!r}',
+            f'peer_sai={self.peer_sai.value.hex()}',
+        ]
+        return f'PrimarySecAssn({",".join(parts)})'
 
 
 @dataclass
@@ -621,8 +676,9 @@ class SafeEntity:
                  ke_priv_key: Optional[List[CoseKey]] = None,
                  conn_id: Optional[bytes] = None):
 
-        self._own_eid = None
-        self._logger = None
+        self._own_eid: Optional[str] = None
+        # default module logger
+        self._logger = LOGGER
 
         self.send_pdu = send_pdu
         self.method = method
@@ -642,12 +698,12 @@ class SafeEntity:
         self._act_peer: Dict[str, PeerState] = dict()
 
         # primary SAs by local SAI independent of peer
-        self._pri_sai: Dict[str, PrimarySecAssn] = dict()
+        self._pri_sai: Dict[bytes, PrimarySecAssn] = dict()
         # primary SAs by peer EID
         self._pri_peer: Dict[str, PrimarySecAssn] = dict()
 
         # secondary SAs by local SAI independent of peer
-        self._sec_sai: Dict[str, SecondarySecAssn] = dict()
+        self._sec_sai: Dict[bytes, SecondarySecAssn] = dict()
 
     def recv_pdu(self, pdu: bytes, peer_eid: str):
         peer_state = self._peer_state(peer_eid)
@@ -735,7 +791,7 @@ class SafeEntity:
 
             enc0 = Enc0Message(
                 phdr={
-                    headers.Algorithm: psa.suite.app_aead,
+                    headers.Algorithm: psa.keystores.suite.app_aead,
                 },
                 uhdr={
                     headers.PartialIV: partial_iv,
@@ -968,7 +1024,7 @@ class SafeEntity:
 
         enc0 = Enc0Message(
             phdr={
-                headers.Algorithm: psa.suite.app_aead,
+                headers.Algorithm: psa.keystores.suite.app_aead,
             },
             uhdr={
                 headers.PartialIV: partial_iv,
@@ -1022,9 +1078,8 @@ class SafeEntity:
         if act.is_finished():
             # finished after that TX
             self._queue_remove(peer_state, act)
-            act = None
 
-        if act:
+        else:
             def callback(): return self._try_tx_edhoc(peer_state, act.last_step_rx)
             act.timer_retx = glib.timeout_add(2000, callback)
             self._logger.debug('Started %s retransmit timer %d', act, act.timer_retx)
@@ -1083,12 +1138,12 @@ class SafeEntity:
             def callback(): return peer_state.remove_activity(act)
             act.timer_remove = glib.timeout_add(5000, callback)
 
-    def _act_get_tx_items(self, act: ActivityState) -> Optional[dict]:
+    def _act_get_tx_items(self, act: ActivityState) -> Optional[SafeMap]:
         items = act.info.get_tx_items()
         self._logger.debug('Get %s TX items %s', act, items)
         return items
 
-    def _act_set_rx_items(self, act: ActivityState, items: Optional[dict]):
+    def _act_set_rx_items(self, act: ActivityState, items: Optional[SafeMap]):
         self._logger.debug('Set %s RX items %s', act, items)
         act.info.set_rx_items(items)
 
@@ -1099,6 +1154,9 @@ class SafeEntity:
 
     @property
     def own_eid(self) -> str:
+        if not self._own_eid:
+            raise AttributeError('no own EID set')
+
         return self._own_eid
 
     @own_eid.setter
@@ -1109,6 +1167,9 @@ class SafeEntity:
     def start_activity(self, peer_state: PeerState, act_type: ActivityType):
         ''' Start a new activity of a specific type.
         '''
+        if not self._own_eid:
+            raise RuntimeError('no own EID set')
+
         act_type = ActivityType(act_type)
         act = ActivityState(
             as_initiator=True,
@@ -1119,7 +1180,7 @@ class SafeEntity:
         act.info = _INFOS[act_type](app=self, peer_state=peer_state, act=act)
         peer_state.add_activity(act)
 
-    def get_primary_sas(self) -> List[PrimarySecAssn]:
+    def get_primary_sas(self) -> Iterable[PrimarySecAssn]:
         return self._pri_peer.values()
 
     def add_primary_sa(self, psa: PrimarySecAssn):
@@ -1130,7 +1191,7 @@ class SafeEntity:
         self._pri_peer[psa.peer_eid] = psa
         self._act_peer[psa.peer_eid].psa = psa
 
-    def get_secondary_sas(self) -> List[SecondarySecAssn]:
+    def get_secondary_sas(self) -> Iterable[SecondarySecAssn]:
         return self._sec_sai.values()
 
     def add_secondary_sa(self, ssa: SecondarySecAssn):
@@ -1140,6 +1201,9 @@ class SafeEntity:
     def start(self, peer_eid: str):
         ''' Start an Initial Authentication activity.
         '''
+        if not self._own_eid:
+            raise RuntimeError('no own EID set')
+
         peer_state = self._peer_state(peer_eid)
 
         ke_priv = self._ke_priv_key.pop(0) if self._ke_priv_key else None
