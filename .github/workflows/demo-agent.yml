@@ -21,12 +21,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: true
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Dependencies
@@ -64,12 +64,12 @@ jobs:
       CONFIG: container/example-sand.yaml
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: true
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Dependencies
@@ -91,7 +91,7 @@ jobs:
         run: ./container/run.py --config ${CONFIG} act check_sand
       - name: Stop
         run: ./container/run.py --config ${CONFIG} act stop delete
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:
           name: ${{ github.job }}
@@ -108,12 +108,12 @@ jobs:
       CONFIG: container/example-zeroconf.yaml
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: true
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Dependencies
@@ -145,7 +145,7 @@ jobs:
           exit 2
       - name: Stop
         run: ./container/run.py --config ${CONFIG} act stop delete
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:
           name: ${{ github.job }}
