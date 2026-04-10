@@ -53,7 +53,7 @@ jobs:
       - name: Transfer BTPUoE
         if: steps.install.outcome == 'success'
         timeout-minutes: 3
-        run: dbus-run-session -- python3 -m btpu.test.bundlegen --log=debug fullvalid
+        run: sudo dbus-run-session -- python3 -m btpu.test.bundlegen --log=debug fullvalid
 
   integration-test-sand:
     name: Integration test SAND
