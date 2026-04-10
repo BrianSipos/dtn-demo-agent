@@ -51,7 +51,7 @@ jobs:
         timeout-minutes: 3
         run: dbus-run-session -- python3 -m tcpcl.test.bundlegen --log=debug fullvalid
       - name: paths
-        run: ls -l ${Python3_ROOT_DIR}/lib
+        run: ls -l ${Python3_ROOT_DIR}
       - name: Transfer BTPUoE
         if: steps.install.outcome == 'success'
         timeout-minutes: 3
