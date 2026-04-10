@@ -39,21 +39,20 @@ jobs:
         id: install
         run: pip3 install .
       - name: Test with pytest
-        continue-on-error: true
         run: |
           pip3 install '.[test]'
           dbus-run-session -- python3 -m pytest -v --cov=scapy_cbor --cov=bp --cov=udpcl --cov=tcpcl src
       - name: Transfer UDPCL
+        if: ${{ always() }}
         timeout-minutes: 3
-        continue-on-error: true
         run: dbus-run-session -- python3 -m udpcl.test.bundlegen --log=debug fullvalid
       - name: Transfer TCPCL
+        if: ${{ always() }}
         timeout-minutes: 3
-        continue-on-error: true
         run: dbus-run-session -- python3 -m tcpcl.test.bundlegen --log=debug fullvalid
       - name: Transfer BTPUoE
+        if: ${{ always() }}
         timeout-minutes: 3
-        continue-on-error: true
         run: sudo -i dbus-run-session -- ${pythonLocation}/bin/python -m btpu.test.bundlegen --log=debug fullvalid
 
   integration-test-sand:
