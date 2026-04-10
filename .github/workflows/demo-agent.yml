@@ -50,10 +50,12 @@ jobs:
         if: steps.install.outcome == 'success'
         timeout-minutes: 3
         run: dbus-run-session -- python3 -m tcpcl.test.bundlegen --log=debug fullvalid
+      - name: paths
+        run: ls -l ${Python3_ROOT_DIR}/lib
       - name: Transfer BTPUoE
         if: steps.install.outcome == 'success'
         timeout-minutes: 3
-        run: sudo PYTHONPATH=$(python -m site --user-site) -i dbus-run-session -- python3 -m btpu.test.bundlegen --log=debug fullvalid
+        run: sudo PYTHONPATH=${Python3_ROOT_DIR}/lib -i dbus-run-session -- python3 -m btpu.test.bundlegen --log=debug fullvalid
 
   integration-test-sand:
     name: Integration test SAND
