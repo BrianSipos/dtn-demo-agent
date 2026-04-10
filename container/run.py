@@ -489,7 +489,7 @@ class Runner:
 
                     'polling': extconfig.get('btpu_polling', []),
                     'init_listen': extconfig.get('btpu_listen', []),
-                    'mtu_default': 800, # FIXME force segmentation
+                    'mtu_default': 800,  # FIXME force segmentation
                 },
                 'udpcl': {
                     'log_level': 'debug',
