@@ -89,8 +89,6 @@ class UdpclAdaptor(AbstractAdaptor):
     # Interface name
     DBUS_IFACE = 'org.ietf.dtn.udpcl.Agent'
 
-    TAG_ENC = unhexlify('d9d9f7')
-
     def __init__(self, **kwargs):
         AbstractAdaptor.__init__(self, **kwargs)
         self.obj_path = '/org/ietf/dtn/udpcl/Agent'
@@ -106,6 +104,7 @@ class UdpclAdaptor(AbstractAdaptor):
             pass
 
     def _handle_recv_bundle_finish(self, bid, _length, rx_params):
+        self._logger.debug('Handle recv_bundle_finished on %s', bid)
         data = self.agent_obj.recv_bundle_pop_data(bid)
         data = bytes(data)
         try:
@@ -114,17 +113,49 @@ class UdpclAdaptor(AbstractAdaptor):
             pass
 
     def _do_bind(self):
-        agent_iface = dbus.Interface(self.agent_obj, UdpclAdaptor.DBUS_IFACE)
+        agent_iface = dbus.Interface(self.agent_obj, self.DBUS_IFACE)
         agent_iface.connect_to_signal('polling_received', self._handle_polling_received)
         agent_iface.connect_to_signal('recv_bundle_finished', self._handle_recv_bundle_finish)
 
     def send_bundle_func(self, tx_params: dict):
-        do_tag = tx_params.get('do_tag', False)
 
         def sender(data):
-            if do_tag:
-                if not data.startswith(UdpclAdaptor.TAG_ENC):
-                    data = UdpclAdaptor.TAG_ENC + data
+            self.agent_obj.send_bundle_data(
+                dbus.ByteArray(data),
+                dbus.Dictionary(tx_params, signature='sv')
+            )
+
+        return sender
+
+
+@cl_type('btpu')
+class BtpuAdaptor(AbstractAdaptor):
+    ''' BTP-U Convergence layer.
+    '''
+
+    # Interface name
+    DBUS_IFACE = 'org.ietf.dtn.btpu.Agent'
+
+    def __init__(self, **kwargs):
+        AbstractAdaptor.__init__(self, **kwargs)
+        self.obj_path = '/org/ietf/dtn/btpu/Agent'
+
+    def _handle_recv_bundle_finish(self, bid, _length, rx_params):
+        self._logger.debug('Handle recv_bundle_finished on %s', bid)
+        data = self.agent_obj.recv_bundle_pop_data(bid)
+        data = bytes(data)
+        try:
+            self.recv_bundle_finish(data, rx_params)
+        except NotImplementedError:
+            pass
+
+    def _do_bind(self):
+        agent_iface = dbus.Interface(self.agent_obj, self.DBUS_IFACE)
+        agent_iface.connect_to_signal('recv_bundle_finished', self._handle_recv_bundle_finish)
+
+    def send_bundle_func(self, tx_params: dict):
+
+        def sender(data):
             self.agent_obj.send_bundle_data(
                 dbus.ByteArray(data),
                 dbus.Dictionary(tx_params, signature='sv')
@@ -154,7 +185,7 @@ class TcpclAdaptor(AbstractAdaptor):
         self._sess_wait = {}
 
     def _do_bind(self):
-        agent_iface = dbus.Interface(self.agent_obj, TcpclAdaptor.DBUS_IFACE)
+        agent_iface = dbus.Interface(self.agent_obj, self.DBUS_IFACE)
         agent_iface.connect_to_signal('connection_opened', self._conn_attach)
         agent_iface.connect_to_signal('connection_closed', self._conn_detach)
         for conn_path in agent_iface.get_connections():

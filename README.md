@@ -88,6 +88,11 @@ python3 -m tcpcl.test.bundlegen <gentype> <gencount>
 ```
 where `gentype` of "fullvalid" generates valid BPv7 test bundles, and `gencount` is the total number of bundles to generate and transfer.
 
+For BTPUoE, which requires root permissions to access raw packet sockets, an end-to-end test can be run by the command:
+```
+sudo PYTHONPATH=${PWD}/src:$(python3 -m site --user-site) -i -- dbus-run-session -- python3 -m btpu.test.bundlegen fullvalid
+```
+
 # Containerized nodes
 
 The `run.py` commands use the environment `DOCKER` to control the container tool.
