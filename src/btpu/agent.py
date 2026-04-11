@@ -3,9 +3,11 @@ Implementation of a symmetric BTP-UoE agent.
 '''
 import copy
 from dataclasses import dataclass, astuple, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import enum
-from typing import ClassVar, Dict, Optional, BinaryIO, List, Tuple, Iterable
+from typing import (
+    Callable, ClassVar, Dict, Optional, BinaryIO, List, Tuple, Iterable
+)
 import logging
 import macaddress
 import os
@@ -19,13 +21,11 @@ from scapy.arch.linux import (
     SOL_PACKET,
     PACKET_AUXDATA,
     PACKET_ADD_MEMBERSHIP,
-    PACKET_DROP_MEMBERSHIP,
     PACKET_MR_MULTICAST,
 )
 import portion
 import dbus.service
 from gi.repository import GLib as glib
-from bp.encoding.fields import DtnTimeField
 
 from btpu.config import Config, ListenConfig, PollConfig
 from btpu.messages import (
@@ -216,22 +216,22 @@ class Agent(dbus.service.Object):
 
     DBUS_IFACE = 'org.ietf.dtn.btpu.Agent'
 
-    def __init__(self, config, bus_kwargs=None):
+    def __init__(self, config: Config, bus_kwargs=None):
         self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self._config = config
-        self._on_stop = None
+        self._on_stop: Optional[Callable[[], None]] = None
 
-        self._bindsocks = {}
+        self._bindsocks: Dict[Tuple, socket.socket] = {}
         # Map from RX socket to glib io-watch ID
-        self._recv_wait = {}
+        self._recv_wait: Dict[socket.socket, int] = {}
         # Existing sockets, map from `VirtualChannel.key` to `socket.socket`
-        self._plain_sock = {}
+        self._plain_sock: Dict[Tuple, socket.socket] = {}
 
-        self._tx_id = 0
+        self._tx_id: int = 0
         self._tx_queue: List[BundleItem] = []
         self._rx_progres: Dict[Tuple[Tuple, int], RxTransfer] = {}
-        self._rx_id = 0
-        self._rx_queue = {}
+        self._rx_id: int = 0
+        self._rx_queue: Dict[int, BundleItem] = {}
 
         if bus_kwargs is None:
             bus_kwargs = dict(
@@ -260,7 +260,7 @@ class Agent(dbus.service.Object):
         '''
         return len(self._rx_queue) == 0 and len(self._tx_queue) == 0
 
-    def set_on_stop(self, func):
+    def set_on_stop(self, func: Callable[[], None]):
         ''' Set a callback to be run when this agent is stopped.
 
         :param func: The callback, which takes no arguments.
