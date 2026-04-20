@@ -16,6 +16,7 @@ from pycose.keys import curves, keytype, CoseKey, EC2Key, OKPKey, SymmetricKey
 from pycose.messages import Sign1Message, Enc0Message
 from pycose import headers
 import random
+from textwrap import fill
 from typing import ClassVar, List, Optional, Type, Union
 
 
@@ -503,7 +504,7 @@ def _get_kdf(hash_cls: Type[hashes.HashAlgorithm]) -> AbstractKDF:
         raise NotImplementedError(f'Undefined use of hash class {hash_cls}')
 
 
-class CommonState:
+class EdhocEntity:
     ''' Common processing for either EDHOC endpoint.
 
     :param authn_priv_key: The local entity private key.
@@ -815,9 +816,6 @@ class CommonState:
         self._logger.debug('Generated PRK_exporter %s',
                            self._prk_exporter.hex())
 
-    def as_initiator(self) -> bool:
-        return self._as_init
-
     def get_own_conn_id(self) -> ConnectionId:
         return self._own_conn_id
 
@@ -839,6 +837,30 @@ class CommonState:
         '''
         return self.edhoc_kdf(self._prk_exporter, info_label, context, length)
 
+    def get_message_1(self, ead: Optional[EadList] = None) -> bytes:
+        raise NotImplementedError
+
+    def get_message_2(self, ead: Optional[EadList] = None) -> bytes:
+        raise NotImplementedError
+
+    def get_message_3(self, ead: Optional[EadList] = None) -> bytes:
+        raise NotImplementedError
+
+    def get_message_4(self, ead: Optional[EadList] = None) -> bytes:
+        raise NotImplementedError
+
+    def process_message_1(self, msg: bytes) -> EadList:
+        raise NotImplementedError
+
+    def process_message_2(self, msg: bytes) -> EadList:
+        raise NotImplementedError
+
+    def process_message_3(self, msg: bytes) -> EadList:
+        raise NotImplementedError
+
+    def process_message_4(self, msg: bytes) -> EadList:
+        raise NotImplementedError
+
 
 CipherSuitesType = List[Union[CipherSuite, int]]
 
@@ -853,7 +875,7 @@ def _normalize_suites(suites: CipherSuitesType) -> List[CipherSuite]:
     return res
 
 
-class EdhocInitiator(CommonState):
+class EdhocInitiator(EdhocEntity):
     ''' Logic for the initiator side of an EDHOC conversation. '''
 
     def __init__(self, method: Method, suites: CipherSuitesType, **kwargs):
@@ -900,7 +922,7 @@ class EdhocInitiator(CommonState):
             length=len(ciphertext_2)
         )
         self._plain_2 = bytes_xor(ciphertext_2, keystream_2)
-        self._logger.debug('Decrypted PLAINTEXT_2 %s', self._plain_2.hex())
+        self._logger.debug('Decrypted PLAINTEXT_2\n%s', fill(self._plain_2.hex(), width=68))
 
         dec_plain_2 = cbor2.CBORDecoder(io.BytesIO(self._plain_2))
         self._peer_conn_id.decode(dec_plain_2)
@@ -976,8 +998,7 @@ class EdhocInitiator(CommonState):
         if ead:
             ead.encode(enc)
         self._plain_3 = plain_3.getvalue()
-        self._logger.debug('Created PLAINTEXT_3 %s',
-                           self._plain_3.hex())
+        self._logger.debug('Created PLAINTEXT_3\n%s', fill(self._plain_3.hex(), width=68))
 
         enc0 = Enc0Message(
             phdr={},
@@ -1018,7 +1039,7 @@ class EdhocInitiator(CommonState):
         self._logger.debug('Decrypting with key K=%s',
                            enc0.key.k.hex())
         plain_4 = enc0.decrypt()
-        self._logger.debug('Decrypted PLAINTEXT_4 %s', plain_4.hex())
+        self._logger.debug('Decrypted PLAINTEXT_4\n%s', fill(plain_4.hex(), width=68))
 
         dec_plain_4 = cbor2.CBORDecoder(io.BytesIO(plain_4))
         ead = EadList()
@@ -1028,7 +1049,7 @@ class EdhocInitiator(CommonState):
         return ead
 
 
-class EdhocResponder(CommonState):
+class EdhocResponder(EdhocEntity):
     ''' Logic for the responder side of an EDHOC conversation. '''
 
     def __init__(self, valid_methods=List[Method], valid_suites=CipherSuitesType, **kwargs):
@@ -1107,8 +1128,7 @@ class EdhocResponder(CommonState):
         if ead:
             ead.encode(enc)
         self._plain_2 = plain_2.getvalue()
-        self._logger.debug('Created PLAINTEXT_2 %s',
-                           self._plain_2.hex())
+        self._logger.debug('Created PLAINTEXT_2\n%s', fill(self._plain_2.hex(), width=68))
 
         keystream_2 = self.edhoc_kdf(
             prk=self._prk_2e,
@@ -1141,7 +1161,7 @@ class EdhocResponder(CommonState):
         self._logger.debug('Decrypting with key K=%s',
                            enc0.key.k.hex())
         self._plain_3 = enc0.decrypt()
-        self._logger.debug('Decrypted PLAINTEXT_3 %s', self._plain_3.hex())
+        self._logger.debug('Decrypted PLAINTEXT_3\n%s', fill(self._plain_3.hex(), width=68))
 
         dec_plain_3 = cbor2.CBORDecoder(io.BytesIO(self._plain_3))
         self._peer_id_cred.decode(dec_plain_3)
@@ -1191,9 +1211,7 @@ class EdhocResponder(CommonState):
         self._logger.debug('Using EAD_4 %s', ead)
         if ead:
             ead.encode(enc)
-        plain_4.getvalue()
-        self._logger.debug('Created PLAINTEXT_4 %s',
-                           plain_4.getvalue().hex())
+        self._logger.debug('Created PLAINTEXT_4\n%s', fill(plain_4.getvalue().hex(), width=68))
 
         enc0 = Enc0Message(
             phdr={},

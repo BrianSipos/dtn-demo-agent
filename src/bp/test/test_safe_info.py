@@ -1,4 +1,4 @@
-''' Test the package :py:mod:`pycose_edhoc`.
+''' Test the package :py:mod:`bp.safe_info`.
 '''
 from binascii import unhexlify
 import cbor2
@@ -10,6 +10,7 @@ from pycose import algorithms
 from pycose.keys import curves, keyparam, CoseKey, EC2Key, OKPKey
 import queue
 import random
+from textwrap import fill
 from typing import Tuple
 
 from pycose_edhoc import (
@@ -17,7 +18,7 @@ from pycose_edhoc import (
     CredStore, CredItem
 )
 from bp.safe_info import (
-    SafeEntity
+    SafeEntity, KeyStoreSet
 )
 
 
@@ -65,8 +66,8 @@ class TestBpSafe(unittest.TestCase):
     def _send_pdu(self, pdu: bytes, src: str, dst: str):
         xfer = Transfer(src=src, dst=dst, pdu=pdu)
         self._pdu_ix += 1
-        LOGGER.info('PDU #%d src %s dst %s data %s', self._pdu_ix,
-                    xfer.src, xfer.dst, xfer.pdu.hex())
+        LOGGER.info('PDU #%d src %s dst %s data\n%s', self._pdu_ix,
+                    xfer.src, xfer.dst, fill(xfer.pdu.hex(), width=68))
 
         self._log.put(xfer)
         self._eloop.quit()
@@ -213,20 +214,28 @@ class TestBpSafe(unittest.TestCase):
         for sa1, sa2 in zip(psas1, psas2):
             self.assertEqual(sa1.local_sai, sa2.peer_sai)
             self.assertEqual(sa1.peer_sai, sa2.local_sai)
+            # Same per-SA PRK
+            self._compare_keystores(sa1.keystores, sa2.keystores)
 
-            self.assertEqual(sa1.prk_sa1, sa2.prk_sa1)
-            self._compare_cose_keys(sa1.tx_use.key, sa2.rx_use.key)
-            self._compare_cose_keys(sa1.rx_use.key, sa2.tx_use.key)
+            self.assertEqual(1, len(sa1.keystores.tx_keys))
+            self.assertEqual(1, len(sa1.keystores.rx_keys))
+            self.assertEqual(1, len(sa2.keystores.tx_keys))
+            self.assertEqual(1, len(sa2.keystores.rx_keys))
+
+            sa1_tx_ck = sa1.keystores.tx_keys[b'']
+            sa1_rx_ck = sa1.keystores.rx_keys[b'']
+            sa2_rx_ck = sa2.keystores.rx_keys[b'']
+            sa2_tx_ck = sa2.keystores.tx_keys[b'']
 
             # only one post-IA PDU
-            self.assertEqual(1, sa1.tx_use.op_count)
-            self.assertEqual(3, sa1.tx_use.bytes_count)
-            self.assertEqual(0, sa1.rx_use.op_count)
-            self.assertEqual(0, sa1.rx_use.bytes_count)
-            self.assertEqual(0, sa2.tx_use.op_count)
-            self.assertEqual(0, sa2.tx_use.bytes_count)
-            self.assertEqual(1, sa2.rx_use.op_count)
-            self.assertEqual(3, sa2.rx_use.bytes_count)
+            self.assertEqual(1, sa1_tx_ck.op_count)
+            self.assertEqual(4, sa1_tx_ck.bytes_count)
+            self.assertEqual(0, sa1_rx_ck.op_count)
+            self.assertEqual(0, sa1_rx_ck.bytes_count)
+            self.assertEqual(0, sa2_tx_ck.op_count)
+            self.assertEqual(0, sa2_tx_ck.bytes_count)
+            self.assertEqual(1, sa2_rx_ck.op_count)
+            self.assertEqual(4, sa2_rx_ck.bytes_count)
 
         ssas1 = safe1.get_secondary_sas()
         ssas2 = safe2.get_secondary_sas()
@@ -234,14 +243,28 @@ class TestBpSafe(unittest.TestCase):
         for sa1, sa2 in zip(ssas1, ssas2):
             self.assertEqual(sa1.local_sai, sa2.peer_sai)
             self.assertEqual(sa1.peer_sai, sa2.local_sai)
+            # Same per-SA PRK
+            self._compare_keystores(sa1.keystores, sa2.keystores)
 
-            self._compare_cose_keys(sa1.tx_use.key, sa2.rx_use.key)
-            self._compare_cose_keys(sa1.rx_use.key, sa2.tx_use.key)
+            # one initial key in each direction
+            self.assertEqual(1, len(sa1.keystores.tx_keys))
+            self.assertEqual(1, len(sa1.keystores.rx_keys))
+            self.assertEqual(1, len(sa2.keystores.tx_keys))
+            self.assertEqual(1, len(sa2.keystores.rx_keys))
+            print(sa1.keystores)
 
-            self.assertEqual(0, sa1.tx_use.op_count)
-            self.assertEqual(0, sa1.rx_use.op_count)
-            self.assertEqual(0, sa2.tx_use.op_count)
-            self.assertEqual(0, sa2.rx_use.op_count)
+    def _compare_keystores(self, ks1: KeyStoreSet, ks2: KeyStoreSet):
+        self.assertEqual(ks1.prk_sa, ks2.prk_sa)
+
+        self.assertSetEqual(set(ks1.tx_keys.keys()), set(ks2.rx_keys.keys()))
+        for kid, ks1_tx_ck in ks1.tx_keys.items():
+            ks2_rx_ck = ks2.rx_keys[kid]
+            self._compare_cose_keys(ks1_tx_ck.key, ks2_rx_ck.key)
+
+        self.assertSetEqual(set(ks1.rx_keys.keys()), set(ks2.tx_keys.keys()))
+        for kid, ks1_rx_ck in ks1.rx_keys.items():
+            ks2_tx_ck = ks2.tx_keys[kid]
+            self._compare_cose_keys(ks1_rx_ck.key, ks2_tx_ck.key)
 
     def _compare_cose_keys(self, key1: CoseKey, key2: CoseKey):
         self.assertEqual(key1.kty, key2.kty)

@@ -5,33 +5,34 @@ import abc
 import cbor2
 from collections.abc import Callable
 from dataclasses import dataclass, field
-import datetime
 import enum
 from gi.repository import GLib as glib
 import io
 import logging
 from pycose import algorithms, headers
-from pycose.keys import curves, keyparam, keyops, CoseKey, SymmetricKey
+from pycose.keys import keyparam, keyops, CoseKey, SymmetricKey
 from pycose.messages import Enc0Message
-# from pycose.extensions.x509 import X5T
 import random
-from typing import ClassVar, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, ClassVar, Dict, Iterable, List, Optional, Tuple, Type, cast
 
 from pycose_edhoc import (
     AbstractKDF,
-    EdhocInitiator, EdhocResponder, Method, CipherSuite, EadList, EadItem,
-    CredStore, CredItem, ConnectionId, cose_key, perform_ecdh, pycose_iv_length
+    EdhocInitiator, EdhocResponder, EdhocEntity, Method, CipherSuite, EadList, EadItem,
+    CredStore, CredItem, ConnectionId, cose_key
 )
 
 LOGGER = logging.getLogger(__name__)
+
+SafeMap = Dict[int, Any]
+''' Type matching the decoded `safe-map` CDDL structure '''
 
 
 @dataclass
 class SimpleData:
     ''' Instances used with ActivityInfo.data '''
-    tx_items: Dict[int, object] = field(default_factory=dict)
+    tx_items: SafeMap = field(default_factory=dict)
     ''' Items to be sent to a peer '''
-    rx_items: Dict[int, object] = field(default_factory=dict)
+    rx_items: SafeMap = field(default_factory=dict)
     ''' Items received from a peer '''
 
 
@@ -45,7 +46,18 @@ SAFE_EXPORTER_LABEL = 32768
 class ActivityType(enum.IntEnum):
     INITIAL_AUTHN = 0
     CAPABILITY_INDICATION = 1
-    SA_CREATION = 2
+    EVENT_NOTIFICATION = 2
+
+    SA_CREATION = 3
+    SA_TEARDOWN = 4
+
+    KEY_CREATION = 6
+    KEY_DISCARD = 7
+    KEY_REJECT = 8
+
+    CP_CREATION = 9
+    CP_DISCARD = 10
+    CP_REJECT = 11
 
 
 @enum.unique
@@ -59,15 +71,36 @@ class ActCIKeys(enum.IntEnum):
 @enum.unique
 class ActSCKeys(enum.IntEnum):
     ''' Map keys for ActivityType.SA_CREATION '''
-    LOCAL_SAI = 1
-    AKE = 2
-    ARN = 3
-    CTXID = 4
+    SENDER_SAI = 1
+
+    SOS = 4
     KUS = 5
     TSI = 6
     TSR = 7
-    NTI = 8
-    TBT = 9
+    VALID_NTI = 8
+    SMS = 9
+    RX_KEY_KDR = 10
+    TX_KEY_KDR = 11
+    RX_PREKEY_KDR = 12
+    TX_PREKEY_KDR = 13
+    ICK = 14
+
+
+@enum.unique
+class ActKCKeys(enum.IntEnum):
+    ''' Map keys for ActivityType.KEY_CREATION '''
+    SENDER_SAI = 1
+    KID = 2
+
+    PREKEY_KID = 10
+    ARN = 11
+    VALID_NTI = 12
+
+
+@enum.unique
+class SecModeSelector(enum.IntEnum):
+    END_TO_END = 1
+    TRANSPORT = 2
 
 
 @dataclass
@@ -84,10 +117,10 @@ class ActivityInfo(abc.ABC):
     def is_finished(self) -> bool:
         raise NotImplementedError
 
-    def get_tx_items(self) -> Optional[dict]:
+    def get_tx_items(self) -> Optional[SafeMap]:
         return None
 
-    def set_rx_items(self, items: Optional[dict]):
+    def set_rx_items(self, items: Optional[SafeMap]):
         pass
 
     def state_changed(self):
@@ -110,7 +143,7 @@ def register_info(act_type: ActivityType):
 @register_info(ActivityType.INITIAL_AUTHN)
 class InitialAuthn(ActivityInfo):
 
-    def __init__(self, edhoc, **kwargs):
+    def __init__(self, edhoc: EdhocEntity, **kwargs):
         super().__init__(**kwargs)
         self.data = edhoc
 
@@ -126,85 +159,80 @@ class InitialAuthn(ActivityInfo):
 
         if max(state) == 2:
             # message_3 has either been sent or received
-            self._generate_sa()
+            self._generate_psa()
 
     def process_edhoc(self, step: int, seqdata: bytes) -> EadList:
+        edhoc = cast(EdhocEntity, self.data)
         if step == 0:
-            ead = self.data.process_message_1(seqdata)
+            ead = edhoc.process_message_1(seqdata)
             if ead.items:
                 LOGGER.error('Received EAD in message_1')
         elif step == 1:
-            ead = self.data.process_message_2(seqdata)
+            ead = edhoc.process_message_2(seqdata)
         elif step == 2:
-            ead = self.data.process_message_3(seqdata)
+            ead = edhoc.process_message_3(seqdata)
         elif step == 3:
-            ead = self.data.process_message_4(seqdata)
+            ead = edhoc.process_message_4(seqdata)
         else:
             # No more EDHOC
             LOGGER.error('Received EDHOC PDU after message_4')
         return ead
 
     def get_edhoc(self, step: int, ead: EadList) -> bytes:
+        edhoc = cast(EdhocEntity, self.data)
         if step == 0:
-            seqdata = self.data.get_message_1()
+            seqdata = edhoc.get_message_1()
         elif step == 1:
             # LOGGER.info('Input for EAD_2: %s', peer_state.all_normal())
-            seqdata = self.data.get_message_2(ead)
+            seqdata = edhoc.get_message_2(ead)
         elif step == 2:
-            seqdata = self.data.get_message_3(ead)
+            seqdata = edhoc.get_message_3(ead)
         elif step == 3:
-            seqdata = self.data.get_message_4(ead)
+            seqdata = edhoc.get_message_4(ead)
         else:
             raise IndexError(f'No IA step {step}')
         return seqdata
 
-    def _generate_sa(self):
-        edhoc = self.data
+    def _generate_psa(self):
+        edhoc = cast(EdhocEntity, self.data)
         suite = edhoc.get_cipher_suite()
-        okm = edhoc.edhoc_exporter
-
-        prk_sa1 = okm(SAFE_EXPORTER_LABEL, b'prk_sa1', suite.app_hash_length)
-        LOGGER.debug('Generated PRK_SA1 %s', prk_sa1.hex())
-
-        ir_use = KeyUse(
-            key=SymmetricKey(
-                k=okm(SAFE_EXPORTER_LABEL, b'key_ir', suite.app_key_length),
-                optional_params={
-                    keyparam.KpAlg: suite.app_aead,
-                    keyparam.KpKeyOps: [keyops.EncryptOp if self.act.as_initiator else keyops.DecryptOp],
-                    keyparam.KpBaseIV: okm(SAFE_EXPORTER_LABEL, b'biv_ir', suite.app_iv_length),
-                }
-            )
-        )
-        ri_use = KeyUse(
-            key=SymmetricKey(
-                k=okm(SAFE_EXPORTER_LABEL, b'key_ri', suite.app_key_length),
-                optional_params={
-                    keyparam.KpAlg: suite.app_aead,
-                    keyparam.KpKeyOps: [keyops.DecryptOp if self.act.as_initiator else keyops.EncryptOp],
-                    keyparam.KpBaseIV: okm(SAFE_EXPORTER_LABEL, b'biv_ri', suite.app_iv_length),
-                }
-            )
-        )
 
         if self.act.as_initiator:
-            tx_use = ir_use
-            rx_use = ri_use
+            sai_i = edhoc.get_own_conn_id()
+            sai_r = edhoc.get_peer_conn_id()
         else:
-            tx_use = ri_use
-            rx_use = ir_use
+            sai_i = edhoc.get_peer_conn_id()
+            sai_r = edhoc.get_own_conn_id()
+
+        context = io.BytesIO()
+        enc_context = cbor2.CBOREncoder(context)
+        enc_context.encode(sai_i.value)
+        enc_context.encode(sai_r.value)
+        LOGGER.debug('Generated PSA context %s', context.getvalue().hex())
+        prk_sa = edhoc.edhoc_exporter(SAFE_EXPORTER_LABEL, context.getvalue(), suite.app_hash_length)
+        LOGGER.debug('Generated PRK_SA1 %s', prk_sa.hex())
 
         psa = PrimarySecAssn(
             local_sai=edhoc.get_own_conn_id(),
             peer_eid=self.peer_state.peer_eid,
             peer_sai=edhoc.get_peer_conn_id(),
             edhoc=edhoc,
-            suite=suite,
-            safe_kdf=edhoc.app_kdf,
-            prk_sa1=prk_sa1,
-            tx_use=tx_use,
-            rx_use=rx_use,
+            keystores=KeyStoreSet(
+                was_initiator=self.act.as_initiator,
+                suite=suite,
+                app_kdf=edhoc.app_kdf,
+                prk_sa=prk_sa,
+            ),
         )
+
+        # Assign initial keys
+        prk_ck = None
+        arn = b''
+        tx_key = psa.keystores.create_content_key(kid_ck=b'', prk_ck=prk_ck, arn=arn, txi=psa.keystores.was_initiator, is_tx=True)
+        psa.keystores.tx_keys[tx_key.kid] = TxContentKey(key=tx_key)
+        rx_key = psa.keystores.create_content_key(kid_ck=b'', prk_ck=prk_ck, arn=arn, txi=(not psa.keystores.was_initiator), is_tx=False)
+        psa.keystores.rx_keys[rx_key.kid] = RxContentKey(key=rx_key)
+
         self.app.add_primary_sa(psa)
 
 
@@ -215,8 +243,9 @@ class CapabilityIndication(ActivityInfo):
         state = (self.act.last_step_tx, self.act.last_step_rx)
         return max(state) == 2
 
-    def get_tx_items(self) -> Optional[dict]:
-        if self.data.tx_items:
+    def get_tx_items(self) -> Optional[SafeMap]:
+        sdata = cast(SimpleData, self.data)
+        if sdata.tx_items:
             return None
 
         items = {
@@ -224,7 +253,7 @@ class CapabilityIndication(ActivityInfo):
             ActCIKeys.ESS: [1, 2],
             ActCIKeys.BCS: [3],
         }
-        self.data.tx_items = items
+        sdata.tx_items = items
         return items
 
     def state_changed(self):
@@ -241,12 +270,18 @@ class SaCreation(ActivityInfo):
         state = (self.act.last_step_tx, self.act.last_step_rx)
         return max(state) == 2
 
-    def get_tx_items(self) -> Optional[dict]:
-        if self.data.tx_items:
+    def get_tx_items(self) -> Optional[SafeMap]:
+        sdata = cast(SimpleData, self.data)
+        if sdata.tx_items:
             return None
 
-        psa = self.peer_state.psa
-        key_hdl = (psa.edhoc if psa else self.peer_state.edhoc.info.data).get_key_handler()
+        if self.peer_state.psa:
+            key_hdl = self.peer_state.psa.edhoc.get_key_handler()
+        elif self.peer_state.edhoc:
+            edhoc = cast(EdhocEntity, self.peer_state.edhoc.info.data)
+            key_hdl = edhoc.get_key_handler()
+        else:
+            raise RuntimeError('no key handle available')
 
         if True:
             try:
@@ -258,148 +293,105 @@ class SaCreation(ActivityInfo):
             self.data.ake_priv = None
 
         items = {
-            ActSCKeys.LOCAL_SAI: random.randbytes(6),
-            ActSCKeys.ARN: random.randbytes(16),
-            ActSCKeys.CTXID: 3,  # COSE Context
-            ActSCKeys.KUS: {
-                CoseCtxKusOptions.ALG: algorithms.A128GCM.identifier,
-            },
-            ActSCKeys.TBT: 1,
+            ActSCKeys.SENDER_SAI: random.randbytes(6),
+            ActSCKeys.SMS: SecModeSelector.END_TO_END,
+            ActSCKeys.KUS: [
+                3,  # COSE Context,
+                {
+                    CoseCtxKusOptions.ALG: algorithms.A128GCM.identifier,
+                },
+            ],
             ActSCKeys.TSI: None,
             ActSCKeys.TSR: None,
+            ActSCKeys.RX_KEY_KDR: [1, 1],
+            ActSCKeys.TX_KEY_KDR: [1, 1],
+            ActSCKeys.RX_PREKEY_KDR: [0, 0],
+            ActSCKeys.TX_PREKEY_KDR: [0, 0],
+            ActSCKeys.ICK: [
+                {
+                    ActKCKeys.KID: random.randbytes(6),
+                    ActKCKeys.ARN: random.randbytes(10),  # total of 16 bytes
+                },
+            ]
         }
-        if self.data.ake_priv:
-            items[ActSCKeys.AKE] = key_hdl.to_pub_data(self.data.ake_priv)
 
-        self.data.tx_items = items
+        sdata.tx_items = items
         return items
 
-    def set_rx_items(self, items: Optional[dict]):
-        self.data.rx_items = items
+    def set_rx_items(self, items: Optional[SafeMap]):
+        sdata = cast(SimpleData, self.data)
+        sdata.rx_items = items
 
     def state_changed(self):
         state = (self.act.last_step_tx, self.act.last_step_rx)
 
         if max(state) == 1:
             # step 1 has either been sent or received
-            self._generate_sa()
+            self._generate_ssa()
 
-    def _generate_sa(self):
+    def _generate_ssa(self):
         psa = self.peer_state.psa
-        key_hdl = (psa.edhoc if psa else self.peer_state.edhoc.info.data).get_key_handler()
 
-        local_sai = ConnectionId.from_item(self.data.tx_items[ActSCKeys.LOCAL_SAI])
-        peer_sai = ConnectionId.from_item(self.data.rx_items[ActSCKeys.LOCAL_SAI])
+        local_sai = ConnectionId.from_item(self.data.tx_items[ActSCKeys.SENDER_SAI])
+        peer_sai = ConnectionId.from_item(self.data.rx_items[ActSCKeys.SENDER_SAI])
 
         # Consistency check
-        if self.data.rx_items[ActSCKeys.CTXID] != self.data.tx_items[ActSCKeys.CTXID]:
-            raise RuntimeError('inconsistent CTXID')
+        if self.data.rx_items[ActSCKeys.KUS][0] != self.data.tx_items[ActSCKeys.KUS][0]:
+            raise RuntimeError('inconsistent CTX ID')
 
         if self.act.as_initiator:
             items_i, items_r = self.data.tx_items, self.data.rx_items
         else:
             items_i, items_r = self.data.rx_items, self.data.tx_items
 
-        sai_i = ConnectionId.from_item(items_i[ActSCKeys.LOCAL_SAI])
-        sai_r = ConnectionId.from_item(items_r[ActSCKeys.LOCAL_SAI])
-        arn_i = items_i.get(ActSCKeys.ARN, b'')
-        arn_r = items_r.get(ActSCKeys.ARN, b'')
+        sai_i = ConnectionId.from_item(items_i[ActSCKeys.SENDER_SAI])
+        sai_r = ConnectionId.from_item(items_r[ActSCKeys.SENDER_SAI])
 
-        peer_ake_data = self.data.rx_items.get(ActSCKeys.AKE)
-        if self.data.ake_priv and peer_ake_data:
-            key_hdl = psa.edhoc.get_key_handler()
-            g_xy = perform_ecdh(self.data.ake_priv, key_hdl.from_pub_data(peer_ake_data))
-            LOGGER.debug('Generated AKE G_XY %s', g_xy.hex())
-        else:
-            g_xy = b''
-
-        ctx_2 = io.BytesIO()
-        enc_ctx_2 = cbor2.CBOREncoder(ctx_2)
-        enc_ctx_2.encode(sai_i.value)
-        enc_ctx_2.encode(sai_r.value)
-        enc_ctx_2.encode(arn_i)
-        enc_ctx_2.encode(arn_r)
-        enc_ctx_2.encode(g_xy)
-        LOGGER.debug('Generated context_2 %s', ctx_2.getvalue().hex())
-        prk_sa2 = psa.safe_kdf(psa.prk_sa1, 0, ctx_2.getvalue(), psa.suite.app_hash_length)
-        LOGGER.debug('Generated PRK_SA2 %s', prk_sa2.hex())
-
-        def safe_okm(ctxid: int, context: bytes, length: int) -> bytes:
-            ''' OKM generator for all secondary SA material '''
-            return psa.safe_kdf(prk_sa2, ctxid, context, length)
-
-        # FIXME: consistency and subset checking from I -> R
-        ctxid = items_r[ActSCKeys.CTXID]
-        if ctxid == 3:
-            # COSE Context
-            kus_options = items_r[ActSCKeys.KUS]
-            alg_id = kus_options[CoseCtxKusOptions.ALG]
-
-            alg = algorithms.CoseAlgorithm.from_id(alg_id)
-            LOGGER.debug('Using SA algorithm %s', alg)
-            if issubclass(alg, algorithms._HMAC):
-                key_length = alg.get_key_length()
-                ir_use = KeyUse(
-                    key=SymmetricKey(
-                        k=safe_okm(ctxid, b'key_ir', key_length),
-                        optional_params={
-                            keyparam.KpAlg: alg,
-                            keyparam.KpKeyOps: [keyops.MacCreateOp if self.act.as_initiator else keyops.MacVerifyOp],
-                        }
-                    )
-                )
-                ri_use = KeyUse(
-                    key=SymmetricKey(
-                        k=safe_okm(ctxid, b'key_ri', key_length),
-                        optional_params={
-                            keyparam.KpAlg: alg,
-                            keyparam.KpKeyOps: [keyops.MacVerifyOp if self.act.as_initiator else keyops.MacCreateOp],
-                        }
-                    )
-                )
-            if issubclass(alg, algorithms._EncAlg):
-                key_length = alg.get_key_length()
-                iv_length = pycose_iv_length(alg)
-                ir_use = KeyUse(
-                    key=SymmetricKey(
-                        k=safe_okm(ctxid, b'key_ir', key_length),
-                        optional_params={
-                            keyparam.KpAlg: alg,
-                            keyparam.KpKeyOps: [keyops.EncryptOp if self.act.as_initiator else keyops.DecryptOp],
-                            keyparam.KpBaseIV: safe_okm(ctxid, b'biv_ir', iv_length),
-                        }
-                    )
-                )
-                ri_use = KeyUse(
-                    key=SymmetricKey(
-                        k=safe_okm(0, b'key_ri', key_length),
-                        optional_params={
-                            keyparam.KpAlg: alg,
-                            keyparam.KpKeyOps: [keyops.DecryptOp if self.act.as_initiator else keyops.EncryptOp],
-                            keyparam.KpBaseIV: safe_okm(0, b'biv_ri', iv_length),
-                        }
-                    )
-                )
-            else:
-                raise ValueError(f'Unhandled algorithm {alg}')
-        LOGGER.debug('Generated ir_use %s', ir_use.key)
-        LOGGER.debug('Generated ri_use %s', ri_use.key)
-
-        if self.act.as_initiator:
-            tx_use = ir_use
-            rx_use = ri_use
-        else:
-            tx_use = ri_use
-            rx_use = ir_use
+        context = io.BytesIO()
+        enc_context = cbor2.CBOREncoder(context)
+        enc_context.encode(sai_i.value)
+        enc_context.encode(sai_r.value)
+        LOGGER.debug('Generated SSA context %s', context.getvalue().hex())
+        prk_sa = psa.edhoc.edhoc_exporter(SAFE_EXPORTER_LABEL, context.getvalue(), psa.keystores.suite.app_hash_length)
+        LOGGER.debug('Generated PRK_SA2 %s', prk_sa.hex())
 
         ssa = SecondarySecAssn(
             psa=psa,
             local_sai=local_sai,
             peer_eid=self.peer_state.peer_eid,
             peer_sai=peer_sai,
-            tx_use=tx_use,
-            rx_use=rx_use,
+            keystores=KeyStoreSet(
+                was_initiator=self.act.as_initiator,
+                suite=psa.keystores.suite,
+                app_kdf=psa.keystores.app_kdf,
+                prk_sa=prk_sa,
+            ),
         )
+
+        if ActSCKeys.ICK in self.data.tx_items:
+            # initial TX keys
+            for kc_items in self.data.tx_items[ActSCKeys.ICK]:
+                tx_key = ssa.keystores.create_content_key(
+                    kid_ck=kc_items[ActKCKeys.KID],
+                    prk_ck=None,
+                    arn=kc_items.get(ActKCKeys.ARN, b''),
+                    txi=ssa.keystores.was_initiator,
+                    is_tx=True
+                )
+                ssa.keystores.tx_keys[tx_key.kid] = TxContentKey(key=tx_key)
+
+        if ActSCKeys.ICK in self.data.rx_items:
+            # initial RX keys
+            for kc_items in self.data.rx_items[ActSCKeys.ICK]:
+                rx_key = ssa.keystores.create_content_key(
+                    kid_ck=kc_items[ActKCKeys.KID],
+                    prk_ck=None,
+                    arn=kc_items.get(ActKCKeys.ARN, b''),
+                    txi=(not ssa.keystores.was_initiator),
+                    is_tx=False
+                )
+                ssa.keystores.rx_keys[rx_key.kid] = RxContentKey(key=rx_key)
+
         self.app.add_secondary_sa(ssa)
 
 
@@ -421,6 +413,8 @@ class ActivityState:
     act_type: ActivityType
     ''' Activity type enumeration '''
 
+    error: Optional[int] = None
+    ''' Set to a specific error code if this activity has failed '''
     info: ActivityInfo = None
     ''' Activity-type specific descriptor '''
 
@@ -466,8 +460,11 @@ class ActivityState:
     def is_finished(self) -> bool:
         ''' Determine if this activity is finished.
 
-        :return: True if the last step was sent or received already.
+        :return: True if the last step was sent or received already or
+        the activity has failed with some error.
         '''
+        if self.error is not None:
+            return True
         if self.info is None:
             return False
         return self.info.is_finished()
@@ -483,11 +480,11 @@ class PeerState:
     last_act_idx: int = 0
     ''' The last used activity index, which reserves the zero value. '''
 
-    edhoc: Dict[bytes, ActivityState] = field(default_factory=dict)
-
     own: Dict[int, ActivityState] = field(default_factory=dict)
     peer: Dict[int, ActivityState] = field(default_factory=dict)
 
+    edhoc: Optional[ActivityState] = None
+    ''' State for IA activity '''
     psa: Optional['PrimarySecAssn'] = None
     ''' The latest SA for this peer '''
 
@@ -521,24 +518,97 @@ class PeerState:
 
 
 @dataclass
-class KeyUse:
-    ''' Each derived symmetric key for an SA '''
+class BaseContentKey:
+    # TODO add time interval
 
     key: SymmetricKey
-    ''' Symmetric key including base-IV '''
+    ''' COSE key including base-IV '''
 
     op_count: int = 0
+    ''' Counter for each operation '''
     bytes_count: int = 0
+    ''' Counter for data volume to avoid over use '''
 
     def increment(self, plain_size: int):
+        LOGGER.debug('Incrementing %s use size %d', self.key.kid.hex(), plain_size)
         self.op_count += 1
         self.bytes_count += plain_size
+
+
+@dataclass
+class TxContentKey(BaseContentKey):
+    ''' Each TX Content Key for an SA '''
 
     def partial_iv(self) -> bytes:
         ''' Get a partial-iv byte string based on the op_count. '''
         # avoid zero-value PIV
         piv = self.op_count + 1
         return piv.to_bytes((piv.bit_length() + 7) // 8, 'big')
+
+
+@dataclass
+class RxContentKey(BaseContentKey):
+    ''' Each RX Content Key for an SA '''
+
+
+@dataclass
+class BasePreKey:
+    # TODO add time interval
+
+    key: CoseKey
+    ''' COSE key of agreed NIKE/KEM algorithm type '''
+
+
+@dataclass
+class KeyStoreSet:
+
+    was_initiator: bool
+    ''' True if the local entity was the initiator for this SA '''
+    suite: CipherSuite
+    ''' Copy of the cipher suite info from EDHOC '''
+    app_kdf: AbstractKDF
+    ''' The KDF function to use for key derivation, determined by EDHOC suite. '''
+    prk_sa: bytes
+    ''' The PRK for this specific SA '''
+
+    tx_keys: Dict[bytes, TxContentKey] = field(default_factory=dict)
+    ''' TX Content Key store '''
+    rx_keys: Dict[bytes, RxContentKey] = field(default_factory=dict)
+    ''' RX Content Key store '''
+
+    tx_prekeys: Dict[bytes, BasePreKey] = field(default_factory=dict)
+    rx_prekeys: Dict[bytes, BasePreKey] = field(default_factory=dict)
+
+    def safe_kdf(self, prk: bytes, context: List[object], length: int) -> bytes:
+        info = io.BytesIO()
+        enc_info = cbor2.CBOREncoder(info)
+        for item in context:
+            enc_info.encode(item)
+        enc_info.encode(length)
+
+        return self.app_kdf.expand(prk, info.getvalue(), length)
+
+    def create_content_key(self, kid_ck: bytes, prk_ck: Optional[bytes], arn: bytes, txi: bool, is_tx: bool) -> SymmetricKey:
+        ''' Create a new content key with no key ops yet. '''
+        txi = bool(txi)
+
+        if prk_ck is None:
+            # no FS default to same as PRK_SA
+            prk_ck = self.prk_sa
+
+        sk = self.safe_kdf(prk_ck, [1, txi, kid_ck, arn], self.suite.app_key_length)
+        iv = self.safe_kdf(prk_ck, [2, txi, kid_ck, arn], self.suite.app_iv_length)
+
+        ops = [keyops.EncryptOp if is_tx else keyops.DecryptOp]
+        return SymmetricKey(
+            k=sk,
+            optional_params={
+                keyparam.KpKid: b'',
+                keyparam.KpAlg: self.suite.app_aead,
+                keyparam.KpKeyOps: ops,
+                keyparam.KpBaseIV: iv,
+            }
+        )
 
 
 @dataclass
@@ -549,23 +619,16 @@ class PrimarySecAssn:
     peer_eid: str
     peer_sai: ConnectionId
 
-    edhoc: Union[EdhocInitiator, EdhocResponder]
-    suite: CipherSuite
+    edhoc: EdhocEntity
 
-    safe_kdf: AbstractKDF
-    ''' The KDF function to use for PRK derivation '''
-    prk_sa1: bytes
-    ''' PRK from which to derive secondary SA material '''
-
-    tx_use: KeyUse
-    rx_use: KeyUse
+    keystores: KeyStoreSet
+    ''' Key stores for this SA '''
 
     def __str__(self) -> str:
         parts = [
             f'local_sai={self.local_sai.value.hex()}',
             f'peer_eid={self.peer_eid!r}',
             f'peer_sai={self.peer_sai.value.hex()}',
-            f'app_aead={self.suite.app_aead.__name__}',
         ]
         return f'PrimarySecAssn({",".join(parts)})'
 
@@ -577,12 +640,14 @@ class SecondarySecAssn:
     ''' Parent of this SA '''
 
     local_sai: ConnectionId
-
+    ''' Local unique SAI '''
     peer_eid: str
+    ''' Peer entity endpoint '''
     peer_sai: ConnectionId
+    ''' Peer unique SAI '''
 
-    tx_use: KeyUse
-    rx_use: KeyUse
+    keystores: KeyStoreSet
+    ''' Key stores for this SA '''
 
     def __str__(self) -> str:
         parts = [
@@ -618,8 +683,9 @@ class SafeEntity:
                  ke_priv_key: Optional[List[CoseKey]] = None,
                  conn_id: Optional[bytes] = None):
 
-        self._own_eid = None
-        self._logger = None
+        self._own_eid: Optional[str] = None
+        # default module logger
+        self._logger = LOGGER
 
         self.send_pdu = send_pdu
         self.method = method
@@ -639,12 +705,12 @@ class SafeEntity:
         self._act_peer: Dict[str, PeerState] = dict()
 
         # primary SAs by local SAI independent of peer
-        self._pri_sai: Dict[str, PrimarySecAssn] = dict()
+        self._pri_sai: Dict[bytes, PrimarySecAssn] = dict()
         # primary SAs by peer EID
         self._pri_peer: Dict[str, PrimarySecAssn] = dict()
 
         # secondary SAs by local SAI independent of peer
-        self._sec_sai: Dict[str, SecondarySecAssn] = dict()
+        self._sec_sai: Dict[bytes, SecondarySecAssn] = dict()
 
     def recv_pdu(self, pdu: bytes, peer_eid: str):
         peer_state = self._peer_state(peer_eid)
@@ -657,10 +723,12 @@ class SafeEntity:
             self._logger.error('Cannot handle SAFE version %d', version)
             return True
         partial_iv = dec_pdu.decode()
+        psa_kid = dec_pdu.decode()
+
         pri_sa_id = ConnectionId()
         pri_sa_id.decode(dec_pdu)
 
-        if partial_iv is None:
+        if partial_iv is None and psa_kid is None:
             self._logger.debug('EDHOC reading at offset %s', dec_pdu.fp.tell())
             # expect only one EDHOC message in remainder of PDU
             seqdata = dec_pdu.fp.read()
@@ -711,11 +779,16 @@ class SafeEntity:
                     if abs(item.label) == SAFE_EAD_LABEL:
                         self._recv_msg(peer_state, item.value)
 
-        else:
+        elif isinstance(partial_iv, bytes) and isinstance(psa_kid, bytes):
+            self._logger.debug('Got psa-kid %s partial-iv %s', psa_kid.hex(), partial_iv.hex())
+
             # an established primary SA with ciphertext
             psa = self._pri_sai[pri_sa_id.value]
+            try:
+                rx_ck = psa.keystores.rx_keys[psa_kid]
+            except KeyError:
+                raise KeyError(f'Unknown psa-kid {psa_kid.hex()}')
 
-            self._logger.debug('Got partial-iv %s', partial_iv.hex())
             ciphertext = dec_pdu.decode()
             self._logger.debug('Got ciphertext %s', ciphertext.hex())
 
@@ -724,24 +797,29 @@ class SafeEntity:
             pri_sa_id.encode(enc_aad)
 
             enc0 = Enc0Message(
-                phdr={},
+                phdr={
+                    headers.Algorithm: psa.keystores.suite.app_aead,
+                },
                 uhdr={
-                    headers.Algorithm: psa.suite.app_aead,
                     headers.PartialIV: partial_iv,
                 },
                 payload=ciphertext,
                 external_aad=aad.getvalue(),
-                key=psa.rx_use.key,
+                key=rx_ck.key,
             )
-            self._logger.debug('Decrypting with key K=%s', enc0.key.k.hex())
+            self._logger.debug('Decrypting with KID=%s', enc0.key.kid.hex())
             plain = enc0.decrypt()
-            psa.rx_use.increment(len(plain))
+            rx_ck.increment(len(plain))
             self._logger.debug('Generated plaintext %s', plain.hex())
 
             dec_plain = cbor2.CBORDecoder(io.BytesIO(plain))
             plain_len = len(plain)
             while dec_plain.fp.tell() < plain_len:
                 self._recv_msg(peer_state, dec_plain.decode())
+
+        else:
+            # something invalid
+            raise RuntimeError('Unexpected partial-iv or psa-kid')
 
         # handle any responses needed to the new state
         self._queue_process_tx()
@@ -778,11 +856,14 @@ class SafeEntity:
         # message ident
         enc.encode(act.act_idx)
         enc.encode(act.next_step)
+        enc.encode(act.act_type)
 
-        items = self._act_get_tx_items(act)
-        if items is not None:
-            enc.encode(act.act_type)
-            enc.encode(items)
+        if act.error is not None:
+            pass
+        else:
+            items = self._act_get_tx_items(act)
+            if items is not None:
+                enc.encode(items)
 
         act.last_step_tx = act.next_step
         self._act_state_changed(act)
@@ -796,14 +877,16 @@ class SafeEntity:
         self._logger.debug('Message RX data %s', msg.hex())
         dec = cbor2.CBORDecoder(io.BytesIO(msg))
 
-        act_idx = dec.decode()
-        act_step = dec.decode()
+        act_idx: Optional[int] = None
+        act_step: Optional[int] = None
+        act_type: Optional[int] = None
         try:
+            act_idx = dec.decode()
+            act_step = dec.decode()
             act_type = dec.decode()
         except cbor2.CBORDecodeEOF:
-            act_type = None
-        if act_type is None and act_step == 0:
-            self._logger.error('Received short message on step 0')
+            self._logger.error('Received short message on idx %s step %s', act_idx, act_step)
+            raise
 
         am_initiator = act_step % 2 == 1
         self._logger.debug('Message RX act-idx %s act-step %s am-initiator %s',
@@ -814,14 +897,13 @@ class SafeEntity:
             if act_step != 0:
                 self._logger.warning('First step seen of index %d step %d', act_idx, act_step)
 
-            act_type = ActivityType(act_type)
             act = ActivityState(
                 as_initiator=False,
                 init_eid=peer_state.peer_eid,
                 act_idx=act_idx,
-                act_type=act_type,
+                act_type=ActivityType(act_type),
             )
-            act.info = _INFOS[act_type](app=self, peer_state=peer_state, act=act)
+            act.info = _INFOS[act.act_type](app=self, peer_state=peer_state, act=act)
             peer_state.add_activity(act)
 
         else:
@@ -832,10 +914,17 @@ class SafeEntity:
             return
 
         try:
-            items = dec.decode()
+            item = dec.decode()
         except cbor2.CBORDecodeEOF:
-            items = None
-        self._act_set_rx_items(act, items)
+            self._logger.debug('Message on idx %s step %s has no payload or error', act_idx, act_step)
+            item = None
+
+        if isinstance(item, int):
+            self._act_set_error(act, item)
+        elif isinstance(item, dict):
+            self._act_set_rx_items(act, item)
+        elif item is not None:
+            self._logger.error('Message on idx %s step %s has invalid payload: %s', act_idx, act_step, item)
 
         act.last_step_rx = act_step
         self._act_state_changed(act)
@@ -865,6 +954,7 @@ class SafeEntity:
         enc_pdu = cbor2.CBOREncoder(pdu)
         enc_pdu.encode(1)  # version
         enc_pdu.encode(None)  # partial-iv
+        enc_pdu.encode(None)  # psa-kid
 
         step = act.next_step
         self._logger.debug('Sending IA for step %s', step)
@@ -873,7 +963,7 @@ class SafeEntity:
             self._logger.debug('Generate EAD empty')
             ead = None  # no EAD sent in plaintext
 
-            enc_pdu.encode(True)  # peer connection ID
+            enc_pdu.encode(True)  # rx-sai
         else:
             act.info.data.get_peer_conn_id().encode(enc_pdu)
 
@@ -895,7 +985,7 @@ class SafeEntity:
 
         seqdata = act.info.get_edhoc(step, ead)
         # EDHOC messages are pre-encoded so go directly to buffer
-        pdu.write(seqdata)
+        enc_pdu.write(seqdata)
 
         act.last_step_tx = step
         self._act_state_changed(act)
@@ -923,21 +1013,27 @@ class SafeEntity:
             return None
 
         psa = self._pri_peer[peer_state.peer_eid]
-        partial_iv = psa.tx_use.partial_iv()
-        self._logger.debug('Using partial-iv %s', partial_iv.hex())
+
+        # choose key
+        tx_ck = psa.keystores.tx_keys[b'']
+        psa_kid = tx_ck.key.kid
+        partial_iv = tx_ck.partial_iv()
+        self._logger.debug('Using psa-kid %s partial-iv %s', psa_kid.hex(), partial_iv.hex())
 
         buf = io.BytesIO()
-        enc = cbor2.CBOREncoder(buf)
-        enc.encode(1)  # version
+        enc_pdu = cbor2.CBOREncoder(buf)
+        enc_pdu.encode(1)  # version
 
-        enc.encode(partial_iv)  # partial-iv
-        psa.peer_sai.encode(enc)  # peer connection ID
+        enc_pdu.encode(partial_iv)  # partial-iv
+        enc_pdu.encode(psa_kid)  # psa-kid
+        psa.peer_sai.encode(enc_pdu)  # peer connection ID
 
-        plain = io.BytesIO()
-        enc_plain = cbor2.CBOREncoder(plain)
+        buf_plain = io.BytesIO()
+        enc_plain = cbor2.CBOREncoder(buf_plain)
         for msgdata in msgdata_list:
             enc_plain.encode(msgdata)
-        self._logger.debug('Generated plaintext %s', plain.getvalue().hex())
+        plain = buf_plain.getvalue()
+        self._logger.debug('Generated plaintext %s', plain.hex())
 
         aad = io.BytesIO()
         enc_aad = cbor2.CBOREncoder(aad)
@@ -945,20 +1041,21 @@ class SafeEntity:
         psa.peer_sai.encode(enc_aad)
 
         enc0 = Enc0Message(
-            phdr={},
+            phdr={
+                headers.Algorithm: psa.keystores.suite.app_aead,
+            },
             uhdr={
-                headers.Algorithm: psa.suite.app_aead,
                 headers.PartialIV: partial_iv,
             },
-            payload=plain.getvalue(),
+            payload=plain,
             external_aad=aad.getvalue(),
-            key=psa.tx_use.key,
+            key=tx_ck.key,
         )
-        self._logger.debug('Encrypting with key K=%s', enc0.key.k.hex())
+        self._logger.debug('Encrypting with KID=%s', enc0.key.kid.hex())
         ciphertext = enc0.encrypt()
-        psa.tx_use.increment(len(plain.getvalue()))
+        tx_ck.increment(len(plain))
         self._logger.debug('Generated ciphertext %s', ciphertext.hex())
-        enc.encode(ciphertext)
+        enc_pdu.encode(ciphertext)
 
         return buf.getvalue()
 
@@ -999,9 +1096,8 @@ class SafeEntity:
         if act.is_finished():
             # finished after that TX
             self._queue_remove(peer_state, act)
-            act = None
 
-        if act:
+        else:
             def callback(): return self._try_tx_edhoc(peer_state, act.last_step_rx)
             act.timer_retx = glib.timeout_add(2000, callback)
             self._logger.debug('Started %s retransmit timer %d', act, act.timer_retx)
@@ -1060,12 +1156,12 @@ class SafeEntity:
             def callback(): return peer_state.remove_activity(act)
             act.timer_remove = glib.timeout_add(5000, callback)
 
-    def _act_get_tx_items(self, act: ActivityState) -> Optional[dict]:
+    def _act_get_tx_items(self, act: ActivityState) -> Optional[SafeMap]:
         items = act.info.get_tx_items()
         self._logger.debug('Get %s TX items %s', act, items)
         return items
 
-    def _act_set_rx_items(self, act: ActivityState, items: Optional[dict]):
+    def _act_set_rx_items(self, act: ActivityState, items: Optional[SafeMap]):
         self._logger.debug('Set %s RX items %s', act, items)
         act.info.set_rx_items(items)
 
@@ -1075,7 +1171,7 @@ class SafeEntity:
         act.info.state_changed()
 
     @property
-    def own_eid(self) -> str:
+    def own_eid(self) -> Optional[str]:
         return self._own_eid
 
     @own_eid.setter
@@ -1086,6 +1182,9 @@ class SafeEntity:
     def start_activity(self, peer_state: PeerState, act_type: ActivityType):
         ''' Start a new activity of a specific type.
         '''
+        if not self._own_eid:
+            raise RuntimeError('no own EID set')
+
         act_type = ActivityType(act_type)
         act = ActivityState(
             as_initiator=True,
@@ -1096,7 +1195,7 @@ class SafeEntity:
         act.info = _INFOS[act_type](app=self, peer_state=peer_state, act=act)
         peer_state.add_activity(act)
 
-    def get_primary_sas(self) -> List[PrimarySecAssn]:
+    def get_primary_sas(self) -> Iterable[PrimarySecAssn]:
         return self._pri_peer.values()
 
     def add_primary_sa(self, psa: PrimarySecAssn):
@@ -1107,7 +1206,7 @@ class SafeEntity:
         self._pri_peer[psa.peer_eid] = psa
         self._act_peer[psa.peer_eid].psa = psa
 
-    def get_secondary_sas(self) -> List[SecondarySecAssn]:
+    def get_secondary_sas(self) -> Iterable[SecondarySecAssn]:
         return self._sec_sai.values()
 
     def add_secondary_sa(self, ssa: SecondarySecAssn):
@@ -1117,6 +1216,9 @@ class SafeEntity:
     def start(self, peer_eid: str):
         ''' Start an Initial Authentication activity.
         '''
+        if not self._own_eid:
+            raise RuntimeError('no own EID set')
+
         peer_state = self._peer_state(peer_eid)
 
         ke_priv = self._ke_priv_key.pop(0) if self._ke_priv_key else None

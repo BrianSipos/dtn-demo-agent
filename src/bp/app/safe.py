@@ -1,7 +1,6 @@
 ''' Prototype of Security Associations with Few Exchanges (SAFE) endpoint.
 '''
 import abc
-import cbor2
 from cryptography.hazmat.primitives import serialization
 # from cryptography.hazmat.primitives.asymmetric import ec, x25519, x448
 from dataclasses import dataclass, field
