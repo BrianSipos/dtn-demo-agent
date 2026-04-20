@@ -148,6 +148,7 @@ class VerifyError(RuntimeError):
 
 def verify_sized_item(length: Optional[int], item: packet.Packet) -> None:
     ''' Verify consistency of reading a sized item.
+
     :param length: The expected size of the field/packet.
     :param item: The field or packet to take size of.
     :raise VerifyError: if inconsistent.

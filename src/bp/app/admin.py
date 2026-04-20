@@ -2,14 +2,13 @@
 '''
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 import cbor2
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass
 from pycose import algorithms
-import dbus
+import dbus.service
 import enum
-from gi.repository import GLib as glib
 import logging
 import math
-from typing import List
+from typing import List, Optional
 
 from scapy_cbor.util import encode_diagnostic
 from bp.encoding import (
@@ -46,13 +45,13 @@ class AcmeChallenge(object):
     ]
 
     # base64url encoded token
-    id_chal_enc: str
+    id_chal_enc: Optional[str]
     # base64url encoded token
-    token_chal_enc: str = None
+    token_chal_enc: Optional[str] = None
     # base64url encoded token
-    token_bundle_enc: str = None
+    token_bundle_enc: Optional[str] = None
     # base64url encoded thumbprint
-    key_tp_enc: str = None
+    key_tp_enc: Optional[str] = None
 
     @property
     def key(self):
@@ -61,6 +60,9 @@ class AcmeChallenge(object):
     def key_auth_hash(self, alg: algorithms._HashAlg) -> bytes:
         ''' Compute the response digest.
         '''
+        if self.token_bundle_enc is None or self.token_chal_enc is None or self.key_tp_enc is None:
+            raise RuntimeError('Cannot compute hash')
+
         key_auth = (self.token_bundle_enc + self.token_chal_enc + '.' + self.key_tp_enc)
         LOGGER.info('Key authorization string: %s', key_auth)
         digest = alg.compute_hash(key_auth.encode('utf8'))
@@ -73,9 +75,9 @@ class AcmeChallenge(object):
 
     @staticmethod
     def b64decode(enc: str) -> bytes:
-        enc = enc.encode('latin1')
-        enc = enc.ljust(int(math.ceil(len(enc) / 4)) * 4, b'=')
-        return urlsafe_b64decode(enc)
+        data = enc.encode('latin1')
+        data = data.ljust(int(math.ceil(len(data) / 4)) * 4, b'=')
+        return urlsafe_b64decode(data)
 
 
 @app('admin')

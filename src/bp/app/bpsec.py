@@ -9,11 +9,10 @@ import enum
 import logging
 import re
 import traceback
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Callable, Dict, List, Literal, Optional, Tuple, Union
 from certvalidator import CertificateValidator, ValidationContext
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from pycose.messages import (
     CoseMessage, Mac0Message, MacMessage, Sign1Message, SignMessage,
@@ -33,8 +32,8 @@ from scapy_cbor.util import encode_diagnostic
 import tcpcl.session
 from bp.config import Config
 from bp.encoding import (
-    DtnTimeField, Timestamp,
-    AbstractBlock, PrimaryBlock, CanonicalBlock, StatusReport,
+    DtnTimeField,
+    PrimaryBlock, CanonicalBlock, StatusReport,
     BlockIntegrityBlock, BlockConfidentialityBlock, AbstractSecurityBlock,
     TypeValuePair, TargetResultList,
 )
@@ -234,7 +233,7 @@ class CertificateStore:
             chain.append(encode_der_cert(cur_cert))
 
         LOGGER.debug('CertificateStore.find_chain got size %d for %s:%s', len(chain), alg_id, want_tprint)
-        return chain
+        return tuple(chain)
 
 
 @dataclass
@@ -532,11 +531,12 @@ class CoseContext(AbstractContext):
 
         return cose_key
 
-    def validate_chain_func(self, time_at: datetime.datetime) -> callable:
+    def validate_chain_func(self, time_at: datetime.datetime) -> Callable[[Tuple[bytes]], None]:
         ''' Get a function to validate a certificate chain.
 
         :param time_at: The time to validate at.
-        :return: A callable which takes an x5chain of certificates
+        :return: A callable which takes an x5chain of certificates and either
+            throws an Exception not not if valid.
         '''
         val_ctx = ValidationContext(
             trust_roots=[
@@ -550,7 +550,7 @@ class CoseContext(AbstractContext):
             moment=time_at,
         )
 
-        def validate(chain):
+        def validate(chain: Tuple[bytes]):
             val = CertificateValidator(
                 end_entity_cert=chain[0],
                 intermediate_certs=chain[1:],
